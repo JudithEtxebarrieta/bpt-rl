@@ -8,6 +8,7 @@ import random
 import matplotlib.colors as mcolors
 from tqdm import tqdm
 from our_library import  UtilsDataFrame, UtilsFigure
+import matplotlib.markers as markers
 
 def validation_ep_selection(ep_test,n_test_ep,test_type='reward'):
     list_output=[]
@@ -33,7 +34,6 @@ def degradation(x,env_name,seed,title):
     plt.subplots_adjust(left=0.20,bottom=0.2,right=0.94,top=0.82,wspace=0.39,hspace=0.2)
     plt.rc('font', family='serif')
     plt.rc('text', usetex=True)
-    plt.rcParams['text.latex.preamble'] = r'\boldmath'
 
     ax=plt.subplot(111)
     ax.grid(True, which='both',linestyle='--', linewidth=0.8,alpha=0.2)
@@ -57,7 +57,7 @@ def degradation(x,env_name,seed,title):
 
     plt.title(title,fontsize=14)
     ax.set_xlabel("Total interaction steps",fontsize=13)
-    ax.set_ylabel("$\widetilde{J}$ of the last policy",fontsize=13)
+    ax.set_ylabel("$\widetilde{f}$ of the last policy",fontsize=13)
     plt.yticks(rotation=90,fontsize=12)
     plt.xticks(fontsize=12)
     plt.ylim([0,3600])
@@ -80,7 +80,7 @@ def learning_curves_test_reward(x,list_n_test_ep,env_name,seed,list_eval_freq=[1
     df_train=df_train[df_train['n_policy']<=max(x)//2048-1]
 
     n_policies=list(df_test['n_policy'])
-
+    list_markers = ["o", "^", "s", "x"]
 
     # Dibujar curvas
     fig=plt.figure(figsize=[5,3])
@@ -88,7 +88,6 @@ def learning_curves_test_reward(x,list_n_test_ep,env_name,seed,list_eval_freq=[1
 
     plt.rc('font', family='serif')
     plt.rc('text', usetex=True)
-    plt.rcParams['text.latex.preamble'] = r'\boldmath'
 
     ax=plt.subplot(111)
     ax.grid(True, which='both',linestyle='--', linewidth=0.8,alpha=0.2)
@@ -98,7 +97,7 @@ def learning_curves_test_reward(x,list_n_test_ep,env_name,seed,list_eval_freq=[1
     for timesteps in x:
             last_policy=df_train[df_train['n_train_timesteps']<=timesteps]['n_policy'].max()+1
             y.append(df_test[df_test['n_policy']==last_policy]['mean_reward'])
-    plt.plot(x, y, linewidth=1,color='black',label='None (last policy)')
+    plt.plot(x, y, linewidth=1,color='#808080',label='None (last policy)')
 
     # Resto de curvas
     if len(list_n_test_ep)>1:
@@ -106,6 +105,7 @@ def learning_curves_test_reward(x,list_n_test_ep,env_name,seed,list_eval_freq=[1
     else:
         for_list=list_eval_freq
     
+    marker_ind=0
     for i in tqdm(for_list):
 
         
@@ -169,13 +169,15 @@ def learning_curves_test_reward(x,list_n_test_ep,env_name,seed,list_eval_freq=[1
         if type(label) is int:
             label=['Every '+str(label)+' policies' if label!=1 else 'Every '+str(label)+' policy']
         else:
-            label= 'Change in the best\n``Trajec. mean"'
-        plt.plot(x_plot, np.array(y)[:,0], linewidth=1,label=label)
+            label= 'Change in the best\n``Trajec. AER"'
+        plt.plot(x_plot, np.array(y)[:,0], linewidth=1,label=label,marker=list_markers[marker_ind],markevery=10,markersize=5)
+        marker_ind+=1
+
 
     ax.legend(title="",fontsize=9,handlelength=1,labelspacing=0.2)
     ax.set_xlabel("Total interaction steps",fontsize=13)
-    ax.set_ylabel("$\widetilde{J}$ of the policy\nselected as the best",fontsize=13)
-    ax.set_title('Evaluating policies with a frequency (legend)\n in additional 5 episodes',fontsize=14)
+    ax.set_ylabel("$\widetilde{f}$ of the policy\nselected as the best",fontsize=13)
+    ax.set_title('Evaluating policies with a frequency (legend)\n in 5 validation episodes',fontsize=14)
     plt.yticks(rotation=90)
 
     if len(list_n_test_ep)>1:
@@ -203,7 +205,6 @@ def learning_curves_train_reward(x,env_name,seed):
     plt.subplots_adjust(left=0.18,bottom=0.2,right=0.94,top=0.82,wspace=0.39,hspace=0.2)
     plt.rc('font', family='serif')
     plt.rc('text', usetex=True)
-    plt.rcParams['text.latex.preamble'] = r'\boldmath'
 
     #----------------------------------------------------------------------------------------------
     # GRAFICA 1: learning-curves
@@ -219,36 +220,37 @@ def learning_curves_train_reward(x,env_name,seed):
 
     y_matrix=[]
     labels=[]
-    colors=[]
-    default_colors=list(mcolors.TABLEAU_COLORS.keys())
+    list_markers = ["o", "^", "s", "X"]
+    list_linestyle=['solid','dotted','dashed','dashdot']
 
     # Dibujar curva sin test durante el proceso (ultima politica observada)
     y=[]
     for timesteps in x:
             last_policy=df_train[df_train['n_train_timesteps']<=timesteps]['n_policy'].max()+1
             y.append(float(df_test[df_test['n_policy']==last_policy]['mean_reward']))
-    plt.plot(x, y, linewidth=1,color='black',label='None (last policy)')
+    plt.plot(x, y, linewidth=1,color='#808080',label='None (last policy)')
     y_matrix.append(y)
     labels.append('None (last policy)')
-    colors.append('black')
  
     # Resto de curvas usando window
-    for i in [0,1,5]:
+    marker_ind=0
+    for i in [5,1,0]:
         y=[]
         for train_timesteps in x:
             last_policy=df_train[df_train['n_train_timesteps']<=train_timesteps]['n_policy'].max()
             best_policy=train_reward_matrix[i].index(max(train_reward_matrix[i][:last_policy]))
             y.append(float(df_test[df_test['n_policy']==best_policy+1]['mean_reward']))
 
-        plt.plot(x, y, linewidth=1,label=str(list_window_sizes[i])+' previous episodes')
+        plt.plot(x, y,linewidth=1,label=str(list_window_sizes[i])+' previous episodes',marker=list_markers[marker_ind],markevery=[44,58,70,87,99],markersize=5)
+        marker_ind+=1
         y_matrix.append(y)
         labels.append(str(list_window_sizes[i])+'previous episodes')
-        colors.append(default_colors[i+2])
+
 
     ax.legend(title="",fontsize=9,handlelength=1,labelspacing=0.2)
     ax.set_xlabel("Total interaction steps",fontsize=13)
-    ax.set_ylabel("$\widetilde{J}$ of the policy\nselected as the best",fontsize=13)
-    ax.set_title('Evaluating all policies with metrics (legend)\n from learning trajectories',fontsize=14)
+    ax.set_ylabel("$\widetilde{f}$ of the policy\nselected as the best",fontsize=13)
+    ax.set_title('Evaluating all policies with metrics (legend)\n from training trajectories',fontsize=14)
     plt.yticks(rotation=90)
     plt.savefig(output_path+'/BestPolicyAdditionalInteraction'+str(seed)+'.pdf')
     plt.show()
@@ -256,9 +258,9 @@ def learning_curves_train_reward(x,env_name,seed):
    
 
 # Degradation
-degradation(list(range(10000, 3200001, 32100)),'Ant',1,'Significant degradation')
-degradation(list(range(10000, 3200001, 32100)),'Ant',3,'Catastrophic forgetting')
-degradation(list(range(10000, 3200001, 32100)),'Ant',6,'Low degradation')
+degradation(list(range(10000, 3200001, 32100)),'Ant',1,'Critical degradation')
+degradation(list(range(10000, 3200001, 32100)),'Ant',3,'Catastrophic degradation')
+degradation(list(range(10000, 3200001, 32100)),'Ant',6,'Moderate degradation')
 
 # Best policy using trajectories
 metrics_train_changes=pickle.load(open('results/KnowingSingleProcess/Ant/extracted_data/metric_changes_norm1.pkl', 'rb'))
