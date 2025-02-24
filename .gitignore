@@ -1,9 +1,8 @@
 venv
 py39venv
-experiments/__pycache__
 results/EnvironmentProcesses/Ant/
 results/EnvironmentProcesses/Humanoid/
 results/EnvironmentProcesses/InvertedDoublePendulum/
 _hipatia
-libraries
-experiments_LibrariesRL/__pycache__
+/libraries/
+__pycache__
