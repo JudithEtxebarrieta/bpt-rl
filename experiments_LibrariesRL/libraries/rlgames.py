@@ -223,6 +223,7 @@ class Options:
         data['params']["config"]['minibatch_size'] = batch_size # Modificar batch_size por defecto
         data['params']["config"]['seq_length'] = batch_size # TODO: entender mejor este parametro, en clase A2CBase: self.games_num = self.minibatch_size // self.seq_length
 
+
         data['params']["config"]['device'] = device # Modificar device por defecto
 
         data['params']["config"]['save_frequency'] = save_frequency # Modificar save_frequency por defecto

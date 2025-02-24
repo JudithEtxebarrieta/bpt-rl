@@ -8,6 +8,9 @@ en su totalidad por la politica a la que se le esta asignando la metrica).
 como checkpoint.
 
 TODO: tengo que mirar a ver esta misma metrica como se interpreta cuando se ejecutan multiples entornos en paralelo.
+
+TODO: el sats_window_size=1 de arriba puede que no sea siempre asi. Igual tiene que ver con:
+self.games_num = self.minibatch_size // self.seq_length. Comprobarlo!!!
 '''
 
 from libraries.rlgames import Options
@@ -50,6 +53,8 @@ for k in range(10):
     all_traj_ep_end+=[i[0] for i in list(df_traj[df_traj['n_policy']==k+1]['traj_ep_end'])[0]]
 
 print(training_stats(all_traj_rw,all_traj_ep_end,range(200,200*11,200),1))
+
+
 
         
 
