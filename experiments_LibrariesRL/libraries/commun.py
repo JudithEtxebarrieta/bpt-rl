@@ -58,7 +58,18 @@ def compress_decompress_list(my_list,compress=True):
 
         return my_list
 
-def training_stats(train_rewards,train_ep_ends,n_timesteps_per_iter,stats_window_size):
+def training_stats_single_worker(train_rewards,train_ep_ends,n_timesteps_per_iter,stats_window_size):
+    '''
+    Asi se calcula por las librerias la estimacion del expected episodic reward usando las trajectorias,
+    cuando hacemos ejecuciones secuenciales (solo un worker).
+
+    Esta funcion calcula la estimaion para todas las politicas de la secuencia.
+
+    `train_rewards`: rewards de trayectorias concatenados en orden de creacion
+    `train_ep_ends`: dones de trayectorias concatenados en orden de creacion
+    `n_timesteps_per_iter`: lista con los steps consumidos por iteracion
+    `stats_window_size`: numero de episodios previos para calcular la media
+    '''
     ep_rw_policy=[]
 
     for time_steps in n_timesteps_per_iter:
@@ -83,3 +94,62 @@ def training_stats(train_rewards,train_ep_ends,n_timesteps_per_iter,stats_window
             ep_rw_policy.append(np.mean(ep_rw[-stats_window_size:]))
 
     return ep_rw_policy
+
+def training_stats_multiple_workers(train_rewards_workers,train_ep_ends_workers,n_timesteps_per_iter,stats_window_size):
+
+    '''
+    Asi se calcula por las librerias la estimacion del expected episodic reward usando las trajectorias,
+    cuando hacemos ejecuciones en paralelo (multiples worker).
+
+    Esta funcion calcula la estimaion para todas las politicas de la secuencia.
+
+    `train_rewards`: matriz de rewards de trayectorias concatenados en orden de creacion (una fila por worker)
+    `train_ep_ends`: matrix de dones de trayectorias concatenados en orden de creacion (una fila por worker)
+    `n_timesteps_per_iter`: lista con los steps consumidos por iteracion
+    `stats_window_size`: numero de episodios previos para calcular la media
+    '''
+
+    def training_stat_single_worker(train_rewards,train_ep_ends,time_steps):
+        '''
+        Es igual que training_stats_single_worker pero solo devuelve la estimacion de una politica (la ultima asociada al limite time_steps)
+        '''
+        current_train_rewards=train_rewards[:time_steps]
+        current_train_ep_ends=train_ep_ends[:time_steps]
+
+        ep_rw=[]
+        ep_last=[]
+        last_i=0
+        current_i=0
+
+        for i in current_train_ep_ends:
+            current_i+=1
+            if i:
+                ep_rw.append(sum(current_train_rewards[last_i:current_i]))
+                ep_last.append(current_i)
+                last_i=current_i
+
+        return ep_rw, ep_last
+    
+    ep_rw_policy=[]
+    for time_steps in n_timesteps_per_iter:
+        ep_rw_workers=[]
+        ep_last_workers=[]
+
+        # Guardar datos de rewards por episodio y cuando se an almacenado para cada worker
+        for i in range(len(train_rewards_workers)):
+            ep_rw, ep_last=training_stat_single_worker(train_rewards_workers[i],train_ep_ends_workers[i],time_steps)
+            ep_rw_workers+=ep_rw
+            ep_last_workers+=ep_last
+
+        # Quedarnos con los stats_window_size ultimos teniendo en cuenta el tiempo de almacenamiento
+        ep_rw_sorted = [x for _, x in sorted(zip(ep_last_workers, ep_rw_workers))] # ordenar ep_rw segun ep_last
+
+        if len(ep_rw_sorted)<stats_window_size:
+            ep_rw_policy.append(np.mean(ep_rw_sorted))
+        else:
+            ep_rw_policy.append(np.mean(ep_rw_sorted[-stats_window_size:]))
+
+    return ep_rw_policy
+
+
+

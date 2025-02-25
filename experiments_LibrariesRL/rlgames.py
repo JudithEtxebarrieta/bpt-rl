@@ -14,7 +14,7 @@ self.games_num = self.minibatch_size // self.seq_length. Comprobarlo!!!
 '''
 
 from libraries.rlgames import Options
-from libraries.commun import compress_decompress_list, training_stats
+from libraries.commun import compress_decompress_list, training_stats_single_worker
 import pandas as pd
 import numpy as np
 
@@ -52,7 +52,7 @@ for k in range(10):
     all_traj_rw+=[j[0]for i in list(df_traj[df_traj['n_policy']==k+1]['traj_rewards'])[0] for j in i]
     all_traj_ep_end+=[i[0] for i in list(df_traj[df_traj['n_policy']==k+1]['traj_ep_end'])[0]]
 
-print(training_stats(all_traj_rw,all_traj_ep_end,range(200,200*11,200),1))
+print(training_stats_single_worker(all_traj_rw,all_traj_ep_end,range(200,200*11,200),1))
 
 
 
