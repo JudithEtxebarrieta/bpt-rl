@@ -31,16 +31,20 @@ entre las checkpoint la mejor cada save_best_every_sec, con respecto a la metric
 es el 'reward', que es el reward promedio de los ultimos stats_avg episodios completos almacenados en train (entre la union
 de las trayectorias durante el aprendizaje).
 
-NOTE: con n_workers=1 el valor de la metrica indicado explicitamente en el nombre del checkpoint best, coincide con el output
-de mi funcion training_stats (por eso se que la metrica es exactamente esa). Cuando n_workers>1, no consigo que el valor coincida,
-creo que es por el orden en que se considera la union de las trayectorias (ahora provienen de n_workers diferentes).
+Cuando num_workers>1, como en cada worker se hace una interaccion independiente de la politica de longitud rollout, 
+por interaccion se almacenan tantas trayectorias como workers. Si 
+x= (batch_size*num_batches_per_epoch)//(rollout*num_workers*num_envs_per_worker)
+el numero de interacciones que hay que repetir para tener suficientes datos para actualizar la politica es >1, las trayectorias
+que se almacenan en process_info/df_traj.csv por iteracion son una matriz de tamaño (x*num_workers,rollout). He observado que
+si num_workers=2, las filas impares de esa matriz son las trayectorias del worker 1 y las pares del worker 2. Supongo que para mas
+workers las filas de la matriz seguiran el patron: fila1-worker1, fila2-worker2, fila3-worker3, fila4-worker1, fila5-worker2, fila6-worker6,...
 
 TODO: algunos de los .pth se cargan sin problemas con torch y otros no, aunque se esten guardando de la misma manera. Por que?
 '''
 import numpy as np
 import pandas as pd
 from libraries.samplefactory import Options
-from libraries.commun import compress_decompress_list, external_run, training_stats
+from libraries.commun import compress_decompress_list, external_run, training_stats_single_worker, training_stats_multiple_workers
 
 # Definir parametros
 method='APPO'
@@ -68,7 +72,7 @@ Options.learn_process(method,env,seed,total_timesteps,'execution3',library_dir,
 Options.learn_process(method,env,seed,total_timesteps,'execution4',library_dir,
                             n_steps_per_env=64,n_workers=2,n_envs_per_worker=1,
                             batch_size=64*2,n_batches_per_epoch=1,n_epoch=1)
-external_run('experiments_LibrariesRL/samplefactory.py',range(43,69))
+external_run('experiments_LibrariesRL/samplefactory.py',range(48,56))
 
 df_traj1=pd.read_csv('experiments_LibrariesRL/results/samplefactory/execution1/process_info/df_traj.csv')
 df_traj1['traj_rewards']=[np.array(compress_decompress_list(i,compress=False)) for i in list(df_traj1['traj_rewards'])]
@@ -102,7 +106,7 @@ try:
 except:
     pass
 
-external_run('experiments_LibrariesRL/samplefactory.py',list(range(43,51))+list(range(87,102)))
+external_run('experiments_LibrariesRL/samplefactory.py',list(range(48,56))+list(range(92,107)))
 
 #--------------------------------------------------------------------------------------------------
 # Entender cual es la politica output
@@ -115,7 +119,7 @@ Options.learn_process(method,env,seed,total_timesteps,'execution5',library_dir,
                             n_steps_per_env=64,n_workers=1,n_envs_per_worker=1,
                             batch_size=64*10,n_batches_per_epoch=1,n_epoch=1,
                             save_every_sec=1, keep_checkpoints=8,save_best_every_sec=1,save_best_after=total_timesteps)
-external_run('experiments_LibrariesRL/samplefactory.py',list(range(43,51))+list(range(105,116)))
+external_run('experiments_LibrariesRL/samplefactory.py',list(range(48,56))+list(range(110,121)))
 
 # Comprobar que las politicas son las que he guardado y cual es la que se selecciona como mejor
 eval1=Options.eval_policy(env,seed,3,'execution5',library_dir,policy_id=0,deterministic_eval=True)
@@ -158,7 +162,7 @@ try:
 except:
     pass
 
-external_run('experiments_LibrariesRL/samplefactory.py',list(range(43,51))+list(range(118,160)))
+external_run('experiments_LibrariesRL/samplefactory.py',list(range(48,56))+list(range(123,163)))
 
 # Como se calcula la metrica 'reward' a partil de la cual se escoge el mejor checkpointing
 df_traj=pd.read_csv('experiments_LibrariesRL/results/samplefactory/execution5/process_info/df_traj.csv')
@@ -170,7 +174,7 @@ train_ep_ends=[ep_end for policy_trajs in df_traj['traj_ep_end'] for traj in pol
 n_timesteps_per_iter=list(range(64*10,64*10*8,64*10))
 stats_window_size=100
 
-print(training_stats(train_rewards,train_ep_ends,n_timesteps_per_iter,stats_window_size))
+print(training_stats_single_worker(train_rewards,train_ep_ends,n_timesteps_per_iter,stats_window_size))
 
 # Comprobar la metrica para ejecucion en paralelo
 total_timesteps=64*10*5
@@ -178,29 +182,25 @@ Options.learn_process(method,env,seed,total_timesteps,'execution6',library_dir,
                             n_steps_per_env=64,n_workers=2,n_envs_per_worker=1,
                             batch_size=64*10,n_batches_per_epoch=1,n_epoch=1,
                             save_every_sec=1, keep_checkpoints=8,save_best_every_sec=1,save_best_after=total_timesteps)
-external_run('experiments_LibrariesRL/samplefactory.py',list(range(43,51))+list(range(174,180)))
+external_run('experiments_LibrariesRL/samplefactory.py',list(range(48,56))+list(range(178,184)))
 
 df_traj=pd.read_csv('experiments_LibrariesRL/results/samplefactory/execution6/process_info/df_traj.csv')
 df_traj['traj_rewards']=[np.array(compress_decompress_list(i,compress=False)) for i in list(df_traj['traj_rewards'])]
 df_traj['traj_ep_end']=[np.array(compress_decompress_list(i,compress=False)) for i in list(df_traj['traj_ep_end'])]
-
-train_rewards=[rw for policy_trajs in df_traj['traj_rewards'] for traj in policy_trajs for rw in traj]
-train_ep_ends=[ep_end for policy_trajs in df_traj['traj_ep_end'] for traj in policy_trajs for ep_end in traj]
-
-print(training_stats(train_rewards,train_ep_ends,n_timesteps_per_iter,stats_window_size))
-
-df_traj_rewards=[]
-df_traj_ep_end=[]
-for j in range(len(df_traj['traj_rewards'])):
-    for i in range(5): # como batch_size=n_steps_per_env*10 y n_workers=2, habra 5 trayectorias por worker almacenadas
-        df_traj_rewards.append(df_traj['traj_rewards'][j][i])
-        df_traj_rewards.append(df_traj['traj_rewards'][j][i+5])
-        df_traj_ep_end.append(df_traj['traj_ep_end'][j][i])
-        df_traj_ep_end.append(df_traj['traj_ep_end'][j][i+5])
-train_rewards=[rw for traj in df_traj_rewards  for rw in traj]
-train_ep_ends=[ep_end for traj in df_traj_ep_end  for ep_end in traj]
+n_timesteps_per_iter=list(range(64*10,64*10*8,64*10))
+stats_window_size=100
+df_traj_rewards=[[],[]]
+df_traj_ep_end=[[],[]]
+for i in range(len(df_traj['traj_rewards'])):
+    # Worker 1
+    df_traj_rewards[0]+=np.array(df_traj['traj_rewards'][i][::2]).flatten().tolist()
+    df_traj_ep_end[0]+=np.array(df_traj['traj_ep_end'][i][::2]).flatten().tolist()
+    # Worker 2
+    df_traj_rewards[1]+=np.array(df_traj['traj_rewards'][i][1::2]).flatten().tolist()
+    df_traj_ep_end[1]+=np.array(df_traj['traj_ep_end'][i][1::2]).flatten().tolist()
 
 n_timesteps_per_iter=list(range(64*10,64*10*8,64*10))
 stats_window_size=100
 
-print(training_stats(train_rewards,train_ep_ends,n_timesteps_per_iter,stats_window_size))
+print(training_stats_multiple_workers(df_traj_rewards,df_traj_ep_end,n_timesteps_per_iter,stats_window_size))
+
