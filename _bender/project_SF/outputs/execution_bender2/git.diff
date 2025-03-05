@@ -1,0 +1,22 @@
+diff --git a/experiments_LibrariesRL/samplefactory.py b/experiments_LibrariesRL/samplefactory.py
+index e13427d..2227a8c 100644
+--- a/experiments_LibrariesRL/samplefactory.py
++++ b/experiments_LibrariesRL/samplefactory.py
+@@ -59,7 +59,7 @@ library_dir='experiments_LibrariesRL/results/samplefactory'
+ # Proceso determinista-> SOLO EN EJECUCION SECUENCIAL
+ #--------------------------------------------------------------------------------------------------
+ # Secuencial
+-Options.learn_process(method,env,seed,total_timesteps,'execution1',library_dir,
++Options.learn_process(method,env,seed,total_timesteps,'execution11',library_dir,
+                             n_steps_per_env=64,n_workers=1,n_envs_per_worker=1,
+                             batch_size=64*2,n_batches_per_epoch=1,n_epoch=1)
+ Options.learn_process(method,env,seed,total_timesteps,'execution2',library_dir,
+@@ -72,7 +72,7 @@ Options.learn_process(method,env,seed,total_timesteps,'execution3',library_dir,
+ Options.learn_process(method,env,seed,total_timesteps,'execution4',library_dir,
+                             n_steps_per_env=64,n_workers=2,n_envs_per_worker=1,
+                             batch_size=64*2,n_batches_per_epoch=1,n_epoch=1)
+-external_run('experiments_LibrariesRL/samplefactory.py',range(48,56))
++external_run('experiments_LibrariesRL/samplefactory.py',range(48,74))
+ 
+ df_traj1=pd.read_csv('experiments_LibrariesRL/results/samplefactory/execution1/process_info/df_traj.csv')
+ df_traj1['traj_rewards']=[np.array(compress_decompress_list(i,compress=False)) for i in list(df_traj1['traj_rewards'])]
