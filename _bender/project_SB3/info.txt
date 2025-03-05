@@ -1,0 +1,50 @@
+JobID          ReqMem   ReqCPUS   My folder name
+------------  -------- -------- ----------------------------------
+
+
+202500_1        32G         32   test_resources_32G_32CPU_1GPUauto
+
+202511_1        60G         20   test_resources_60G_20CPU_1GPUauto
+
+202517_1        36G         18   test_resources_36G_18CPU_1GPUauto
+
+202502_1        32G         16   test_resources_32G_16CPU_1GPUauto
+
+202513_1        60G         10   test_resources_60G_10CPU_1GPUauto
+
+202503_1        32G          8   test_resources_32G_8CPU_1GPUauto
+
+202504_1        32G          4   test_resources_32G_4CPU_1GPUauto
+
+202505_1        32G          2   test_resources_32G_2CPU_1GPUauto
+
+202506_1        32G         16   test_resources_32G_16CPU_1GPUcuda
+
+202507_1        32G          8   test_resources_32G_8CPU_1GPUcuda
+
+Ejecutar la siguiente linea para obtener informacion
+sacct --format=JobID,NodeList,NNodes,ReqMem,MaxRSS,AveRSS,ReqCPUS,CPUTime,TotalCPU,AveCPU,Elapsed,State -j 202500_1,202511_1,202517_1,202502_1,202513_1,202503_1,202504_1,202505_1,202506_1,202507_1
+
+output: (parece que 16CPU, 32G, y 1GPU son suficientes)
+JobID               NodeList   NNodes     ReqMem     MaxRSS     AveRSS  ReqCPUS    CPUTime   TotalCPU     AveCPU    Elapsed	 State
+------------ --------------- -------- ---------- ---------- ---------- -------- ---------- ---------- ---------- ---------- ----------
+202500_1              node01        1        32G                             32   02:22:56  23:00.489              00:04:28  COMPLETED
+202500_1.ba+          node01        1             25260380K  25260380K       32   02:22:56  23:00.489   00:23:00   00:04:28  COMPLETED
+202502_1              node01        1        32G                             16   00:52:48  13:37.769              00:03:18  COMPLETED
+202502_1.ba+          node01        1             13646208K  13646208K       16   00:52:48  13:37.769   00:13:38   00:03:18  COMPLETED
+202503_1              node01        1        32G                              8   00:38:16  13:08.874              00:04:47  COMPLETED
+202503_1.ba+          node01        1              7557916K   7557916K        8   00:38:16  13:08.874   00:13:09   00:04:47  COMPLETED
+202504_1              node01        1        32G                              4   00:26:24  13:10.248              00:06:36  COMPLETED
+202504_1.ba+          node01        1              4442640K   4442640K        4   00:26:24  13:10.248   00:13:10   00:06:36  COMPLETED
+202505_1              node01        1        32G                              2   00:22:22  14:54.261              00:11:11  COMPLETED
+202505_1.ba+          node01        1              2847832K   2847832K        2   00:22:22  14:54.261   00:14:54   00:11:11  COMPLETED
+202506_1              node01        1        32G                             16   01:07:12  15:57.586              00:04:12  COMPLETED
+202506_1.ba+          node01        1             13644640K  13644640K       16   01:07:12  15:57.586   00:15:58   00:04:12  COMPLETED
+202507_1              node01        1        32G                              8   00:40:40  14:15.870              00:05:05  COMPLETED
+202507_1.ba+          node01        1              7498556K   7498556K        8   00:40:40  14:15.870   00:14:16   00:05:05  COMPLETED
+202511_1              node01        1        60G                             20   01:21:40  18:04.529              00:04:05  COMPLETED
+202511_1.ba+          node01        1             16449232K  16449232K       20   01:21:40  18:04.529   00:18:03   00:04:05  COMPLETED
+202513_1              node01        1        60G                             10   00:49:10  14:20.823              00:04:55  COMPLETED
+202513_1.ba+          node01        1              9202004K   9202004K       10   00:49:10  14:20.823   00:14:20   00:04:55  COMPLETED
+202517_1              node01        1        36G                             18   01:16:30  16:54.062              00:04:15  COMPLETED
+202517_1.ba+          node01        1             15370372K  15370372K       18   01:16:30  16:54.062   00:16:53   00:04:15  COMPLETED

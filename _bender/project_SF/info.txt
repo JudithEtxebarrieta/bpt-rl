@@ -1,0 +1,52 @@
+Nombre de carpeta       JobID	   ReqMem   ReqCPUS  NodeList   SF param:       Mensaje en .err
+                                                                num_workers
+------------------      ---------  -------- -------- --------   -----------     ------------------
+
+
+execution1              202107_1        10G	  10   node01           1       Worker 0 uses CPU cores [0, 1, ..., 31] 
+
+execution2              202108_1        10G	  10   node01           2       Worker 0 uses CPU cores [0, 1,..., 15];  Worker 1 uses CPU cores [16, 17,..., 31]
+
+execution3              202109_1        10G	  10   node01           5       Worker i uses CPU cores [0, 1, ..., 31] for all i=0,...,4
+
+execution4              202110_1        10G	  10   node01          10       Worker i uses CPU cores [0, 1, ..., 31] for all i=0,...,9
+
+execution_1             202111_1        10G	  10   node01           1       Worker 0 uses CPU cores [0, 1, ..., 31] 
+
+execution_2             202112_1        10G	  10   node01           2       Worker 0 uses CPU cores [0, 1,..., 15];  Worker 1 uses CPU cores [16, 17,..., 31]
+
+execution_3             202113_1        10G	  10   node01           4       Worker 0 uses CPU cores [0, 1, ..., 7];  Worker 1 uses CPU cores [8, 9, ..., 15]; ...; Worker 3 uses CPU cores [24, 25,..., 31]
+
+execution_4             202114_1        10G	  10   node01           8       Worker 0 uses CPU cores [0, 1, 2, 3]; Worker 1 uses CPU cores [4, 5, 6, 7];...; Worker 7 uses CPU cores [28, 29, 30, 31]
+
+SF_PPO_Ant_seed1        202355_1        80G       40   node02           8       Se para por no poder cargar una politica guardada (aunque ya haya cargado bien las politicas guardadas en las 27 iter anteriores)
+
+Conclusion:
+-----------
+- Las caracteristicas que escribo en el sbatch solo valen para asignar el nodo01. Este en total tiene 32CPU.
+- SF luego coge todo lo disponible en nodo01, de ahi los 32 cores que se reparten entre los num_workers indicados.
+
+Dudas/problemas:
+----------------
+- Cuando el parametro num_workers no es un multiplo de los CPUs disponibles en el nodo asignado, asigna todos los cores a todos los workers. Pero entonces, la ejecucion no va a ser efectiva?
+
+- Por defecto SF con mujoco obliga num_workers=num_envs_per_worker=8, entonces hay que pedir 8*8=64 CPUs? no hay nodo en el cluster con esa cantidad exacta, puede ser o 32, 40, 96. El primero
+asignara 32/8=4 cores por worker, el segundo 5 y el ultimo 12. Ocupamos todo el nodo en los tres casos.
+
+He ejecutado con en nodo02 que tiene 40 CPU y no iba mal, hasta que se ha atascado por no poder cargar un modelo. Esto ya me habia pasado antes, aunque todos los modelos se guardan igua y se leen igual, a veces>
+
+Check the documentation of torch.load to learn more about types accepted by default with weights_only https://pytorch.org/docs/stable/generated/torch.load.html.
+^[[33m[2025-03-04 13:42:25,332][909352] Loading state from checkpoint /pfs/jechevarrieta/project_2502/outputs/SF_PPO_Ant_seed1_BUENA/process_info/policy_26.pth...^[[0m
+^[[31m^[[1m[2025-03-04 13:42:25,336][909352] Could not load from checkpoint, attempt 1^[[0m
+Traceback (most recent call last):
+  File "/pfs/jechevarrieta/project_2502/libraries/sample-factory/sample_factory/algo/learning/learner.py", line 281, in load_checkpoint
+    checkpoint_dict = torch.load(latest_checkpoint, map_location=device)
+  File "/pfs/jechevarrieta/project_2502/.venv/lib/python3.10/site-packages/torch/serialization.py", line 1470, in load
+    raise pickle.UnpicklingError(_get_wo_message(str(e))) from None
+_pickle.UnpicklingError: Weights only load failed. This file can still be loaded, to do so you have two options, ^[[1mdo those steps only if you trust the source of the checkpoint^[[0m.
+        (1) In PyTorch 2.6, we changed the default value of the `weights_only` argument in `torch.load` from `False` to `True`. Re-running `torch.load` with `weights_only` set to `False` will likely succeed, bu>
+        (2) Alternatively, to load with `weights_only=True` please check the recommended steps in the following error message.
+        WeightsUnpickler error: Unsupported global: GLOBAL numpy.core.multiarray.scalar was not an allowed global by default. Please use `torch.serialization.add_safe_globals([scalar])` or the `torch.serializat>
+
+- SF si que esta usando GPUs porque dice "Using GPUs [0] for process 0 (actually maps to GPUs [0])", pero para que lo usa?
+
