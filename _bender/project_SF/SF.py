@@ -77,6 +77,7 @@ import bz2
 import base64
 import numpy as np
 import os
+import torch
 
 class MyTimer:
     
@@ -126,6 +127,24 @@ def compress_decompress_list(my_list,compress=True):
 
 
 class ModifiedFunctions:
+
+    def load_checkpoint(checkpoints, device):
+        if len(checkpoints) <= 0:
+            log.warning("No checkpoints found")
+            return None
+        else:
+            latest_checkpoint = checkpoints[-1]
+
+            # extra safety mechanism to recover from spurious filesystem errors
+            num_attempts = 3
+            for attempt in range(num_attempts):
+                # noinspection PyBroadException
+                try:
+                    log.warning("Loading state from checkpoint %s...", latest_checkpoint)
+                    checkpoint_dict = torch.load(latest_checkpoint, map_location=device,weights_only=False) #MODIFICACION: weights_only=False para que no de error al cargar algunas politicas.
+                    return checkpoint_dict
+                except Exception:
+                    log.exception(f"Could not load from checkpoint, attempt {attempt}")
 
     def on_new_training_batch(self, batch_idx: int):
         global total_time, n_val_ep, end_saving
@@ -545,6 +564,11 @@ class Options:
         make_eval_deterministic=deterministic_eval
         eval_policy_from_checkpointing= 'True' if str(policy_id)=='False' or checkpoint_id!=None else policy_id
         eval_checkpoint_id=checkpoint_id
+
+        # Redefinir funciones
+        Learner.load_checkpoint=ModifiedFunctions.load_checkpoint
+
+
         def start_eval(env,seed,experiment_name,train_dir):
             args = [
                     f'--env={env}',

@@ -39,7 +39,6 @@ que se almacenan en process_info/df_traj.csv por iteracion son una matriz de tam
 si num_workers=2, las filas impares de esa matriz son las trayectorias del worker 1 y las pares del worker 2. Supongo que para mas
 workers las filas de la matriz seguiran el patron: fila1-worker1, fila2-worker2, fila3-worker3, fila4-worker1, fila5-worker2, fila6-worker6,...
 
-TODO: algunos de los .pth se cargan sin problemas con torch y otros no, aunque se esten guardando de la misma manera. Por que?
 '''
 import numpy as np
 import pandas as pd
@@ -59,7 +58,7 @@ library_dir='experiments_LibrariesRL/results/samplefactory'
 # Proceso determinista-> SOLO EN EJECUCION SECUENCIAL
 #--------------------------------------------------------------------------------------------------
 # Secuencial
-Options.learn_process(method,env,seed,total_timesteps,'execution1',library_dir,
+Options.learn_process(method,env,seed,total_timesteps,'execution11',library_dir,
                             n_steps_per_env=64,n_workers=1,n_envs_per_worker=1,
                             batch_size=64*2,n_batches_per_epoch=1,n_epoch=1)
 Options.learn_process(method,env,seed,total_timesteps,'execution2',library_dir,
@@ -72,7 +71,7 @@ Options.learn_process(method,env,seed,total_timesteps,'execution3',library_dir,
 Options.learn_process(method,env,seed,total_timesteps,'execution4',library_dir,
                             n_steps_per_env=64,n_workers=2,n_envs_per_worker=1,
                             batch_size=64*2,n_batches_per_epoch=1,n_epoch=1)
-external_run('experiments_LibrariesRL/samplefactory.py',range(48,56))
+external_run('experiments_LibrariesRL/samplefactory.py',range(48,74))
 
 df_traj1=pd.read_csv('experiments_LibrariesRL/results/samplefactory/execution1/process_info/df_traj.csv')
 df_traj1['traj_rewards']=[np.array(compress_decompress_list(i,compress=False)) for i in list(df_traj1['traj_rewards'])]

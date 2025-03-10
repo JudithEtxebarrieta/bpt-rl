@@ -1,4 +1,4 @@
-Nombre de carpeta       JobID	   ReqMem   ReqCPUS  NodeList   SF param:       Mensaje en .err
+Nombre de carpeta       JobID	     ReqMem   ReqCPUS  NodeList   SF param:       Mensaje en .err
                                                                 num_workers
 ------------------      ---------  -------- -------- --------   -----------     ------------------
 
@@ -19,7 +19,7 @@ execution_3             202113_1        10G	  10   node01           4       Work
 
 execution_4             202114_1        10G	  10   node01           8       Worker 0 uses CPU cores [0, 1, 2, 3]; Worker 1 uses CPU cores [4, 5, 6, 7];...; Worker 7 uses CPU cores [28, 29, 30, 31]
 
-SF_PPO_Ant_seed1        202355_1        80G       40   node02           8       Se para por no poder cargar una politica guardada (aunque ya haya cargado bien las politicas guardadas en las 27 iter anteriores)
+SF_PPO_Ant_seed3        216225_1        64G   32   node01           8       (este se ejecuta sin problemas)
 
 Conclusion:
 -----------
@@ -28,12 +28,12 @@ Conclusion:
 
 Dudas/problemas:
 ----------------
-- Cuando el parametro num_workers no es un multiplo de los CPUs disponibles en el nodo asignado, asigna todos los cores a todos los workers. Pero entonces, la ejecucion no va a ser efectiva?
-
-- Por defecto SF con mujoco obliga num_workers=num_envs_per_worker=8, entonces hay que pedir 8*8=64 CPUs? no hay nodo en el cluster con esa cantidad exacta, puede ser o 32, 40, 96. El primero
+- Cuando el parametro num_workers no es un multiplo de los CPUs disponibles en el nodo asignado, asigna todos los cores a todos los workers. Pero entonces, ¿la ejecucion no va a ser efectiva?
+Por defecto SF con mujoco obliga num_workers=num_envs_per_worker=8, ¿entonces hay que pedir 8*8=64 CPUs? no hay nodo en el cluster con esa cantidad exacta, puede ser o 32, 40, 96. El primero
 asignara 32/8=4 cores por worker, el segundo 5 y el ultimo 12. Ocupamos todo el nodo en los tres casos.
 
-He ejecutado con en nodo02 que tiene 40 CPU y no iba mal, hasta que se ha atascado por no poder cargar un modelo. Esto ya me habia pasado antes, aunque todos los modelos se guardan igua y se leen igual, a veces>
+- Hay que tener cuidado con la version de torch. En algunas ejecuciones, se atasca por no poder cargar un modelo aunque los previos si se hayan cargado bien, y todos los modelos se guardan igual y se leen igual.
+El error que sale es este, pero se arregla modificado la funcion por defecto load_checkpoint del Learner, añadiendo weights_only=False.
 
 Check the documentation of torch.load to learn more about types accepted by default with weights_only https://pytorch.org/docs/stable/generated/torch.load.html.
 ^[[33m[2025-03-04 13:42:25,332][909352] Loading state from checkpoint /pfs/jechevarrieta/project_2502/outputs/SF_PPO_Ant_seed1_BUENA/process_info/policy_26.pth...^[[0m
@@ -48,5 +48,6 @@ _pickle.UnpicklingError: Weights only load failed. This file can still be loaded
         (2) Alternatively, to load with `weights_only=True` please check the recommended steps in the following error message.
         WeightsUnpickler error: Unsupported global: GLOBAL numpy.core.multiarray.scalar was not an allowed global by default. Please use `torch.serialization.add_safe_globals([scalar])` or the `torch.serializat>
 
-- SF si que esta usando GPUs porque dice "Using GPUs [0] for process 0 (actually maps to GPUs [0])", pero para que lo usa?
+- SF si que esta usando GPUs porque dice "Using GPUs [0] for process 0 (actually maps to GPUs [0])", pero si a los workers de les asigna
+tantos cores ¿para que/ donde se usa la GPU?
 
