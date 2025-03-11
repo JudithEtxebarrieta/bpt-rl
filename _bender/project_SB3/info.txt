@@ -22,6 +22,7 @@ JobID          ReqMem   ReqCPUS   My folder name
 
 202507_1        32G          8   test_resources_32G_8CPU_1GPUcuda
 
+
 Ejecutar la siguiente linea para obtener informacion
 sacct --format=JobID,NodeList,NNodes,ReqMem,MaxRSS,AveRSS,ReqCPUS,CPUTime,TotalCPU,AveCPU,Elapsed,State -j 202500_1,202511_1,202517_1,202502_1,202513_1,202503_1,202504_1,202505_1,202506_1,202507_1
 
@@ -48,3 +49,7 @@ JobID               NodeList   NNodes     ReqMem     MaxRSS     AveRSS  ReqCPUS 
 202513_1.ba+          node01        1              9202004K   9202004K       10   00:49:10  14:20.823   00:14:20   00:04:55  COMPLETED
 202517_1              node01        1        36G                             18   01:16:30  16:54.062              00:04:15  COMPLETED
 202517_1.ba+          node01        1             15370372K  15370372K       18   01:16:30  16:54.062   00:16:53   00:04:15  COMPLETED
+
+Conclusiones:
+----------- 
+- Esta libreria no esta diseñada para aprovechar el uso de GPUs.

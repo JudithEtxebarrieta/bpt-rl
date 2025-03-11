@@ -23,7 +23,8 @@ Valores concretos:
 - deterministic_eval=True # Para que la validacion sea pareada
 
 NOTE: caracteristicas en el sbatch
-Despues de un analisis he visto que para n_eval_ep=500, 32G, 16CPU, 1GPU son suficientes.
+Despues de un analisis he visto que para n_eval_ep=500, 32G, 16CPU, 1GPU son suficientes. 
+Parece que esta libreria no esta diseñada para aprovechar el uso de GPU.
 
 TODO: queda por probar si usar mi eval_policy para validar en paralelo es mas rapido que la validacion hecha por el Callback implementado.
 '''
@@ -459,6 +460,8 @@ class ModifiedFunctions:
                                     episode_lengths.append(info["episode"]["l"])
                                     # Only increment at the real end of an episode
                                     episode_counts[i] += 1
+                                    num_episodes.append(sum(episode_counts))#MODIFICADO*
+                                    times_per_episode.append(time.time()-start_val_time)#MODIFICADO*
                             else:
                                 episode_rewards.append(current_rewards[i])
                                 episode_lengths.append(current_lengths[i])
@@ -707,23 +710,29 @@ seed=1
 total_timesteps=2048*3
 library_dir='_bender/project_SB3/outputs'
 
-Options.learn_process(method,env,seed,total_timesteps,'execution1',library_dir,
-                      device='cpu',
-                      callback=True,n_eval_ep=2,eval_freq=2048,n_eval_envs=1,deterministic_eval=True)
+# Options.learn_process(method,env,seed,total_timesteps,'execution1',library_dir,
+#                       device='cpu',
+#                       callback=True,n_eval_ep=2,eval_freq=2048,n_eval_envs=1,deterministic_eval=True)
 
-Options.learn_process(method,env,seed,total_timesteps,'execution2',library_dir,
-                      n_workers=2,
-                      device='cpu',
-                      callback=True,n_eval_ep=2,eval_freq=2048,n_eval_envs=2,deterministic_eval=True)
+# Options.learn_process(method,env,seed,total_timesteps,'execution2',library_dir,
+#                       n_workers=2,
+#                       device='cpu',
+#                       callback=True,n_eval_ep=2,eval_freq=2048,n_eval_envs=2,deterministic_eval=True)
 
-if __name__ == "__main__": # Cuando vec_env_type='parallel' hay que ejecutarlo con esta linea porque habra ejecucion en paralelo
-    Options.learn_process(method,env,seed,total_timesteps,'execution3',library_dir,
-                        n_workers=2,vec_env_type='parallel',
-                        device='cpu',
-                        callback=True,n_eval_ep=2,eval_freq=2048,n_eval_envs=2,deterministic_eval=True)
+# if __name__ == "__main__": # Cuando vec_env_type='parallel' hay que ejecutarlo con esta linea porque habra ejecucion en paralelo
+#     Options.learn_process(method,env,seed,total_timesteps,'execution3',library_dir,
+#                         n_workers=2,vec_env_type='parallel',
+#                         device='cpu',
+#                         callback=True,n_eval_ep=2,eval_freq=2048,n_eval_envs=2,deterministic_eval=True)
+
+# if __name__ == "__main__": # Cuando vec_env_type='parallel' hay que ejecutarlo con esta linea porque habra ejecucion en paralelo
+#     Options.learn_process(method,env,seed,total_timesteps,'execution4',library_dir,
+#                         n_workers=1,vec_env_type='parallel',
+#                         device='cpu',
+#                         callback=True,n_eval_ep=2,eval_freq=2048,n_eval_envs=2,deterministic_eval=True)
 
 # Comprobar que los estados iniciales de validacion son los mismos
-df_val=pd.read_csv('_bender/project_SB3/outputs/execution3/process_info/df_val.csv')
+df_val=pd.read_csv('_bender/project_SB3/outputs/execution1/process_info/df_val.csv')
 print([np.array(compress_decompress_list(i,compress=False)) for i in np.array(compress_decompress_list(df_val['ep_inits'][0],compress=False))])
 print([np.array(compress_decompress_list(i,compress=False)) for i in np.array(compress_decompress_list(df_val['ep_inits'][1],compress=False))])
 
@@ -734,3 +743,10 @@ print(np.array(compress_decompress_list(df_val['traj_ep_end'][0],compress=False)
 
 print([np.count_nonzero(np.array(i)) for i in compress_decompress_list(df_val['traj_ep_end'][0],compress=False)])
 print([len(i) for i in compress_decompress_list(df_val['traj_inits'][0],compress=False)])
+
+# Comprobar que para env train (secuencial) y test (paralelo/vectorial) diferentes se guardan bien todos los datos
+df_val=pd.read_csv('_bender/project_SB3/outputs/execution4/process_info/df_val.csv')
+
+print(np.array(compress_decompress_list(df_val['ep_rewards'][1],compress=False)))
+print(np.array(compress_decompress_list(df_val['n_val_ep'][1],compress=False)))
+print(np.array(compress_decompress_list(df_val['elapsed_val_time'][1],compress=False)))
