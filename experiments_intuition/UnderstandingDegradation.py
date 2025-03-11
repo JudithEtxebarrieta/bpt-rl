@@ -1,5 +1,6 @@
 '''
-Aprovechando los datos almacenados con Stable Baselines3 para Ant:
+Aprovechando los datos almacenados con Stable Baselines3 para Ant 
+usando ejecucion secuencial y midiendo el tiempo en steps:
 
 - Identificar semillas interesante: Moderate, Critical, Catastrophic
 - Grafica de kernel density estimation por iteracion
@@ -22,8 +23,12 @@ from sklearn.neighbors import KernelDensity
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
-from our_library import UtilsDataFrame
 from scipy.integrate import simpson
+import sys, os
+
+parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0,parent_dir )
+from experiments.our_library import UtilsDataFrame
 
 
 def learning_curve(x,env_name,seed,title):
@@ -33,8 +38,8 @@ def learning_curve(x,env_name,seed,title):
     ax=plt.subplot(111)
     ax.grid(True, which='both',linestyle='--', linewidth=0.8,alpha=0.2)
 
-    df_test=pd.read_parquet('results/EnvironmentProcesses/'+str(env_name)+'/df_test_'+str(env_name)+'_seed'+str(seed)+'.parquet')
-    df_train=pd.read_parquet('results/EnvironmentProcesses/'+str(env_name)+'/df_train_'+str(env_name)+'_seed'+str(seed)+'.parquet')
+    df_test=pd.read_parquet(parent_dir+'/results/EnvironmentProcesses/'+str(env_name)+'/df_test_'+str(env_name)+'_seed'+str(seed)+'.parquet')
+    df_train=pd.read_parquet(parent_dir+'/results/EnvironmentProcesses/'+str(env_name)+'/df_train_'+str(env_name)+'_seed'+str(seed)+'.parquet')
 
     # Dibujar curva sin test durante el proceso (ultima politica observada)
     y=[]
@@ -48,7 +53,7 @@ def learning_curve(x,env_name,seed,title):
     plt.title(title+' degradation')
     ax.set_xlabel("Total iterations")
     ax.set_ylabel("$\widetilde{f}$ of the last policy")
-    plt.savefig('results/ValidationFrequency/'+env_name+str(seed)+title+'_learning_curve.pdf')
+    plt.savefig('experiments_intuition/results/UnderstandingDegradation/'+env_name+str(seed)+title+'_learning_curve.pdf')
     plt.show()
     plt.close()
 
@@ -56,7 +61,7 @@ def learning_curve(x,env_name,seed,title):
 
 def episodic_reward_KDE_per_iteration(env_name,seed,iterations):
     # Validation dataframe
-    df_test=pd.read_parquet('results/EnvironmentProcesses/'+str(env_name)+'/df_test_'+str(env_name)+'_seed'+str(seed)+'.parquet')
+    df_test=pd.read_parquet(parent_dir+'/results/EnvironmentProcesses/'+str(env_name)+'/df_test_'+str(env_name)+'_seed'+str(seed)+'.parquet')
     column_ep_test_rewards=[UtilsDataFrame.compress_decompress_list(i,compress=False) for i in df_test['ep_test_rewards']]
     df_test['ep_test_rewards']=column_ep_test_rewards
 
@@ -100,14 +105,14 @@ def episodic_reward_KDE_per_iteration(env_name,seed,iterations):
 
     # Curvas de medias y expected values
     plt.plot(x_translate_list,avg_ep_rw,color='red',label='Average ER')
-    plt.plot(x_translate_list,expected_ep_rw,color='green',label='Expected ER')
+    # plt.plot(x_translate_list,expected_ep_rw,color='green',label='Expected ER')
     
 
     plt.legend(loc="upper center", bbox_to_anchor=(0.5, -0.3),ncol=4)
     plt.xticks(ticks=x_translate_list, labels=iterations,rotation=60)
     plt.ylabel('Normalized Episodic Reward (ER)')
     plt.xlabel('Policy')
-    plt.savefig('results/ValidationFrequency/'+env_name+str(seed)+'_'+str(min(iterations))+'_'+str(max(iterations))+'_'+str(iterations[1]-iterations[0])+'.pdf')
+    plt.savefig('experiments_intuition/results/UnderstandingDegradation/'+env_name+str(seed)+'_'+str(min(iterations))+'_'+str(max(iterations))+'_'+str(iterations[1]-iterations[0])+'.pdf')
     plt.show()
 
 
