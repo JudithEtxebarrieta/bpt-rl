@@ -6,3 +6,6 @@ results/EnvironmentProcesses/InvertedDoublePendulum/
 _hipatia
 /libraries/
 __pycache__
+.vscode
+_bender/project_SB3/data
+_bender/project_SF/data
