@@ -1,8 +1,13 @@
 '''
 En este scrip se aborda la comparacion grafica de los criterios existentes.
 
-Se consideran 2 procesos de aprendizaje, diferenciados unicamente por la semilla (seed=1,3): 
-algo= PPO, env=Ant, learning time=10000000 steps, 16 CPU para interaccion train y validacion en 500 episodios (y device='auto').
+Se consideran 4 procesos de aprendizaje: 
+
+- seed=1,3
+algo= PPO, env=Ant, learning time=10000000 steps, 16 CPU para interaccion train y validacion en 500 episodios (y device='auto')
+
+- seed=1,2
+algo= PPO, env=Humanoid, learning time=10000000 steps, 16 CPU para interaccion train y validacion en 500 episodios (y device='cpu')
 
 De los 500 datos de episodic reward almacenados:
 - 250 para ground truth
@@ -11,11 +16,7 @@ De los 500 datos de episodic reward almacenados:
 Las graficas representan:
 - Proceso de aprendizaje con learning-curves (para conocer el nivel de degradacion)
 - Criterios con evolucion de rank y magnitud.
-
-Conclusiones:
-- El tiempo de validacion parece insignificante frente al de interaccion (no hay mucha diferencia entre 50 o 100 episodios de validacion)
-- Las estimaciones con train son especialmente peores en las primeras politicas
-- Los procesos seleccionados no tienen mucha degradacion. Con ese nivel de degradacion el criterio de seleccion con que usa datos de validacion es el mejor.
+- Coste y precision de estimaciones.
 
 TODO: comparar la eficacia de los criterios dependiendo del nivel de paralelizacion usado para aprender y validar.
 - Cuantos menos CPU-> mayor degradacion (?)
@@ -35,12 +36,10 @@ import os
 import numpy as np
 from tqdm import tqdm
 import matplotlib.colors as mcolors
+import math
 
 parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-'''
-Este script realmente esta creado para las siguientes clases, i.e. abordar la comparacion grafica de los diferentes criterios
-'''
 class Estimator:
 
     def estimate_from_traj(train_rewards_workers,train_ep_ends_workers,n_timesteps_per_iter,n_traj_ep):
@@ -112,7 +111,7 @@ class Estimator:
 
         return df_estimates
     
-    def compute_estimates(algo,env,seed,n_ep,train_test_estimate):
+    def compute_estimates(algo,env,seed,resources,n_ep,train_test_estimate):
         '''
         Antes de generar las graficas, se calculan las estimaciones de expected episodic reward (EER) con train y test.
         Las estimaciones se almacenan en bases de datos adicionales. Asi se pueden calcular tantas estimaciones como
@@ -124,7 +123,7 @@ class Estimator:
         '''
         
         # Leer bases de datos del proceso de interes
-        current_path=parent_dir+'/_bender/project_SB3/data/'+str(algo)+'_'+str(env)+'_seed'+str(seed)
+        current_path=parent_dir+'/_bender/project_SB3/data/'+algo+'_'+env+'_seed'+str(seed)+'_'+resources
         df_train=pd.read_csv(current_path+'/df_traj.csv')
         df_test=pd.read_csv(current_path+'/df_val.csv')
         
@@ -170,14 +169,14 @@ class Estimator:
                 df_val_estimates.to_csv(current_path+'/df_val_estimates.csv', index=False)
         
 
-    def time_discretizer(algo,env,seed,iter_freq,iter_max):
+    def time_discretizer(algo,env,seed,resources,iter_freq,iter_max):
         '''
         Devuelve una discretizacion del vector de tiempos de entrenamiento en segundos (eje OX). 
         Util cuando queremos medir el tiempo en segundos y no en steps.
         '''
 
         # Leer bases de datos train del proceso de interes
-        current_path=parent_dir+'/_bender/project_SB3/data/'+str(algo)+'_'+str(env)+'_seed'+str(seed)
+        current_path=parent_dir+'/_bender/project_SB3/data/'+algo+'_'+env+'_seed'+str(seed)+'_'+resources
         df_train=pd.read_csv(current_path+'/df_traj.csv')
 
         # Tiempo medio por iteracion
@@ -185,7 +184,7 @@ class Estimator:
         iter_mean_time=int(np.mean(time_between_iter))
 
         # Vector de tiempos discretizado con la frecuencia indicada y el valor maximo como limite
-        return list(range(iter_mean_time,iter_mean_time*iter_max,iter_mean_time*iter_freq))
+        return list(np.arange(df_train['time_seconds'][0],iter_mean_time*iter_max,iter_mean_time*iter_freq))
 
 
 class Converter:
@@ -222,13 +221,15 @@ class Converter:
         '''
         return [np.concatenate(row, axis=0) for row in zip(*np.array(traj_seq))]
 
-
+    def normalize_list(lst):
+        lst = np.array(lst)
+        return (lst - np.min(lst)) / (np.max(lst) - np.min(lst))
      
 class EvolutionGenerator:
-    def __init__(self,algo,env,seed):
+    def __init__(self,algo,env,seed,resources):
           
         # Leer bases de datos del proceso de interes
-        current_path=parent_dir+'/_bender/project_SB3/data/'+str(algo)+'_'+str(env)+'_seed'+str(seed)
+        current_path=parent_dir+'/_bender/project_SB3/data/'+str(algo)+'_'+str(env)+'_seed'+str(seed)+'_'+resources
         df_train=pd.read_csv(current_path+'/df_traj.csv')
         df_train_estimates=pd.read_csv(current_path+'/df_traj_estimates.csv')
         df_test=pd.read_csv(current_path+'/df_val.csv')
@@ -238,14 +239,15 @@ class EvolutionGenerator:
         self.df_test=df_test
         self.df_train_estimates=df_train_estimates
         self.df_test_estimates=df_test_estimates
-
+    #----------------------------------------------------------------------------------------------
+    # Metricas para medir la calidad de la politica seleccionada
+    #----------------------------------------------------------------------------------------------
     def real_ranking_position(self,elapsed_time,n_policy):
 
         last_policy=self.last_policy(elapsed_time,time_in='seconds')
         EER_list=self.df_test_estimates[self.df_test['n_policy']<=last_policy]['truth'].tolist()
 
         return np.argsort(EER_list)[::-1].tolist().index(n_policy)+1
-
 
     def magnitude(self,elapsed_time,n_policy,normalized):
 
@@ -260,7 +262,9 @@ class EvolutionGenerator:
         EER_criteria_best=EER_list[n_policy]
 
         return abs(EER_real_best-EER_criteria_best)
-
+    #----------------------------------------------------------------------------------------------
+    # Criterios de seleccion
+    #----------------------------------------------------------------------------------------------
     def truth_best_policy(self,elapsed_time,time_in='seconds'):
         if time_in=='seconds':
             policy_id=self.df_test_estimates[self.df_train['time_seconds']<=elapsed_time]['truth'].idxmax()
@@ -276,7 +280,6 @@ class EvolutionGenerator:
             policy_id=self.df_test_estimates[self.df_train['n_timesteps']<=elapsed_time]['truth'].idxmin()
 
         return policy_id
-
 
     def last_policy(self,elapsed_time,time_in='seconds'):
         '''
@@ -333,14 +336,16 @@ class EvolutionGenerator:
         # Politica seleccionada y tiempo extra total invertido en su seleccion
         return current_val_policies[indx_subseq], sum(times_seq)
     
-
+    #----------------------------------------------------------------------------------------------
+    # Generadores de la evolucion completa de las metricas
+    #----------------------------------------------------------------------------------------------
     def rank_evolution(self,x_times,n_ep=None,freq=None,criteria='last'):
         '''
         Genera lista de coordenadas OY (posiciones en el ranking real) a dibujar dependiendo del criterio seleccionado
         '''
         y_ranks=[]
         x_extras=[]
-        
+        val_time=0
         for time in x_times:
             if criteria=='truth_best':
                 policy_id=self.truth_best_policy(time,time_in='seconds')
@@ -354,7 +359,7 @@ class EvolutionGenerator:
                 policy_id,val_time=self.best_policy_validation(time,n_ep,freq,time_in='seconds')
                 x_extras.append(val_time)
 
-            rank=self.real_ranking_position(time,policy_id)
+            rank=self.real_ranking_position(time+val_time,policy_id)
             y_ranks.append(rank)
 
         if criteria=='best_val':
@@ -362,13 +367,13 @@ class EvolutionGenerator:
         else:
             return y_ranks
 
-    def magnitude_evolution(self,x_times,n_ep=None,freq=None,criteria='last',normalized=False):
+    def magnitude_evolution(self,x_times,n_ep=None,freq=None,criteria='last',normalized=False,for_analyzer=False):
         '''
         Genera lista de coordenadas OY (diferencia en el EER truth con respecto al mejor real) a dibujar dependiendo del criterio seleccionado
         '''
         y_magnitudes=[]
         x_extras=[]
-
+        val_time=0
         for time in x_times:
             if criteria=='truth_best':
                 policy_id=self.truth_best_policy(time,time_in='seconds')
@@ -382,7 +387,9 @@ class EvolutionGenerator:
                 policy_id,val_time=self.best_policy_validation(time,n_ep,freq,time_in='seconds')
                 x_extras.append(val_time)
 
-            magnitude=self.magnitude(time,policy_id,normalized=normalized)
+            if for_analyzer:
+                val_time=0
+            magnitude=self.magnitude(time+val_time,policy_id,normalized=normalized)
             y_magnitudes.append(magnitude)
 
         if criteria=='best_val':
@@ -393,21 +400,25 @@ class EvolutionGenerator:
 
 class EvolutionGrapher:
 
-    def __init__(self,algo,env,seed,
+    def __init__(self,algo,env,seed,resources,
                  list_n_traj_ep,
                  list_n_val_ep, list_n_val_freq,
                  iter_max):
         
         # Primero generar los datos necesarios para las graficas
         for n_ep in tqdm(list_n_traj_ep):
-            Estimator.compute_estimates(algo,env,seed,n_ep,'train')
+            Estimator.compute_estimates(algo,env,seed,resources,n_ep,'train')
         for n_ep in tqdm(list_n_val_ep):
-            Estimator.compute_estimates(algo,env,seed,n_ep,'test')
+            Estimator.compute_estimates(algo,env,seed,resources,n_ep,'test')
 
-        self.generator=EvolutionGenerator(algo,env,seed)
+        # Guardar en una variable las 4 bases de datos
+        self.generator=EvolutionGenerator(algo,env,seed,resources)
+
+        # Guardar el resto de variables
         self.algo=algo
         self.env=env
         self.seed=seed
+        self.resources=resources
         self.list_n_traj_ep=list_n_traj_ep
         self.list_n_val_ep=list_n_val_ep
         self.list_n_val_freq=list_n_val_freq
@@ -425,7 +436,7 @@ class EvolutionGrapher:
         ax=plt.subplot(111)
         ax.grid(True, which='both',linestyle='--', linewidth=0.8,alpha=0.2)        
 
-        x_times=Estimator.time_discretizer(self.algo,self.env,self.seed,1,self.iter_max)
+        x_times=Estimator.time_discretizer(self.algo,self.env,self.seed,self.resources,1,self.iter_max)
 
         # Dibujar la curva ideal
         y_trurh_best=self.generator.rank_evolution(x_times,criteria='truth_best') 
@@ -447,7 +458,7 @@ class EvolutionGrapher:
         # Dibujar las curvas de criterio test
         for n_ep in self.list_n_val_ep:
             for freq in self.list_n_val_freq:
-                x_times_freq=Estimator.time_discretizer(self.algo,self.env,self.seed,freq,self.iter_max)
+                x_times_freq=Estimator.time_discretizer(self.algo,self.env,self.seed,self.resources,freq,self.iter_max)
                 y_best,x_extra=self.generator.rank_evolution(x_times,n_ep=n_ep,freq=x_times_freq,criteria='best_val') 
                 plt.plot([i+j for i,j in zip(x_times,x_extra)], y_best, linewidth=1,label=str(n_ep)+' val. ep. every '+str(freq)+' policies')
 
@@ -456,7 +467,7 @@ class EvolutionGrapher:
         ax.set_xlabel("Total  time")
         ax.set_ylabel("Truth rank of the selected policy")
         plt.legend(title='Criteria',loc="upper center",bbox_to_anchor=(0.5, -0.3),ncol=3)
-        plt.savefig('experiments_intuition/results/CriteriaComparison/rank_evolution_'+self.algo+'_'+self.env+str(self.seed)+'.pdf')
+        plt.savefig('experiments_intuition/results/CriteriaComparison/rank_evolution_'+self.algo+'_'+self.env+str(self.seed)+'_'+self.resources+'.pdf')
         plt.show()
         plt.close()
 
@@ -472,7 +483,7 @@ class EvolutionGrapher:
         ax=plt.subplot(111)
         ax.grid(True, which='both',linestyle='--', linewidth=0.8,alpha=0.2)     
 
-        x_times=Estimator.time_discretizer(self.algo,self.env,self.seed,1,self.iter_max)
+        x_times=Estimator.time_discretizer(self.algo,self.env,self.seed,self.resources,1,self.iter_max)
 
         # Dibujar la curva ideal
         y_trurh_best=self.generator.magnitude_evolution(x_times,criteria='truth_best') 
@@ -494,7 +505,7 @@ class EvolutionGrapher:
         # Dibujar las curvas de criterio test
         for n_ep in self.list_n_val_ep:
             for freq in self.list_n_val_freq:
-                x_times_freq=Estimator.time_discretizer(self.algo,self.env,self.seed,freq,self.iter_max)
+                x_times_freq=Estimator.time_discretizer(self.algo,self.env,self.seed,self.resources,freq,self.iter_max)
                 y_best,x_extra=self.generator.magnitude_evolution(x_times,n_ep=n_ep,freq=x_times_freq,criteria='best_val') 
                 plt.plot([i+j for i,j in zip(x_times,x_extra)], y_best, linewidth=1,label=str(n_ep)+' val. ep. every '+str(freq)+' policies')
 
@@ -503,7 +514,7 @@ class EvolutionGrapher:
         ax.set_xlabel("Total  time")
         ax.set_ylabel("Difference of truth mean rewards between\n the selected policy and real best")
         plt.legend(title='Criteria',loc="upper center",bbox_to_anchor=(0.5, -0.3),ncol=3)
-        plt.savefig('experiments_intuition/results/CriteriaComparison/magnitude_evolution_'+self.algo+'_'+self.env+str(self.seed)+'.pdf')
+        plt.savefig('experiments_intuition/results/CriteriaComparison/magnitude_evolution_'+self.algo+'_'+self.env+str(self.seed)+'_'+self.resources+'.pdf')
         plt.show()
         plt.close()
 
@@ -519,7 +530,7 @@ class EvolutionGrapher:
 
         rows=3+len(self.list_n_traj_ep)+len(self.list_n_val_ep)*len(self.list_n_val_freq)
         colors=list(mcolors.TABLEAU_COLORS.keys())
-        x_times=Estimator.time_discretizer(self.algo,self.env,self.seed,1,self.iter_max)
+        x_times=Estimator.time_discretizer(self.algo,self.env,self.seed,self.resources,1,self.iter_max)
 
         ax=plt.subplot(rows,1,1)
         y_trurh_best=self.generator.magnitude_evolution(x_times,criteria='truth_best',normalized=True) 
@@ -557,7 +568,7 @@ class EvolutionGrapher:
         for n_ep in self.list_n_val_ep:
             for freq in self.list_n_val_freq:
                 ax=plt.subplot(rows,1,i)
-                x_times_freq=Estimator.time_discretizer(self.algo,self.env,self.seed,freq,self.iter_max)
+                x_times_freq=Estimator.time_discretizer(self.algo,self.env,self.seed,self.resources,freq,self.iter_max)
                 y_best,x_extra=self.generator.magnitude_evolution(x_times,n_ep=n_ep,freq=x_times_freq,criteria='best_val',normalized=True) 
                 plt.plot([i+j for i,j in zip(x_times,x_extra)], y_best, linewidth=1,label=str(n_ep)+' val. ep. every '+str(freq)+' policies',color=colors[i-1])
                 plt.fill_between([i+j for i,j in zip(x_times,x_extra)],y_best,[0]*len(x_times),alpha=0.5,color=colors[i-1])
@@ -570,7 +581,7 @@ class EvolutionGrapher:
         ax.set_xlabel("Total  time")
         #ax.set_ylabel("Normaliced magnitude")
         #plt.legend(title='Criteria',loc="upper center",bbox_to_anchor=(0.5, -0.3),ncol=3)
-        plt.savefig('experiments_intuition/results/CriteriaComparison/magnitude_area_'+self.algo+'_'+self.env+str(self.seed)+'.pdf')
+        plt.savefig('experiments_intuition/results/CriteriaComparison/magnitude_area_'+self.algo+'_'+self.env+str(self.seed)+'_'+self.resources+'.pdf')
         plt.show()
         plt.close()
 
@@ -587,7 +598,7 @@ class EvolutionGrapher:
         # Dibujar curva sin test durante el proceso (ultima politica observada)
         y=[]
         x_policy=[]
-        x_times=Estimator.time_discretizer(self.algo,self.env,self.seed,1,self.iter_max)
+        x_times=Estimator.time_discretizer(self.algo,self.env,self.seed,self.resources,1,self.iter_max)
 
         for time in x_times:
                 last_policy=self.generator.df_train[self.generator.df_train['time_seconds']<=time]['n_policy'].max()+1
@@ -598,21 +609,285 @@ class EvolutionGrapher:
         plt.title('Learning-curve')
         ax.set_xlabel("Total iterations")
         ax.set_ylabel("Truth expected episodic reward\nof the last policy")
-        plt.savefig('experiments_intuition/results/CriteriaComparison/learning_curve_'+self.algo+'_'+self.env+str(self.seed)+'.pdf')
+        plt.savefig('experiments_intuition/results/CriteriaComparison/learning_curve_'+self.algo+'_'+self.env+str(self.seed)+'_'+self.resources+'.pdf')
         plt.show()
         plt.close()
+
+class EstimationAnalyzer():    
+
+    def __init__(self,algo,env,seed,resources,
+                 list_n_traj_ep,
+                 list_n_val_ep, list_n_val_freq,
+                 iter_max):
+        
+        # Primero generar los datos necesarios para las graficas
+        for n_ep in tqdm(list_n_traj_ep):
+            Estimator.compute_estimates(algo,env,seed,resources,n_ep,'train')
+        for n_ep in tqdm(list_n_val_ep):
+            Estimator.compute_estimates(algo,env,seed,resources,n_ep,'test')
+
+        # Guardar en una variable las 4 bases de datos
+        self.generator=EvolutionGenerator(algo,env,seed,resources)
+
+        # Guardar el resto de variables
+        self.algo=algo
+        self.env=env
+        self.seed=seed
+        self.resources=resources
+        self.list_n_traj_ep=list_n_traj_ep
+        self.list_n_val_ep=list_n_val_ep
+        self.list_n_val_freq=list_n_val_freq
+        self.iter_max=iter_max 
+
+
+    def matrix_for_cost_analysis(self):
+
+        matrix=[]
+
+        # Lista de numero de inicializaciones de episodio por iteracion
+        num_ep_init_per_iter=[np.sum(Converter.compress_decompress_list(i,compress=False)) for i in self.generator.df_train['traj_ep_end'][:self.iter_max]]
+        matrix.append(Converter.normalize_list(num_ep_init_per_iter))
+
+        # Lista de tiempos de interaccion por iteracion
+        matrix.append([self.generator.df_train['time_seconds'][0]]+[self.generator.df_train['time_seconds'][i+1]-self.generator.df_train['time_seconds'][i] for i in range(self.iter_max-1)])
+
+        # Listas de tiempos de validacion con n_ep fijo por iteracion
+        for n_ep in self.list_n_val_ep:
+            matrix.append([Converter.compress_decompress_list(i,compress=False)[1] for i in self.generator.df_test_estimates[str(n_ep)+'_val_ep'][:self.iter_max]])
+
+        # Porcentage de filas de validacion con respecto fila de interaccion
+        for i in range(2,len(self.list_n_val_ep)+2):
+            matrix[i]=np.array(matrix[i])/np.array(matrix[1])
+
+        # Normalizar tiempos de interaccion
+        matrix[1]=Converter.normalize_list(matrix[1])
+
+        # Listas para las identificar el tipo de politica (buena/mala, estocastica/determinista, duradera/bolatil)
+        goodness=Converter.normalize_list(self.generator.df_test_estimates['truth'][:self.iter_max])
+        variability= Converter.normalize_list([np.var(Converter.compress_decompress_list(i,compress=False)[:250]) for i in self.generator.df_test['ep_rewards'][:self.iter_max]])
+        durability=Converter.normalize_list([np.mean(Converter.compress_decompress_list(i,compress=False)[:250]) for i in self.generator.df_test['ep_lens'][:self.iter_max]])
+        matrix=np.vstack((np.array([goodness,variability,durability]),np.array(matrix)))
+
+        return matrix
+    
+    def matrix_for_accuracy_analysis(self,freq=None,train_or_test='train'):
+        matrix=[]
+
+        # Lista de varianzas de los truth en la secuencia catual
+        vars=[]
+        for i in range(1,self.iter_max+1):
+            vars.append(np.var(sorted(self.generator.df_test_estimates['truth'][:i],reverse=True)[:i]))
+        matrix.append(Converter.normalize_list(vars))
+
+        # Listas de normalized magnitude para cada posible n_ep
+        if train_or_test=='train':
+            list_n_ep=self.list_n_traj_ep
+            criteria='best_train'
+        if train_or_test=='test':
+            criteria='best_val'
+            list_n_ep=self.list_n_val_ep
+            freq=Estimator.time_discretizer(self.algo,self.env,self.seed,self.resources,freq,self.iter_max)
+
+        for n_ep in list_n_ep:
+            if train_or_test=='train':
+                magnitude=self.generator.magnitude_evolution(self.generator.df_train['time_seconds'][:self.iter_max],n_ep,freq,criteria,normalized=True,for_analyzer=True)
+            if train_or_test=='test':
+                magnitude,extra_time=self.generator.magnitude_evolution(self.generator.df_train['time_seconds'][:self.iter_max],n_ep,freq,criteria,normalized=True,for_analyzer=True)
+            matrix.append(magnitude)
+
+        return np.array(matrix)
+    
+    def generate_colormap(self,value, cmap_name, vmin, vmax):
+        """Asigna un color segun el valor y el mapa de colores indicado"""
+        norm = mcolors.Normalize(vmin=vmin, vmax=vmax)
+        cmap = plt.get_cmap(cmap_name)
+        return cmap(norm(value))
+
+    def colored_matrix_for_cost_analysis(self,matrix,cost_perc_threshold=0.25):
+        """Crea una imagen coloreada basada en la matriz para el analisis de los costes de estimacion"""
+        rows, cols = matrix.shape
+        colored_matrix = np.zeros((rows, cols, 3))  # Matriz para colores RGB
+        
+        # Filas iniciales (escala azul): goodness, variability y durability de la politica
+        for i in range(3):
+            for j in range(cols):
+                blue_value = matrix[i, j]  # Valor entre 0 y 1
+                colored_matrix[i, j] = self.generate_colormap(blue_value, 'Blues', 0, 1)[:3]  # Usar azul para estas filas
+        
+        # Fila 4,5 (escala de grises): tiempo por iteracion train
+        for i in range(3,5):
+            for j in range(cols):
+                gray_value = 1 - matrix[i, j]  # Invertir el valor para la escala de grises
+                colored_matrix[i, j] = [gray_value, gray_value, gray_value]
+        
+        # Filas restantes (escala verde y roja): porcentages de tiempo de validacion frente al tiempo por iteracion train
+        for i in range(5, rows):
+            for j in range(cols):
+                value = matrix[i, j]
+                if value <= cost_perc_threshold:
+                    # Usar la escala verde invertida (ahora 0 es más oscuro y 1 es más claro)
+                    colored_matrix[i, j] = self.generate_colormap(cost_perc_threshold - value, 'Greens', 0, cost_perc_threshold)[:3]
+                else:
+                    colored_matrix[i, j] = self.generate_colormap(value, 'Reds', cost_perc_threshold, np.max(matrix[i]))[:3]
+        
+        return colored_matrix
+    
+    def colored_matrix_for_accuracy_analysis(self,matrix):
+        rows, cols = matrix.shape
+        colored_matrix = np.zeros((rows, cols, 3))  # Matriz para colores RGB
+        
+        # Fila inicial (escala azul): varianza del truth entre el mejor 25% de las politicas de la secunecia
+        for j in range(cols):
+            blue_value = matrix[0, j]  # Valor entre 0 y 1
+            colored_matrix[0, j] = self.generate_colormap(blue_value, 'Blues_r', 0, 1)[:3]  # Usar azul para estas filas
+        
+        # Resto de filas (escala de grises): magnitud normalizada
+        for i in range(1,rows):
+            for j in range(cols):
+                gray_value = 1 - matrix[i, j]  # Invertir el valor para la escala de grises
+                colored_matrix[i, j] = [gray_value, gray_value, gray_value]
+        
+        return colored_matrix
+    
+    def graph_cost_analysis(self):
+        # Genara la matriz numerica a partir de los datos
+        matrix=self.matrix_for_cost_analysis()
+
+        # Generar matriz de colores
+        colored_matrix = self.colored_matrix_for_cost_analysis(matrix)
+
+        fig, ax = plt.subplots(figsize=(20, 6))
+        plt.subplots_adjust(left=0.09, bottom=0.2, right=0.81, top=0.82, wspace=0.39, hspace=0.2)
+        im = ax.imshow(colored_matrix, aspect='auto')
+
+        # Crear barra de color para la escala de azules
+        cbar_ax0 = fig.add_axes([0.82, 0.15, 0.015, 0.7])
+        sm0 = plt.cm.ScalarMappable(cmap='Blues', norm=mcolors.Normalize(vmin=0, vmax=1))  # Usar 'Blues' para las filas azules
+        sm0.set_array([])
+        cbar0 = plt.colorbar(sm0, cax=cbar_ax0)
+        cbar0.set_label('Policy characteristic level',fontsize=12)  # Título de la barra de color
+        cbar0.ax.yaxis.set_tick_params(rotation=90)
+        
+        # Crear barra de color para la escala de grises invertida
+        cbar_ax0 = fig.add_axes([0.87, 0.15, 0.015, 0.7])
+        sm0 = plt.cm.ScalarMappable(cmap='gray_r', norm=mcolors.Normalize(vmin=0, vmax=1))
+        sm0.set_array([])
+        cbar0 = plt.colorbar(sm0, cax=cbar_ax0)
+        cbar0.set_label('Normalized train data',fontsize=12)
+        cbar0.ax.yaxis.set_tick_params(rotation=90)
+        
+        # Crear barra de color para la escala verde invertida
+        cbar_ax1 = fig.add_axes([0.92, 0.15, 0.015, 0.7])
+        sm1 = plt.cm.ScalarMappable(cmap='Greens_r', norm=mcolors.Normalize(vmin=0, vmax=0.25))  # Usar 'Greens_r' para verde invertido
+        sm1.set_array([])
+        cbar1 = plt.colorbar(sm1, cax=cbar_ax1)
+        cbar1.ax.yaxis.set_tick_params(rotation=90)
+        
+        # Crear barra de color para la escala roja
+        cbar_ax2 = fig.add_axes([0.95, 0.15, 0.015, 0.7])
+        sm2 = plt.cm.ScalarMappable(cmap='Reds', norm=mcolors.Normalize(vmin=0.25, vmax=np.max(matrix)))
+        sm2.set_array([])
+        cbar2 = plt.colorbar(sm2, cax=cbar_ax2)
+        cbar2.set_label('Percentage of iteration time',fontsize=12)
+        cbar2.ax.yaxis.set_tick_params(rotation=90)
+        
+        # Etiquetas para los ejes
+        row_labels = ['Goodness', 'Variability', 'Durability','Train iter. ep. initis','Train iter. time']+[str(i)+' val. ep.' for i in self.list_n_val_ep]
+        ax.set_yticks(np.arange(matrix.shape[0]))  # Establece las posiciones de las filas
+        ax.set_yticklabels(row_labels,fontsize=12)  # Establece las etiquetas de las filas
+        ax.set_xlabel("Policy in sequence", fontsize=14)
         
 
+        plt.savefig('experiments_intuition/results/CriteriaComparison/estimation_cost_analysis_'+self.algo+'_'+self.env+str(self.seed)+'_'+self.resources+'.pdf')
+        plt.show()
+        plt.close()
+
+    def graph_accuracy_analysis(self,train_or_test='train'):
+
+        # Genara la matriz numerica a partir de los datos
+        if train_or_test=='train':
+            freq=None
+        if train_or_test=='test':
+            freq=1
+        matrix=self.matrix_for_accuracy_analysis(freq,train_or_test)
+
+        # Generar matriz de colores
+        colored_matrix = self.colored_matrix_for_accuracy_analysis(matrix)
+
+        fig, ax = plt.subplots(figsize=(20, 6))
+        plt.subplots_adjust(left=0.076, bottom=0.2, right=0.81, top=0.82, wspace=0.39, hspace=0.2)
+        im = ax.imshow(colored_matrix, aspect='auto')
+
+        # Crear barra de color para la escala de azules
+        cbar_ax0 = fig.add_axes([0.82, 0.15, 0.015, 0.7])
+        sm0 = plt.cm.ScalarMappable(cmap='Blues_r', norm=mcolors.Normalize(vmin=0, vmax=1))  # Usar 'Blues' para las filas azules
+        sm0.set_array([])
+        cbar0 = plt.colorbar(sm0, cax=cbar_ax0)
+        cbar0.set_label('Normalized episodic reward variance',fontsize=12)  # Título de la barra de color
+        cbar0.ax.yaxis.set_tick_params(rotation=90)
         
-grapher=EvolutionGrapher('PPO','Ant',1,[100,50],[100,50],[10,100],306)
+        # Crear barra de color para la escala de grises invertida
+        cbar_ax0 = fig.add_axes([0.87, 0.15, 0.015, 0.7])
+        sm0 = plt.cm.ScalarMappable(cmap='gray_r', norm=mcolors.Normalize(vmin=0, vmax=1))
+        sm0.set_array([])
+        cbar0 = plt.colorbar(sm0, cax=cbar_ax0)
+        cbar0.set_label('Normalized magnitude',fontsize=12)
+        cbar0.ax.yaxis.set_tick_params(rotation=90)
+        
+        # Etiquetas para los ejes
+        if train_or_test=='train':
+            row_labels = ['Difficulty']+[str(i)+' traj. ep.' for i in self.list_n_traj_ep]
+        if train_or_test=='test':
+            row_labels = ['Difficulty']+[str(i)+' val. ep.' for i in self.list_n_val_ep]
+        ax.set_yticks(np.arange(matrix.shape[0]))  # Establece las posiciones de las filas
+        ax.set_yticklabels(row_labels,fontsize=12)  # Establece las etiquetas de las filas
+        ax.set_xlabel("Policy in sequence", fontsize=14)
+        
+        plt.savefig('experiments_intuition/results/CriteriaComparison/estimation_accuracy_analysis_'+train_or_test+'_'+self.algo+'_'+self.env+str(self.seed)+'_'+self.resources+'.pdf')
+        plt.show()
+        plt.close()
+
+
+
+        
+grapher=EvolutionGrapher('PPO','Ant',1,'16cpu1gpu',[100,50],[100,50],[10,100],306)
+analyzer=EstimationAnalyzer('PPO','Ant',1,'16cpu1gpu',[5,25,50,100,250],[5,25,50,100,250],[1,50,100],306)
 grapher.learning_curve()
-# grapher.graph_rank_evolution()
-# grapher.graph_magnitude_evolution()
-# grapher.graph_magnitude_area()
-grapher=EvolutionGrapher('PPO','Ant',3,[100,50],[100,50],[10,100],306)
+grapher.graph_rank_evolution()
+grapher.graph_magnitude_evolution()
+grapher.graph_magnitude_area()
+analyzer.graph_cost_analysis()
+analyzer.graph_accuracy_analysis('test')
+analyzer.graph_accuracy_analysis('train')
+
+grapher=EvolutionGrapher('PPO','Ant',3,'16cpu1gpu',[100,50],[100,50],[10,100],306)
+analyzer=EstimationAnalyzer('PPO','Ant',3,'16cpu1gpu',[5,25,50,100,250],[5,25,50,100,250],[1,50,100],306)
 grapher.learning_curve()
-# grapher.graph_rank_evolution()
-# grapher.graph_magnitude_evolution()
-# grapher.graph_magnitude_area()
+grapher.graph_rank_evolution()
+grapher.graph_magnitude_evolution()
+grapher.graph_magnitude_area()
+analyzer.graph_cost_analysis()
+analyzer.graph_accuracy_analysis('test')
+analyzer.graph_accuracy_analysis('train')
+
+grapher=EvolutionGrapher('PPO','Humanoid',1,'16cpu',[100,50],[100,50],[10,100],306)
+analyzer=EstimationAnalyzer('PPO','Humanoid',1,'16cpu',[5,25,50,100,250],[5,25,50,100,250],[1,50,100],306)
+grapher.learning_curve()
+grapher.graph_rank_evolution()
+grapher.graph_magnitude_evolution()
+grapher.graph_magnitude_area()
+analyzer.graph_cost_analysis()
+analyzer.graph_accuracy_analysis('test')
+analyzer.graph_accuracy_analysis('train')
+
+grapher=EvolutionGrapher('PPO','Humanoid',2,'16cpu',[100,50],[100,50],[10,100],306)
+analyzer=EstimationAnalyzer('PPO','Humanoid',2,'16cpu',[5,25,50,100,250],[5,25,50,100,250],[1,50,100],306)
+grapher.learning_curve()
+grapher.graph_rank_evolution()
+grapher.graph_magnitude_evolution()
+grapher.graph_magnitude_area()
+analyzer.graph_cost_analysis()
+analyzer.graph_accuracy_analysis('test')
+analyzer.graph_accuracy_analysis('train')
 
 
