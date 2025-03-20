@@ -46,12 +46,13 @@ import numpy as np
 import os
 import time
 import csv
+from torch.nn import functional as F
 
 
 from stable_baselines3.ppo import MlpPolicy, PPO
 from stable_baselines3.common.on_policy_algorithm import OnPolicyAlgorithm
 from stable_baselines3.common.env_util import make_vec_env
-from stable_baselines3.common.utils import obs_as_tensor
+from stable_baselines3.common.utils import obs_as_tensor, explained_variance
 from stable_baselines3.common.buffers import RolloutBuffer
 from stable_baselines3.common.callbacks import BaseCallback
 from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv,VecEnv, sync_envs_normalization, VecMonitor, is_vecenv_wrapped
@@ -106,6 +107,7 @@ def compress_decompress_list(my_list,compress=True):
         return my_list
 
 class ModifiedFunctions:
+    # Funcion principal de aprendizaje: se modifica para inicializar bases de datos que almacenaran los datos para la simulacion y guardar las politicas.
     def learn(
         self: SelfOnPolicyAlgorithm,
         total_timesteps: int,
@@ -127,7 +129,8 @@ class ModifiedFunctions:
         self.save(process_dir+'/policy'+str(n_policy)+'.zip')
 
         # Crear bases de datos donde ire escribiendo los datos por iteracion
-        df_traj_csv=pd.DataFrame(columns=['n_policy','n_timesteps','time_seconds','traj_rewards','traj_ep_end','traj_inits'])
+        df_traj_csv=pd.DataFrame(columns=['n_policy','n_timesteps','time_seconds','traj_rewards','traj_ep_end','traj_inits',
+                                          'traj_advantages','traj_values','traj_returns','policy_loss'])
         df_traj_csv.to_csv(join(process_dir, "df_traj.csv"), index=False)
         df_val_csv=pd.DataFrame(columns=['n_policy','ep_inits','ep_rewards','ep_lens','n_val_ep','elapsed_val_time'])
         df_val_csv.to_csv(join(process_dir, "df_val.csv"), index=False)
@@ -166,6 +169,7 @@ class ModifiedFunctions:
 
             ###############################MODIFICACION
             total_time_seconds.pause()
+            
             # Guardar politicas
             self.save(process_dir+'/policy'+str(n_policy)+'.zip')
             n_policy+=1
@@ -176,6 +180,7 @@ class ModifiedFunctions:
 
         return self
     
+    # Funcion para la interaccion de train: se modifica para guardar los datos de interaccion
     def collect_rollouts(
         self,
         env: VecEnv,
@@ -298,20 +303,21 @@ class ModifiedFunctions:
             self._last_obs = new_obs  # type: ignore[assignment]
             self._last_episode_starts = dones
 
-        #########################MODIFICACION
-        total_time_seconds.pause()
-        with open(join(process_dir, "df_traj.csv"), 'a',newline='') as df_traj_csv:
-            writer = csv.writer(df_traj_csv)
-            writer.writerow([n_policy,self.num_timesteps,total_time_seconds.get_time(),compress_decompress_list(policy_traj_rewards),compress_decompress_list(policy_traj_ep_end),compress_decompress_list(policy_traj_ep_inits)])
-
-        total_time_seconds.resume()
-        ##########################
-
         with th.no_grad():
             # Compute value for the last timestep
             values = self.policy.predict_values(obs_as_tensor(new_obs, self.device))  # type: ignore[arg-type]
 
         rollout_buffer.compute_returns_and_advantage(last_values=values, dones=dones)
+
+        #########################MODIFICACION
+        total_time_seconds.pause()
+        with open(join(process_dir, "df_traj.csv"), 'a',newline='') as df_traj_csv:
+            writer = csv.writer(df_traj_csv)
+            writer.writerow([n_policy,self.num_timesteps,total_time_seconds.get_time(),compress_decompress_list(policy_traj_rewards),compress_decompress_list(policy_traj_ep_end),compress_decompress_list(policy_traj_ep_inits),
+                             compress_decompress_list(rollout_buffer.advantages.tolist()),compress_decompress_list(rollout_buffer.values.tolist()),compress_decompress_list(rollout_buffer.returns.tolist()),None])
+
+        total_time_seconds.resume()
+        ##########################
 
         callback.update_locals(locals())
 
@@ -319,6 +325,138 @@ class ModifiedFunctions:
 
         return True
     
+    # Funcion para la actualizacion de politica: se modifica para guardar los losses de las politicas usados para su actualizacion
+    def train(self) -> None:
+        """
+        Update policy using the currently gathered rollout buffer.
+        """
+        # Switch to train mode (this affects batch norm / dropout)
+        self.policy.set_training_mode(True)
+        # Update optimizer learning rate
+        self._update_learning_rate(self.policy.optimizer)
+        # Compute current clip range
+        clip_range = self.clip_range(self._current_progress_remaining)  # type: ignore[operator]
+        # Optional: clip range for the value function
+        if self.clip_range_vf is not None:
+            clip_range_vf = self.clip_range_vf(self._current_progress_remaining)  # type: ignore[operator]
+
+        entropy_losses = []
+        pg_losses, value_losses = [], []
+        clip_fractions = []
+
+        continue_training = True
+        # train for n_epochs epochs
+        for epoch in range(self.n_epochs):
+            approx_kl_divs = []
+            # Do a complete pass on the rollout buffer
+            for rollout_data in self.rollout_buffer.get(self.batch_size):
+                actions = rollout_data.actions
+                if isinstance(self.action_space, spaces.Discrete):
+                    # Convert discrete action from float to long
+                    actions = rollout_data.actions.long().flatten()
+
+                values, log_prob, entropy = self.policy.evaluate_actions(rollout_data.observations, actions)
+                values = values.flatten()
+                # Normalize advantage
+                advantages = rollout_data.advantages
+                # Normalization does not make sense if mini batchsize == 1, see GH issue #325
+                if self.normalize_advantage and len(advantages) > 1:
+                    advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
+
+                # ratio between old and new policy, should be one at the first iteration
+                ratio = th.exp(log_prob - rollout_data.old_log_prob)
+
+                # clipped surrogate loss
+                policy_loss_1 = advantages * ratio
+                policy_loss_2 = advantages * th.clamp(ratio, 1 - clip_range, 1 + clip_range)
+                policy_loss = -th.min(policy_loss_1, policy_loss_2).mean()
+
+                # Logging
+                pg_losses.append(policy_loss.item())
+                clip_fraction = th.mean((th.abs(ratio - 1) > clip_range).float()).item()
+                clip_fractions.append(clip_fraction)
+
+                if self.clip_range_vf is None:
+                    # No clipping
+                    values_pred = values
+                else:
+                    # Clip the difference between old and new value
+                    # NOTE: this depends on the reward scaling
+                    values_pred = rollout_data.old_values + th.clamp(
+                        values - rollout_data.old_values, -clip_range_vf, clip_range_vf
+                    )
+                # Value loss using the TD(gae_lambda) target
+                value_loss = F.mse_loss(rollout_data.returns, values_pred)
+                value_losses.append(value_loss.item())
+
+                # Entropy loss favor exploration
+                if entropy is None:
+                    # Approximate entropy when no analytical form
+                    entropy_loss = -th.mean(-log_prob)
+                else:
+                    entropy_loss = -th.mean(entropy)
+
+                entropy_losses.append(entropy_loss.item())
+
+                loss = policy_loss + self.ent_coef * entropy_loss + self.vf_coef * value_loss
+
+                # Calculate approximate form of reverse KL Divergence for early stopping
+                # see issue #417: https://github.com/DLR-RM/stable-baselines3/issues/417
+                # and discussion in PR #419: https://github.com/DLR-RM/stable-baselines3/pull/419
+                # and Schulman blog: http://joschu.net/blog/kl-approx.html
+                with th.no_grad():
+                    log_ratio = log_prob - rollout_data.old_log_prob
+                    approx_kl_div = th.mean((th.exp(log_ratio) - 1) - log_ratio).cpu().numpy()
+                    approx_kl_divs.append(approx_kl_div)
+
+                if self.target_kl is not None and approx_kl_div > 1.5 * self.target_kl:
+                    continue_training = False
+                    if self.verbose >= 1:
+                        print(f"Early stopping at step {epoch} due to reaching max kl: {approx_kl_div:.2f}")
+                    break
+
+                # Optimization step
+                self.policy.optimizer.zero_grad()
+                loss.backward()
+                # Clip grad norm
+                th.nn.utils.clip_grad_norm_(self.policy.parameters(), self.max_grad_norm)
+                self.policy.optimizer.step()
+
+            self._n_updates += 1
+            if not continue_training:
+                break
+
+        explained_var = explained_variance(self.rollout_buffer.values.flatten(), self.rollout_buffer.returns.flatten())
+
+        # Logs
+        self.logger.record("train/entropy_loss", np.mean(entropy_losses))
+        self.logger.record("train/policy_gradient_loss", np.mean(pg_losses))
+        self.logger.record("train/value_loss", np.mean(value_losses))
+        self.logger.record("train/approx_kl", np.mean(approx_kl_divs))
+        self.logger.record("train/clip_fraction", np.mean(clip_fractions))
+        self.logger.record("train/loss", loss.item())
+        self.logger.record("train/explained_variance", explained_var)
+        if hasattr(self.policy, "log_std"):
+            self.logger.record("train/std", th.exp(self.policy.log_std).mean().item())
+
+        self.logger.record("train/n_updates", self._n_updates, exclude="tensorboard")
+        self.logger.record("train/clip_range", clip_range)
+        if self.clip_range_vf is not None:
+            self.logger.record("train/clip_range_vf", clip_range_vf)
+
+        ####################################MODIFICACION
+        # Terminar de completar datos de iteracion train guardando el loss usado para actualizar la politica
+        # (este valor ocupa el ultimo lugar en la ultima fila guardada en la base de datos)
+        global total_time_seconds
+        total_time_seconds.pause()
+        df_traj_csv = pd.read_csv(join(process_dir, "df_traj.csv"))
+        df_traj_csv.iloc[-1, -1] = loss.item()
+        df_traj_csv.to_csv(join(process_dir, "df_traj.csv"), index=False)
+        total_time_seconds.resume()
+
+        #############################################################
+    
+    # Funcion que define la interaccion de validacion: se modifica para guardar los datos de validacion
     def _on_step(self) -> bool:
 
         #####################################
@@ -606,6 +744,7 @@ class Options:
         # Modificar funciones de librerias existentes
         OnPolicyAlgorithm.learn=ModifiedFunctions.learn
         OnPolicyAlgorithm.collect_rollouts=ModifiedFunctions.collect_rollouts
+        PPO.train=ModifiedFunctions.train
 
         if callback==True:
             EvalCallback._on_step= ModifiedFunctions._on_step
@@ -731,22 +870,43 @@ library_dir='_bender/project_SB3/outputs'
 #                         device='cpu',
 #                         callback=True,n_eval_ep=2,eval_freq=2048,n_eval_envs=2,deterministic_eval=True)
 
-# Comprobar que los estados iniciales de validacion son los mismos
-df_val=pd.read_csv('_bender/project_SB3/outputs/execution1/process_info/df_val.csv')
-print([np.array(compress_decompress_list(i,compress=False)) for i in np.array(compress_decompress_list(df_val['ep_inits'][0],compress=False))])
-print([np.array(compress_decompress_list(i,compress=False)) for i in np.array(compress_decompress_list(df_val['ep_inits'][1],compress=False))])
+# if __name__ == "__main__": # Cuando vec_env_type='parallel' hay que ejecutarlo con esta linea porque habra ejecucion en paralelo
+#     Options.learn_process(method,env,seed,total_timesteps,'execution5',library_dir,
+#                         n_workers=2,vec_env_type='parallel',
+#                         device='cpu',
+#                         callback=True,n_eval_ep=2,eval_freq=2048,n_eval_envs=2,deterministic_eval=True)
+
+# # Comprobar que los estados iniciales de validacion son los mismos
+# df_val=pd.read_csv('_bender/project_SB3/outputs/execution1/process_info/df_val.csv')
+# print([np.array(compress_decompress_list(i,compress=False)) for i in np.array(compress_decompress_list(df_val['ep_inits'][0],compress=False))])
+# print([np.array(compress_decompress_list(i,compress=False)) for i in np.array(compress_decompress_list(df_val['ep_inits'][1],compress=False))])
+
 
 # Dimensiones de trajectorias 
-df_val=pd.read_csv('_bender/project_SB3/outputs/execution3/process_info/df_traj.csv')
+# df_val=pd.read_csv('_bender/project_SB3/outputs/execution3/process_info/df_traj.csv')
+# print(np.array(compress_decompress_list(df_val['traj_rewards'][0],compress=False)).shape)
+# print(np.array(compress_decompress_list(df_val['traj_ep_end'][0],compress=False)).shape)
+
+# print([np.count_nonzero(np.array(i)) for i in compress_decompress_list(df_val['traj_ep_end'][0],compress=False)])
+# print([len(i) for i in compress_decompress_list(df_val['traj_inits'][0],compress=False)])
+
+# # Comprobar que para env train (secuencial) y test (paralelo/vectorial) diferentes se guardan bien todos los datos
+# df_val=pd.read_csv('_bender/project_SB3/outputs/execution4/process_info/df_val.csv')
+
+# print(np.array(compress_decompress_list(df_val['ep_rewards'][1],compress=False)))
+# print(np.array(compress_decompress_list(df_val['n_val_ep'][1],compress=False)))
+# print(np.array(compress_decompress_list(df_val['elapsed_val_time'][1],compress=False)))
+
+# Comprobar que se guardan bien los datos relacionados con la actualizacion de politica
+df_val=pd.read_csv('_bender/project_SB3/outputs/execution5/process_info/df_traj.csv')
 print(np.array(compress_decompress_list(df_val['traj_rewards'][0],compress=False)).shape)
-print(np.array(compress_decompress_list(df_val['traj_ep_end'][0],compress=False)).shape)
+print(np.array(compress_decompress_list(df_val['traj_advantages'][0],compress=False)).shape)
+print(np.array(compress_decompress_list(df_val['traj_advantages'][0],compress=False)))
+print(np.array(compress_decompress_list(df_val['traj_values'][0],compress=False)).shape)
+print(np.array(compress_decompress_list(df_val['traj_values'][0],compress=False)))
+print(np.array(compress_decompress_list(df_val['traj_returns'][0],compress=False)).shape)
+print(np.array(compress_decompress_list(df_val['traj_returns'][0],compress=False)))
+print(df_val['policy_loss'])
 
-print([np.count_nonzero(np.array(i)) for i in compress_decompress_list(df_val['traj_ep_end'][0],compress=False)])
-print([len(i) for i in compress_decompress_list(df_val['traj_inits'][0],compress=False)])
 
-# Comprobar que para env train (secuencial) y test (paralelo/vectorial) diferentes se guardan bien todos los datos
-df_val=pd.read_csv('_bender/project_SB3/outputs/execution4/process_info/df_val.csv')
 
-print(np.array(compress_decompress_list(df_val['ep_rewards'][1],compress=False)))
-print(np.array(compress_decompress_list(df_val['n_val_ep'][1],compress=False)))
-print(np.array(compress_decompress_list(df_val['elapsed_val_time'][1],compress=False)))
