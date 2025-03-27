@@ -1,0 +1,10 @@
+process_id,train_n_ep,test_n_ep,test_freq
+PPO_Ant_seed1,100,5,1
+PPO_Ant_seed2,50,5,1
+PPO_Ant_seed3,250,5,1
+PPO_Ant_seed4,250,5,5
+PPO_Humanoid_seed1,100,50,1
+PPO_Humanoid_seed2,25,100,1
+PPO_Humanoid_seed3,50,25,1
+PPO_Humanoid_seed4,25,250,1
+PPO_HumanoidStandup_seed1,500,5,1
