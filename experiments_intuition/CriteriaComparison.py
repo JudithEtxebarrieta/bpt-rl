@@ -38,6 +38,7 @@ NOTE: aunque SB3 no este pensado para aprovechar los GPU, he observado que asign
 import os, sys
 import pandas as pd
 import matplotlib.pyplot as plt
+import matplotlib.gridspec as gridspec
 import json
 import bz2
 import base64
@@ -55,8 +56,36 @@ from sklearn.neighbors import KernelDensity
 
 parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-class Estimator:
 
+
+class Estimator:
+    '''
+    Las funciones de esta clase permiten hacer estimaciones asociadas a cada iteracion de un proceso a partir de los datos train o test
+    almacenados durante la ejecucion de un proceso definido por (algoritmo RL-environmnet-seed-tiempo maximo). Esas estimaciones pueden ser:
+    1) Estimaciones de expected episodic reward
+    2) Estimaciones de degradacion
+    '''
+    # TODO: esta funcion igual encaja mas en Converter
+    def time_discretizer(algo,env,seed,resources,iter_freq,iter_max,min_time):
+        '''
+        Devuelve una discretizacion del vector de tiempos de entrenamiento en segundos (eje OX). 
+        Util cuando queremos medir el tiempo en segundos y no en steps.
+        '''
+
+        # Leer bases de datos train del proceso de interes
+        current_path=parent_dir+'/_bender/project_SB3/data/'+algo+'_'+env+'_seed'+str(seed)+'_'+resources
+        df_train=pd.read_csv(current_path+'/df_traj.csv')
+
+        # Tiempo medio por iteracion
+        time_between_iter=[df_train['time_seconds'][i+1]-df_train['time_seconds'][i] for i in range(df_train.shape[0]-1)]
+        iter_mean_time=int(np.mean(time_between_iter))
+
+        # Vector de tiempos discretizado con la frecuencia indicada y el valor maximo como limite
+        return list(np.arange(min_time,df_train.loc[iter_max-1,'time_seconds'],iter_mean_time*iter_freq))
+
+    #----------------------------------------------------------------------------------------------
+    # Para estimaciones de expected episodic reward
+    #----------------------------------------------------------------------------------------------
     def estimate_from_traj(train_rewards_workers,train_ep_ends_workers,n_timesteps_per_iter,n_traj_ep):
 
         '''
@@ -112,7 +141,88 @@ class Estimator:
                 ep_rw_policy.append(np.mean(ep_rw_sorted[-n_traj_ep:]))
 
         return ep_rw_policy
-    
+
+    #----------------------------------------------------------------------------------------------
+    # Para estimaciones de degradacion
+    #----------------------------------------------------------------------------------------------
+    def estimate_any_degradation(A,B,degradation_metric,also_dominance=False):
+        '''
+        `degradation_metric`: 'Cp' o 'paired_diff'
+        
+        'Cp'
+        Transformacion de la estimacion de la probabilidad de que las variables aleatorias de las que provienen las muestras A y B cumplan: X_A < X_B 
+        https://www.tandfonline.com/doi/full/10.1080/10618600.2022.2084405
+
+        Transformacion de dominancia C_p para definir nuestra degradacion por actualizacion (valor en [0,1], 0 no hay degradacion y 
+        cuanto mas cerca de 1 mas degradacion). Esta funcion normaliza C_p en [0,1] cuando C_p toma valores en (0.5,1] (i.e. B=X_prev domina
+        a A=X_current) y 0 en los demas casos (A=X_current domina a B=X_prev o son iguales).
+
+        'paired_diff'
+        Estimacion de que la probabilida de la variable aleatoria definida como la diferencia pareada de los episodic reward de dos politicas en
+        la secuencia sea positiva.
+        '''
+        if degradation_metric=='Cp':  
+            # Estimacion de Cp
+            sign_matrix = np.sign(B[:, None] - A)  # Matriz de comparacion
+            cp_estimation=(np.sum(sign_matrix) / (2 * len(A)**2)) + 0.5
+
+            # Modificacion para que se defina en [0,1]
+            indicator=[1 if cp_estimation>0.5 else 0][0]
+            degradation=2*(cp_estimation-0.5)*indicator
+
+            if also_dominance:
+                return degradation, cp_estimation
+            else:
+                return degradation
+        
+        if degradation_metric=='paired_diff':
+            # Normalizar los valores de las dos variables para que la metrica salga en [0,1]
+            max_value=max([max(A),max(B)])
+            min_value=min([min(A),min(B)])
+            norm_A=Converter.normalize_list(A,min_value,max_value)
+            norm_B=Converter.normalize_list(B,min_value,max_value)
+
+            # Variable de diferencias pareadas
+            paired_diffs=norm_B-norm_A
+
+            # Media de diferencias positivas ponderada por la proporcion de positivos
+            degradation=np.mean(paired_diffs>0)*np.mean([diff for diff in paired_diffs if diff>0])
+            
+            return degradation
+        
+    def estimate_update_degradations(algo,env,seed,resources, iter_max,degradation_metric='Cp'):
+        '''
+        Calcula la evolucion de la degradacion local entre politicas consecutivas, i.e. update degradation, usando la metrica local indicada.
+        '''
+        current_path=parent_dir+'/_bender/project_SB3/data/'+str(algo)+'_'+str(env)+'_seed'+str(seed)+'_'+resources
+
+        # Leer base de datos test
+        df_test=pd.read_csv(current_path+'/df_val.csv')
+        df_test['ep_rewards']=[Converter.compress_decompress_list(i,compress=False) for i in df_test['ep_rewards']][:iter_max]
+
+        # Calcular vector de degradaciones por actualizacion
+        update_degradations=[0] # En la inicializacion de la secuencia de politicas no hay degradacion
+        update_dominances=[0]
+        for row in range(1,iter_max):
+            X_current=df_test.loc[row,'ep_rewards'][:500] 
+            X_prev=df_test.loc[row-1,'ep_rewards'][:500]
+
+            if degradation_metric=='Cp':
+                update_degradation,dominance=Estimator.estimate_any_degradation(np.array(X_current),np.array(X_prev),degradation_metric,also_dominance=True)
+                update_degradations.append(update_degradation)
+                update_dominances.append(dominance)
+            if degradation_metric=='paired_diff':
+                update_degradations.append(Estimator.estimate_any_degradation(np.array(X_current),np.array(X_prev),degradation_metric))
+
+        if degradation_metric=='Cp':
+            return update_degradations,update_dominances
+        if degradation_metric=='paired_diff':
+            return update_degradations
+
+    #----------------------------------------------------------------------------------------------
+    # Para generar dos bases de datos adicionales (una para train y otra para test) con las
+    # diferentes posibles estimaciones a partir de los datos train o test
+    #----------------------------------------------------------------------------------------------
     def read_create_estimates_csv(path_csv,seq_size,start_iter=0):
         '''
         Crea (si no existe) o lee (si existe) una base de datos para almacenar estimaciones de expected episodic reward por politica de la secuencia.
@@ -142,7 +252,7 @@ class Estimator:
         df_train=pd.read_csv(current_path+'/df_traj.csv')
         df_test=pd.read_csv(current_path+'/df_val.csv')
         
-        # Calcular estimaciones que usaremos como groun truth con los primeros 500 episodios de validacion
+        # Calcular estimaciones que usaremos como ground truth con los primeros 500 episodios de validacion
         df_test['ep_rewards']=[ Converter.compress_decompress_list(i,compress=False) for i in df_test['ep_rewards']]
         df_val_estimates=Estimator.read_create_estimates_csv(current_path+'/df_val_estimates.csv',df_train.shape[0])
         if 'truth' not in df_val_estimates.columns.tolist():
@@ -153,12 +263,17 @@ class Estimator:
             df_val_estimates.to_csv(current_path+'/df_val_estimates.csv', index=False)
         
         # Tambien estimaciones de degradacion para añadir a las learning-curve mas informativas (empezar a considerar la degradacion despues del 10% del tiempo)
-        #if 'update_degradation' not in df_val_estimates.columns.tolist():
-        update_degradations,update_dominances=Estimator.compute_update_degradations(algo,env,seed,resources,df_test.shape[0],also_dominance=True)
-        df_val_estimates['update_dominances']=[0 for _ in range(int(df_test.shape[0]*.1))]+update_dominances[int(df_test.shape[0]*.1):]
-        df_val_estimates['update_degradation']=[0 for _ in range(int(df_test.shape[0]*.1))]+update_degradations[int(df_test.shape[0]*.1):]
-        df_val_estimates['degradation_level']=[0 for _ in range(int(df_test.shape[0]*.1))]+[np.mean(df_val_estimates['update_degradation'][int(df_test.shape[0]*.1):i+1]) for i in range(int(df_test.shape[0]*.1),df_test.shape[0])]
-        df_val_estimates.to_csv(current_path+'/df_val_estimates.csv', index=False)
+        degradation_metrics=['Cp','paired_diff']
+        for degradation_metric in degradation_metrics:
+            #if 'update_deg_'+degradation_metric not in df_val_estimates.columns.tolist():
+                if degradation_metric=='Cp':
+                    update_degradations,update_dominances=Estimator.estimate_update_degradations(algo,env,seed,resources,df_test.shape[0],degradation_metric)
+                    df_val_estimates['update_dominances']=[0 for _ in range(int(df_test.shape[0]*.1))]+update_dominances[int(df_test.shape[0]*.1):]
+                if degradation_metric=='paired_diff':
+                    update_degradations=Estimator.estimate_update_degradations(algo,env,seed,resources,df_test.shape[0],degradation_metric)
+
+                df_val_estimates['update_deg_'+degradation_metric]=[0 for _ in range(int(df_test.shape[0]*.1))]+update_degradations[int(df_test.shape[0]*.1):]
+                df_val_estimates.to_csv(current_path+'/df_val_estimates.csv', index=False)
 
         # Calcular estimaciones a partir de datos de train
         df_traj_estimates=Estimator.read_create_estimates_csv(current_path+'/df_traj_estimates.csv',df_train.shape[0])
@@ -191,62 +306,11 @@ class Estimator:
                 df_val_estimates[str(n_ep)+'_val_ep']=[Converter.compress_decompress_list(i) for i in zip(estimates,val_times)]
                 df_val_estimates.to_csv(current_path+'/df_val_estimates.csv', index=False)
         
-    def time_discretizer(algo,env,seed,resources,iter_freq,iter_max,min_time):
-        '''
-        Devuelve una discretizacion del vector de tiempos de entrenamiento en segundos (eje OX). 
-        Util cuando queremos medir el tiempo en segundos y no en steps.
-        '''
-
-        # Leer bases de datos train del proceso de interes
-        current_path=parent_dir+'/_bender/project_SB3/data/'+algo+'_'+env+'_seed'+str(seed)+'_'+resources
-        df_train=pd.read_csv(current_path+'/df_traj.csv')
-
-        # Tiempo medio por iteracion
-        time_between_iter=[df_train['time_seconds'][i+1]-df_train['time_seconds'][i] for i in range(df_train.shape[0]-1)]
-        iter_mean_time=int(np.mean(time_between_iter))
-
-        # Vector de tiempos discretizado con la frecuencia indicada y el valor maximo como limite
-        return list(np.arange(min_time,df_train.loc[iter_max-1,'time_seconds'],iter_mean_time*iter_freq))
-
-    def compute_update_degradations(algo,env,seed,resources, iter_max,also_dominance=False):
-        current_path=parent_dir+'/_bender/project_SB3/data/'+str(algo)+'_'+str(env)+'_seed'+str(seed)+'_'+resources
-
-        def Cp_estimation(A, B):
-            ''' 
-            Estimacion de la probabilidad de que las variabes aleatorias de las que provienen las muestras A y B cumplan: X_A < X_B 
-            https://www.tandfonline.com/doi/full/10.1080/10618600.2022.2084405
-            '''   
-            sign_matrix = np.sign(B[:, None] - A)  # Matriz de comparacion
-            return (np.sum(sign_matrix) / (2 * len(A)**2)) + 0.5
-        
-        def update_degradation(X_current,X_prev):
-            '''
-            Transformacion de dominancia C_p para definir nuestra degradacion por actualizacion (valor en [0,1], 0 no hay degradacion y 
-            cuanto mas cerca de 1 mas degradacion). Esta funcion normaliza C_o en [0,1] cuando C_p toma valores en (0.5,1] (i.e. X_prev domina
-            a X_current) y 0 en los demas casos (X_current domina a X_prev o son iguales).
-            '''
-            dominance=Cp_estimation(np.array(X_current),np.array(X_prev))
-            indicator=[1 if dominance>0.5 else 0][0]
-            return 2*(dominance-0.5)*indicator
-
-        # Leer base de datos test
-        df_test=pd.read_csv(current_path+'/df_val.csv')
-        df_test['ep_rewards']=[Converter.compress_decompress_list(i,compress=False) for i in df_test['ep_rewards']][:iter_max]
-
-        # Calcular vector de degradaciones por actualizacion
-        update_degradations=[0] # En la inicializacion de la secuencia de politicas no hay degradacion
-        update_dominances=[0]
-        for row in range(1,iter_max):
-            X_current=df_test.loc[row,'ep_rewards'][:500] 
-            X_prev=df_test.loc[row-1,'ep_rewards'][:500]
-            update_degradations.append(update_degradation(X_current,X_prev))
-            update_dominances.append(Cp_estimation(np.array(X_current),np.array(X_prev)))
-
-        if also_dominance:
-            return update_degradations, update_dominances
-        else:
-            return update_degradations
+ 
 class Converter:
+    '''
+    Las funciones de esta clase sirven para hacer conversiones, i.e. convertir el formato original de un input en otro formato output.
+    '''
 
     def compress_decompress_list(my_list,compress=True):
         '''
@@ -354,7 +418,18 @@ class Converter:
 
 
 class EvolutionGenerator:
+    '''
+    Esta clase contiene funciones que permiten generar la evolucion de diferentes metricas durante un proceso determinado por
+    algortimo-environment-semilla. 
+    '''
     def __init__(self,algo,env,seed,resources,perc_time_start):
+        '''
+        `algo`: algortimo RL usado para genera el proceso (primer nombre separado por '_' de la carpeta en donde se almacenan los datos)
+        `env`: environmnet
+        `seed`: semilla aleatoria
+        `resources`: recursos computacionales para ejecucion en paralelo 
+        `perc_time_start`: que porcentage inicial de tiempo de entrenamiento se va a ignorar para empezar a valorar la eficacia de los criterios
+        '''
           
         # Leer bases de datos del proceso de interes
         current_path=parent_dir+'/_bender/project_SB3/data/'+str(algo)+'_'+str(env)+'_seed'+str(seed)+'_'+resources
@@ -371,7 +446,7 @@ class EvolutionGenerator:
         self.start_time=df_train.loc[self.start_iter-1,'time_seconds']
 
     #----------------------------------------------------------------------------------------------
-    # Metricas para medir la calidad de la politica seleccionada
+    # Metricas para medir la calidad de la politica seleccionada o nivel de degradacion de la secuencia
     #----------------------------------------------------------------------------------------------
     def real_ranking_position(self,elapsed_time,n_policy):
 
@@ -392,6 +467,39 @@ class EvolutionGenerator:
         EER_criteria_best=EER_list[n_policy-self.start_iter+1]
 
         return abs(EER_real_best-EER_criteria_best)
+    
+    def degradation_level(self,elapsed_time,global_metric,local_metric):
+        '''
+        `global_metric`: 'mean_update_deg', 'weighted_mean_best_later_deg'
+        `local_metric`: 'Cp', 'paired_diff'
+        '''
+
+        if global_metric=='mean_update_deg':
+            last_idx=self.last_policy(elapsed_time)
+            degradation_level=np.mean(self.df_test_estimates['update_deg_'+local_metric][int(self.df_test.shape[0]*.1)-1:last_idx+1])
+
+        if global_metric=='weighted_mean_best_later_deg':
+            # Indice de la mejor truth politica
+            truth_best_idx=self.truth_best_policy(elapsed_time)
+            last_idx=self.last_policy(elapsed_time)
+
+            # Guardar: 1) Degradaciones entre cada politica posterior a la mejor y la mejor; 2) Numero de iteraciones (normalizadas) trasncurridas entre cada politica posterior a la mejor y la mejor
+            degradations_best_laters=[]
+            iter_diff_best_laters=[]
+            best_ep_rewards=np.array(Converter.compress_decompress_list(self.df_test.loc[truth_best_idx,'ep_rewards'],compress=False)[:500])
+            for later_idx in range(truth_best_idx+1,last_idx+1):
+                later_ep_rewards=np.array(Converter.compress_decompress_list(self.df_test.loc[later_idx,'ep_rewards'],compress=False)[:500])
+                degradations_best_laters.append(Estimator.estimate_any_degradation(later_ep_rewards,best_ep_rewards,local_metric))
+                iter_diff_best_laters.append(later_idx-truth_best_idx)
+            iter_diff_best_laters=np.array(iter_diff_best_laters)/sum(iter_diff_best_laters)
+
+            # Nivel de degradacion: media de las degradaciones ponderada por los numeros de iteraciones trasncurridos
+            degradation_level=0
+            for weight, deg in zip(iter_diff_best_laters,degradations_best_laters):
+                degradation_level+=weight*deg
+
+        return degradation_level
+    
     #----------------------------------------------------------------------------------------------
     # Criterios de seleccion
     #----------------------------------------------------------------------------------------------
@@ -504,8 +612,14 @@ class EvolutionGenerator:
             return y_magnitudes, x_extras
         else:
             return y_magnitudes
-    
-class EvolutionGrapher:
+
+    def degradation_evolution(self,x_times,global_metric,local_metric):
+        return [self.degradation_level(time,global_metric,local_metric) for time in x_times]
+
+class EvolutionGrapher():
+    '''
+    Las funciones de esta clase permiten representar graficamente la evolucion de diferentes metricas.
+    '''
 
     def __init__(self,algo,env,seed,resources,iter_max,perc_time_start=0.1,
                  list_n_traj_ep=[],
@@ -755,7 +869,12 @@ class EvolutionGrapher:
         #plt.show()
         plt.close()
 
-    def graph_degradation_evolution(self):
+    def graph_degradation_evolution(self,global_metric,local_metric):
+        '''
+        Esta funcion es la version mejorada/completa de la anterior. Ademas de la la learning-curve (evolucion del truth expected episodic reward),
+        tambien incluye evolucion de nivel de degradacion (global), de degradacion por actualizacion (local), y analisis individual comparativo
+        de degradacion y truth en diferentes casos.
+        '''
 
         fig, axes = plt.subplots(4,4,figsize=(12,5),gridspec_kw={'height_ratios': [1,3,1,3]})
         plt.subplots_adjust(left=0.08,bottom=0.25,right=0.8,top=0.92,wspace=0.39,hspace=0.1)
@@ -763,43 +882,69 @@ class EvolutionGrapher:
         for i in range(12):
             list_axes[i].set_visible(False)
 
-        def KDE_consecutive_policies(n_policy,ax,title,update_dom,update_deg,truth_deg):
-
+        def KDE_consecutive_policies(n_policy,ax,title,local_metric,metrics_to_show,first=False):
+            
             # Obtener los ep. reward truth normalizados de las dos politicas de interes
             column_ep_rewards=[Converter.compress_decompress_list(i,compress=False)[:500] for i in self.generator.df_test['ep_rewards']]
-            all_ep_rw=column_ep_rewards[n_policy-1][:500]+column_ep_rewards[n_policy][:500]
-            max_ep_rw=max(all_ep_rw)
-            min_ep_rw=min(all_ep_rw)
-            prev_ER=Converter.normalize_list(column_ep_rewards[n_policy-1][:500],min_ep_rw,max_ep_rw)
-            current_ER=Converter.normalize_list(column_ep_rewards[n_policy][:500],min_ep_rw,max_ep_rw)
+            prev_ER=column_ep_rewards[n_policy-1][:500]
+            current_ER=column_ep_rewards[n_policy][:500]
+            max_ep_rw=max(prev_ER+current_ER)
+            min_ep_rw=min(prev_ER+current_ER)
+            norm_prev_ER=Converter.normalize_list(prev_ER,min_ep_rw,max_ep_rw)
+            norm_current_ER=Converter.normalize_list(current_ER,min_ep_rw,max_ep_rw)
 
+            
             # KDE a partir de las dos muestras anteriores
-            avg_ep_rw=[]
-            x_position=[0]
-            x_d=np.linspace(0,1, 1000)
-            for sample in [prev_ER,current_ER]:
-                x=np.array(sample)
+            if local_metric=='Cp':
+                x_d=np.linspace(0,1, 1000)
+                avg_ep_rw=[]
+                x_position=[0]
+                for sample in [norm_prev_ER,norm_current_ER]:
+                    x=np.array(sample)
+                    kde = KernelDensity(bandwidth=0.05, kernel='gaussian')
+                    kde.fit(x[:, None])
+                    y_prob = np.exp(kde.score_samples(x_d[:, None]))
+
+                    ax.plot(np.full_like(x, -0.01)+x_position[-1],x, '_', markeredgewidth=1,color='grey',alpha=0.5)
+                    ax.fill_betweenx( x_d,y_prob+x_position[-1],min(y_prob)+x_position[-1],color='red',alpha=0.5)
+
+                    x_position.append(max(y_prob)*2)
+                    avg_ep_rw.append(np.mean(x))
+
+                ax.plot(x_position[:2],avg_ep_rw,color='black')
+                ax.set_xlabel(title+'\n$P(X_{i-1}>X_i)=$'+str(format(metrics_to_show[0], ".2e"))+'\n$\delta_{i-1,i}=$'+str(format(metrics_to_show[1], ".2e"))+'\n$\Delta f^-_i=$'+str(format(metrics_to_show[2], ".2e")))
+                ax.set_xticks(ticks=x_position[:2], labels=[str(n_policy-1),str(n_policy)])
+                if first:
+                    ax.set_ylabel('Normalized\nepisodic reward')
+
+            if local_metric=='paired_diff':
+                x_d=np.linspace(-1,1, 1000)
+                x=np.array(norm_prev_ER)-np.array(norm_current_ER)
                 kde = KernelDensity(bandwidth=0.05, kernel='gaussian')
                 kde.fit(x[:, None])
                 y_prob = np.exp(kde.score_samples(x_d[:, None]))
 
-                ax.plot(np.full_like(x, -0.01)+x_position[-1],x, '_', markeredgewidth=1,color='grey',alpha=0.5)
-                ax.fill_betweenx( x_d,y_prob+x_position[-1],min(y_prob)+x_position[-1],color='red',alpha=0.5)
+                ax.plot(x,np.full_like(x, -0.01), '|', markeredgewidth=1,color='grey',alpha=0.5)
+                ax.plot(np.mean(norm_prev_ER)-np.mean(norm_current_ER),-0.01,'|',markeredgewidth=2,color='black',label='diff mean')
+                ax.plot(np.mean([i for i in x if i>0]),-0.01,'|', color='blue',markeredgewidth=2,label='+diff mean')
+                ax.fill_between( x_d,y_prob,min(y_prob),color='red',alpha=0.5)
+                ax.axvline(x=0, color='black', linestyle='--',linewidth=0.5)
+                perc_pos=int(len([i for i in x if i>=0])*100)/len(x)
+                perc_neg=int(len([i for i in x if i<0])*100)/len(x)
+                
+                ax.set_xlabel(str(perc_neg)+'%    '+str(perc_pos)+'%\n\n'+title+'\n$\delta_{i-1,i}=$'+str(format(metrics_to_show[1], ".2e"))+'\n$\Delta f^-_i=$'+str(format(metrics_to_show[2], ".2e")))
+                ax.legend(fontsize=5)
+                if first:
+                    ax.set_ylabel('Normalized\nepisodic reward\npaired diff. distribution')
 
-                x_position.append(max(y_prob)*2)
-                avg_ep_rw.append(np.mean(x))
 
-            ax.plot(x_position[:2],avg_ep_rw,color='black')
-            ax.set_xlabel(title+'\n $D_i=$'+str(format(update_dom, ".2e"))+'\n$\delta_i=$'+str(format(update_deg, ".2e"))+'\n$\Delta f^-_i=$'+str(format(truth_deg, ".2e")))
-            ax.set_xticks(ticks=x_position[:2], labels=[str(n_policy-1),str(n_policy)])
-
-        # Nivel de degradacion
+        # Evolucion del nivel de degradacion
         ax=plt.subplot(4,4,(1,4))
-        degradation_level=self.generator.df_test_estimates['degradation_level']
+        degradation_level=[0 for _ in range(int(self.start_iter))]+self.generator.degradation_evolution(self.generator.df_train['time_seconds'].tolist()[self.start_iter:self.iter_max],global_metric,local_metric)
         ax.imshow(np.array(degradation_level).reshape(1, -1), cmap="gray_r", aspect="auto")
         ax.set_xticks([])
         ax.set_yticks([])
-        ax.set_title('Degradation evolution')
+        ax.set_title('Degradation evolution (global: '+global_metric+'; local: '+local_metric+')')
 
         # Learning-curve con lineas verticales que representan los update degradations
         ax=plt.subplot(4,4,(5,8))
@@ -807,7 +952,7 @@ class EvolutionGrapher:
 
         cmap_white_to_red = mcolors.LinearSegmentedColormap.from_list("white_red", ["white", "red"])
         for i in range(self.iter_max):
-            cmap=Converter.generate_colormap(self.generator.df_test_estimates['update_degradation'][i],cmap_white_to_red,0,1)
+            cmap=Converter.generate_colormap(self.generator.df_test_estimates['update_deg_'+local_metric][i],cmap_white_to_red,0,1)
             ax.axvline(x=i, color=cmap, linestyle='-', linewidth=1) 
 
         plt.plot(list(range(self.iter_max))[:int(self.iter_max*.1)], self.generator.df_test_estimates['truth'][:int(self.iter_max*.1)], linewidth=.5,linestyle='--',color='black')
@@ -817,49 +962,48 @@ class EvolutionGrapher:
         ax.set_xlabel('Learning iteration ($i$)')
 
         # KDE de iteracion actual y previa para comparar similitud entre metrica de degradacion y estimacion truth
-        update_dominances=np.array(self.generator.df_test_estimates['update_dominances'][int(self.iter_max*0.1):])
-        update_degradation=abs(np.array(self.generator.df_test_estimates['update_degradation'][int(self.iter_max*0.1):])) # abs porque al hacer np.array los ceros salen -0.0
+        if local_metric=='Cp':
+            dominances=np.array(self.generator.df_test_estimates['update_dominances'][self.start_iter:])
+        else:
+            dominances=[None]*(self.iter_max-self.start_iter)
+
+        update_degradation=abs(np.array(self.generator.df_test_estimates['update_deg_'+local_metric][self.start_iter:])) # abs porque al hacer np.array los ceros salen -0.0
         truth_degradation=[0]+[self.generator.df_test_estimates['truth'][i-1]-self.generator.df_test_estimates['truth'][i] for i in range(1,self.iter_max)]
-        truth_degradation=abs(Converter.normalize_list([i if i>0 else 0 for i in truth_degradation]))[int(self.iter_max*0.1):]
+        truth_degradation=abs(Converter.normalize_list([i if i>0 else 0 for i in truth_degradation]))[self.start_iter:]
 
-        true_negative=min((i for i, deg in enumerate(truth_degradation) if deg==0),key=lambda i: update_degradation[i])+int(self.iter_max*0.1)
-        true_positive=max((i for i, deg in enumerate(truth_degradation) if deg>0),key=lambda i: update_degradation[i])+int(self.iter_max*0.1)
-        false_negative=max((i for i, deg in enumerate(truth_degradation) if deg==0),key=lambda i: update_degradation[i])+int(self.iter_max*0.1)
-        false_positive=max((i for i, deg in enumerate(update_degradation) if deg==0),key=lambda i: truth_degradation[i])+int(self.iter_max*0.1)
+        true_negative=['True negative',min((i for i, deg in enumerate(truth_degradation) if deg==0),key=lambda i: update_degradation[i],default=None)]
+        true_positive=['True positive',max((i for i, deg in enumerate(truth_degradation) if deg>0),key=lambda i: update_degradation[i],default=None)]
+        false_negative=['False negative',max((i for i, deg in enumerate(truth_degradation) if deg==0),key=lambda i: update_degradation[i],default=None)]
+        false_positive=['False positive',max((i for i, deg in enumerate(update_degradation) if deg==0),key=lambda i: truth_degradation[i],default=None)]
 
-        ax=plt.subplot(4,4,13) 
-        KDE_consecutive_policies(true_negative,ax,'True negative ($i$='+str(true_negative)+')',
-                                      update_dominances[true_negative-int(self.iter_max*0.1)],
-                                      update_degradation[true_negative-int(self.iter_max*0.1)],
-                                      truth_degradation[true_negative-int(self.iter_max*0.1)])
-        ax.set_ylabel('Normalized\nepisodic reward')
-
-        ax=plt.subplot(4,4,14)
-        KDE_consecutive_policies(true_positive,ax,'True positive ($i$='+str(true_positive)+')',
-                                      update_dominances[true_positive-int(self.iter_max*0.1)],
-                                      update_degradation[true_positive-int(self.iter_max*0.1)],
-                                      truth_degradation[true_positive-int(self.iter_max*0.1)])
-
-        ax=plt.subplot(4,4,15)
-        KDE_consecutive_policies(false_negative,ax,'False negative ($i$='+str(false_negative)+')',
-                                      update_dominances[false_negative-int(self.iter_max*0.1)],
-                                      update_degradation[false_negative-int(self.iter_max*0.1)],
-                                      truth_degradation[false_negative-int(self.iter_max*0.1)])
-        ax=plt.subplot(4,4,16)
-        KDE_consecutive_policies(false_positive,ax,'False positive ($i$='+str(false_positive)+')',
-                                      update_dominances[false_positive-int(self.iter_max*0.1)],
-                                      update_degradation[false_positive-int(self.iter_max*0.1)],
-                                      truth_degradation[false_positive-int(self.iter_max*0.1)])
+        highlighted_iter=[true_negative,true_positive,false_negative,false_positive]
+        for i in range(4):
+            ax=plt.subplot(4,4,13+i) 
+            if highlighted_iter[i][1]!=None:
+                metrics_to_show=[dominances[highlighted_iter[i][1]],update_degradation[highlighted_iter[i][1]],truth_degradation[highlighted_iter[i][1]]]
+                KDE_consecutive_policies(highlighted_iter[i][1]+self.start_iter,ax,highlighted_iter[i][0]+' ($i$='+str(highlighted_iter[i][1]+self.start_iter)+')',local_metric,metrics_to_show,i==0)
+            else:
+                ax.set_xlabel('No '+highlighted_iter[i][0])
+                ax.set_frame_on(False)  
+                ax.set_xticks([])  
+                ax.set_yticks([])  
+                ax.set_xticklabels([]) 
+                ax.set_yticklabels([])  
 
         # Barras de colores
-        Converter.generate_colorbar(fig,[0.84, 0.6, 0.015, 0.3],cmap_white_to_red,[0,max(update_degradation)],'Update degradation ($\delta_i$)')
-        Converter.generate_colorbar(fig,[0.92, 0.6, 0.015, 0.3],'Greys',[0,max(degradation_level)],'Degradation level ($\overline{\delta}_i$)')
+        Converter.generate_colorbar(fig,[0.84, 0.6, 0.015, 0.3],cmap_white_to_red,[0,max(update_degradation)],'Update degradation ($\delta_{i-1,i}$)')
+        Converter.generate_colorbar(fig,[0.92, 0.6, 0.015, 0.3],'Greys',[0,max(degradation_level)],'Degradation level ($\delta_i$)')
 
-        plt.savefig('experiments_intuition/results/CriteriaComparison/figures/'+self.algo+'_'+self.env+'_seed'+str(self.seed)+'/improved_learning_curve.pdf')
+        plt.savefig('experiments_intuition/results/CriteriaComparison/figures/'+self.algo+'_'+self.env+'_seed'+str(self.seed)+'/degradation_evolution_'+global_metric+'_'+local_metric+'.pdf')
         #plt.show()
         plt.close()
 
-class EstimationAnalyzer():    
+class EstimationAnalyzer():  
+    '''
+    Las funciones de esta clase permiten analizar graficamente el coste de las estimaciones de expected episodic reward
+    a partir de los datos test, y la precision de seleccion de las estimaciones con test y train. Los analisis estan enfocados
+    en un unico proceso determinado por una combinacion de algortimo-environment-semilla-resursos
+    '''  
 
     def __init__(self,algo,env,seed,resources,
                  list_n_traj_ep,
@@ -926,7 +1070,7 @@ class EstimationAnalyzer():
 
         return matrix
     
-    def matrix_for_accuracy_analysis(self,freq=None,train_or_test='train'):
+    def matrix_for_accuracy_analysis(self,freq=None,train_or_test='train',global_deg_metric='mean_update_deg',local_deg_metric='Cp'):
         '''
         Genera matriz numerica con los datos necesarios para interpretar como de buenas son las estimaciones 
         para seleccionar la mejor politica de la secuencia actual (no se considera el tiempo invertido en validacion,
@@ -939,7 +1083,8 @@ class EstimationAnalyzer():
         matrix=[]
 
         # Lista de niveles de degradacion
-        matrix.append(self.generator.df_test_estimates['degradation_level'][self.start_iter-1:self.iter_max])
+        degradation_level=self.generator.degradation_evolution(self.generator.df_train['time_seconds'].tolist()[self.start_iter-1:self.iter_max],global_deg_metric,local_deg_metric)
+        matrix.append(degradation_level)
 
         # Listas de normalized magnitude para cada posible n_ep
         if train_or_test=='train':
@@ -1179,6 +1324,11 @@ class EstimationAnalyzer():
 
         
 class CriteriaTuner():
+    '''
+    Esta clase esta enfocada a fijar la configuracion optima de los criterios train (n_ep) y test (n_ep y freq),
+    analizando la evolucion de la magnitud para un grid de posibles valores de cada parametro. El tuning se 
+    analiza graficamente, y las mejores configuraciones basadas en ese analisis se almacenan en un csv.
+    '''
 
     def __init__(self,algo,env,seed,resources,
                 list_n_val_ep, list_n_val_freq,
@@ -1468,87 +1618,58 @@ class CriteriaTuner():
         Converter.from_csv_to_png('experiments_intuition/results/CriteriaComparison','criteria_conf_by_process')
         return opt_conf
     
-class SingleProcessAnalisys():
-    def __init__(self,algo,env,seed,resources,max_iter):
-            
-        # Generar directorio donde se almacenaran las graficas.
-        os.makedirs('experiments_intuition/results/CriteriaComparison/figures/'+algo+'_'+env+'_seed'+str(seed), exist_ok=True)
-        
-        # Valores de parametros a considerara (se hara el tuning entre estos)
-        list_n_ep=[500,250,100,50,25,5]# Como las bases de datos "mejoradas" tienen almacenadas 1000 validaciones por politica
-        list_freq=[100,50,25,10,5,1]
-        
-        # Representacion del proceso
-        grapher=EvolutionGrapher(algo,env,seed,resources,max_iter)
-        grapher.learning_curve()
-        grapher.graph_degradation_evolution()
 
-        # Analisis de estimaciones (coste y precision de seleccion)
-        analyzer=EstimationAnalyzer(algo,env,seed,resources,list_n_ep,list_n_ep,max_iter)
-        analyzer.graph_cost_analysis()
-        analyzer.graph_accuracy_analysis('test')
-        analyzer.graph_accuracy_analysis('train')
-        analyzer.graph_train_vs_test_estimates()
-
-        # Ajuste de parametros
-        tuner=CriteriaTuner(algo,env,seed,resources,list_n_ep,list_freq,max_iter)
-        opt_n_ep_train,opt_n_ep_test,opt_freq_test=tuner.graph_best_val_tuning()
-
-        # Comparacion de mejor version de criterios existentes
-        grapher=EvolutionGrapher(algo,env,seed,resources,max_iter,list_n_traj_ep=[opt_n_ep_train],list_n_val_ep=[opt_n_ep_test],list_n_val_freq=[opt_freq_test])
-        grapher.graph_rank_evolution()
-        grapher.graph_rank_evolution(True)
-        grapher.graph_magnitude_evolution()
-        grapher.graph_magnitude_evolution(True,True)
-
-class ProcessIndependentAnalisys():
-    def __init__(self,iter_max,perc_time_start=0.1,all_possible_conf=False):
+class ProcessIndependentAnalyzer():
+    def __init__(self,iter_max,perc_time_start=0.1,
+                 global_deg_metric='mean_update_deg',local_deg_metric='Cp',
+                 all_possible_conf=False, # Para generar datos relacionados con el analisis de sensibilidad
+                 grid_train_n_ep=None,grid_test_n_ep=None,grid_test_freq=None # Para almacenar datos relacionados con el analisis para ganar intuicion
+                 ):
 
         start_iter=int(iter_max*perc_time_start)-1
-        
-        # Mirar si ya se ha llamado a esta funcion previamente (si existen las bases de datos necesrias, si no inicializarlas)
-        df_degradation=Estimator.read_create_estimates_csv('experiments_intuition/results/CriteriaComparison/data/update_degradation.csv',iter_max,start_iter)
-        df_last_mag=Estimator.read_create_estimates_csv('experiments_intuition/results/CriteriaComparison/data/criteria_last_mag.csv',iter_max,start_iter)
-        df_train_mag=Estimator.read_create_estimates_csv('experiments_intuition/results/CriteriaComparison/data/criteria_best_train_mag.csv',iter_max,start_iter)
-        df_test_mag=Estimator.read_create_estimates_csv('experiments_intuition/results/CriteriaComparison/data/criteria_best_test_mag.csv',iter_max,start_iter)
+        self.iter_max=iter_max
+        self.start_iter=start_iter
 
+        # Mirar si ya se ha llamado a esta funcion previamente (si existen las bases de datos necesrias, si no inicializarlas)
+        df_degradation=Estimator.read_create_estimates_csv('experiments_intuition/results/CriteriaComparison/data/deg_mag/level_degradation.csv',iter_max,start_iter)
+        df_last_mag=Estimator.read_create_estimates_csv('experiments_intuition/results/CriteriaComparison/data/deg_mag/criteria_last_mag.csv',iter_max,start_iter)
+        df_train_mag=Estimator.read_create_estimates_csv('experiments_intuition/results/CriteriaComparison/data/deg_mag/criteria_best_train_mag.csv',iter_max,start_iter)
+        df_test_mag=Estimator.read_create_estimates_csv('experiments_intuition/results/CriteriaComparison/data/deg_mag/criteria_best_test_mag.csv',iter_max,start_iter)
+        
         # Leer base de datos donde se almacenan las mejores configuraciones de los criterios por proceso (criteria_conf_by_process.csv)
         df_conf=pd.read_csv('experiments_intuition/results/CriteriaComparison/data/criteria_conf_by_process.csv')
 
         
-        # Calcular y guardar por proceso: degradaciones por actualizacion y evolucion de magnitudes por criterio (si no estan ya guardados)
-        for row in tqdm(range(df_conf.shape[0])):
+        # Calcular y guardar por proceso: evolucion de nivel de degradacion y evolucion de magnitudes por criterio (si no estan ya guardados)
+        for row in tqdm(range(df_conf.shape[0])):# Aqui estan guardados todos los procesos que consideraremos
             process_id=df_conf.loc[row,'process_id']
             algo,env,seed=Converter.process_id_splitter(process_id)
-            
-            # Si los datos del proceso no estan ya almacenados calcularlos y almacenarlos
-            if process_id not in list(df_degradation.columns):
 
-                # Calcular y guardar las estimaciones de degradacion por actualizacion
-                df_degradation[process_id]=Estimator.compute_update_degradations(algo,env,seed,'16cpu1gpu_mejorado',iter_max)[start_iter:]
+            generator=EvolutionGenerator(algo,env,seed,'16cpu1gpu_mejorado',perc_time_start)
+            x_times=generator.df_train['time_seconds'].tolist()[start_iter:iter_max]  
+            min_time=generator.df_train.loc[start_iter,'time_seconds']
+            
+            # Si los datos del proceso no estan ya almacenados calcularlos y almacenarlos (configuraciones optimas en cada proceso)
+            if process_id not in list(df_degradation.columns):
+                
+                # Calcular y guardar las evolucion de nivel de degradacion
+                df_degradation[process_id+'_'+global_deg_metric+'_'+local_deg_metric]=generator.degradation_evolution(x_times,global_deg_metric,local_deg_metric)
 
                 # Configuracion optima de los criterios train y test 
                 train_n_ep,test_n_ep,test_freq=df_conf.loc[row,['train_n_ep','test_n_ep','test_freq']]
 
                 # Calcular y guardar la evolucion de magnitud de cada criterio (las estimaciones para las configuraciones anteriores las tengo guardadas porque ya he tenido que ejecutar el tuner)
-                generator=EvolutionGenerator(algo,env,seed,'16cpu1gpu_mejorado',perc_time_start)
-                min_time=generator.df_train.loc[start_iter,'time_seconds']
-                x_times=generator.df_train['time_seconds'].tolist()[start_iter:iter_max]  
                 x_times_with_freq=Estimator.time_discretizer(algo,env,seed,'16cpu1gpu_mejorado',test_freq,iter_max,min_time)
                 df_last_mag[process_id]=generator.magnitude_evolution(x_times,criteria='last',normalized=True)
                 df_train_mag[process_id]=generator.magnitude_evolution(x_times,n_ep=train_n_ep,criteria='best_train',normalized=True)
                 df_test_mag[process_id]=generator.magnitude_evolution(x_times,n_ep=test_n_ep,freq=x_times_with_freq,criteria='best_val',normalized=True)[0]
-
-            # Almaxenar datos adicionales para posibles combinaciones de configuraciones optimas
+            print('if de avanzado listo')
+            # Almacenar datos adicionales para posibles combinaciones de configuraciones optimas (para el analisis de sensibilidad)
             if all_possible_conf:
                 all_train_n_ep=list(set(df_conf['train_n_ep']))
                 all_test_n_ep_freq=list(set(tuple(pair) for pair in zip(df_conf['test_n_ep'],df_conf['test_freq'])))
 
                 # Calcular y guardar la evolucion de magnitud de cada criterio (las estimaciones para las configuraciones anteriores las tengo guardadas porque ya he tenido que ejecutar el tuner)
-                generator=EvolutionGenerator(algo,env,seed,'16cpu1gpu_mejorado',perc_time_start)
-                min_time=generator.df_train.loc[start_iter,'time_seconds']
-                x_times=generator.df_train['time_seconds'].tolist()[start_iter:iter_max]  
-
                 for n_ep in all_train_n_ep:
                     if process_id+'_'+str(n_ep) not in list(df_train_mag.columns):
                         df_train_mag[process_id+'_'+str(n_ep)]=generator.magnitude_evolution(x_times,n_ep=n_ep,criteria='best_train',normalized=True)
@@ -1558,30 +1679,47 @@ class ProcessIndependentAnalisys():
                         x_times_with_freq=Estimator.time_discretizer(algo,env,seed,'16cpu1gpu_mejorado',freq,iter_max,min_time)
                         df_test_mag[process_id+'_'+str(n_ep)+'_'+str(freq)]=generator.magnitude_evolution(x_times,n_ep=n_ep,freq=x_times_with_freq,criteria='best_val',normalized=True)[0]
 
-            # Guardar cambios en bases de datos
-            df_degradation.to_csv('experiments_intuition/results/CriteriaComparison/data/update_degradation.csv', index=False)
-            df_last_mag.to_csv('experiments_intuition/results/CriteriaComparison/data/criteria_last_mag.csv', index=False)
-            df_train_mag.to_csv('experiments_intuition/results/CriteriaComparison/data/criteria_best_train_mag.csv', index=False)
-            df_test_mag.to_csv('experiments_intuition/results/CriteriaComparison/data/criteria_best_test_mag.csv', index=False)
+            print('if de sensibilidad listo')
+            # Almacenar datos de configuraciones indicadas (para analisis intermedio, menos avanzado)
+            if grid_train_n_ep!=None:
+                for n_ep in grid_train_n_ep:
+                    if process_id+'_'+str(n_ep) not in list(df_train_mag.columns):
+                        df_train_mag[process_id+'_'+str(n_ep)]=generator.magnitude_evolution(x_times,n_ep=n_ep,criteria='best_train',normalized=True)
+            print('if de intuicion train listo')  
+            if grid_test_n_ep!=None:
+                for n_ep in grid_test_n_ep:
 
+                    # Sin contar el extra de tiempo de validacion con freq=1
+                    if process_id+'_'+str(n_ep)+'_without_extra' not in list(df_test_mag.columns):
+                        x_times_with_freq=Estimator.time_discretizer(algo,env,seed,'16cpu1gpu_mejorado',1,iter_max,min_time)
+                        df_test_mag[process_id+'_'+str(n_ep)+'_without_extra']=generator.magnitude_evolution(x_times,n_ep=n_ep,freq=x_times_with_freq,criteria='best_val',normalized=True,for_analyzer=True)[0]
+
+                    # Contando el extra de tiempo de validacion para diferentes frecuencias
+                    for freq in grid_test_freq:
+                        if process_id+'_'+str(n_ep)+'_'+str(freq) not in list(df_test_mag.columns):
+                            x_times_with_freq=Estimator.time_discretizer(algo,env,seed,'16cpu1gpu_mejorado',freq,iter_max,min_time)
+                            df_test_mag[process_id+'_'+str(n_ep)+'_'+str(freq)]=generator.magnitude_evolution(x_times,n_ep=n_ep,freq=x_times_with_freq,criteria='best_val',normalized=True)[0]
+
+
+            print('if de intuicion test listo')  
+            # Guardar cambios en bases de datos
+            df_degradation.to_csv('experiments_intuition/results/CriteriaComparison/data/deg_mag/level_degradation.csv', index=False)
+            df_last_mag.to_csv('experiments_intuition/results/CriteriaComparison/data/deg_mag/criteria_last_mag.csv', index=False)
+            df_train_mag.to_csv('experiments_intuition/results/CriteriaComparison/data/deg_mag/criteria_best_train_mag.csv', index=False)
+            df_test_mag.to_csv('experiments_intuition/results/CriteriaComparison/data/deg_mag/criteria_best_test_mag.csv', index=False)
+        
         self.df_degradation=df_degradation
         self.df_last_mag=df_last_mag
         self.df_train_mag=df_train_mag
         self.df_test_mag=df_test_mag
         self.iter_max=iter_max
 
-    def read_generate_criteria_rank_by_degradation_data(self,process_ids):
-        # Generar datos necesarios para la grafica si ya no estan generados
-        path_csv='experiments_intuition/results/CriteriaComparison/criteria_rank_by_degradation.csv'
-        if not os.path.exists(path_csv):
-            df = pd.DataFrame(columns=['process_id','degradation_level','rank_last','rank_best_train','rank_best_test','not_first_prob'])
-            os.makedirs(os.path.dirname(path_csv), exist_ok=True)
-            df.to_csv(path_csv, index=False)
-        else:
-            df=pd.read_csv(path_csv)
+    def read_generate_criteria_rank_by_degradation_data(self,process_ids,global_deg_metric,local_deg_metric):
+        # Generar datos necesarios para la grafica
+        df = pd.DataFrame(columns=['process_id','degradation_level','rank_last','rank_best_train','rank_best_test','not_first_prob'])
 
         for process_id in process_ids:
-            degradation_levels=[np.mean(self.df_degradation[process_id][:i]) for i in range(self.iter_max)]
+            degradation_levels=self.df_degradation[process_id+'_'+global_deg_metric+'_'+local_deg_metric]
 
             criteria_mag=np.array([self.df_last_mag[process_id],self.df_train_mag[process_id],self.df_test_mag[process_id]]).T
             criteria_rankings=[Converter.from_list_to_ranking(magnitudes) for magnitudes in criteria_mag]
@@ -1592,12 +1730,9 @@ class ProcessIndependentAnalisys():
             df_new = pd.DataFrame(rows_to_add, columns=df.columns)
             df = pd.concat([df, df_new], ignore_index=True)
 
-        df.to_csv('experiments_intuition/results/CriteriaComparison/data/criteria_rank_by_degradation.csv', index=False)
-
         return df
     
-    def read_generate_train_test_criteria_rank_by_degradation_data(self,process_ids,train_or_test):
-        
+    def read_generate_train_test_criteria_rank_by_degradation_data(self,process_ids,global_deg_metric,local_deg_metric,train_or_test):
         
         df_conf=pd.read_csv('experiments_intuition/results/CriteriaComparison/data/criteria_conf_by_process.csv')
         all_train_n_ep=list(set(df_conf['train_n_ep']))
@@ -1608,17 +1743,11 @@ class ProcessIndependentAnalisys():
         if train_or_test=='test':
             process_id_suffix=[str(n_ep)+'_'+str(freq) for n_ep,freq in all_test_n_ep_freq]
             
-        # Generar datos necesarios para la grafica si ya no estan generados
-        path_csv='experiments_intuition/results/CriteriaComparison/'+train_or_test+'_criteria_rank_by_degradation.csv'
-        if not os.path.exists(path_csv):
-            df = pd.DataFrame(columns=['process_id','degradation_level']+['rank_'+i for i in process_id_suffix]+['not_first_prob'])
-            os.makedirs(os.path.dirname(path_csv), exist_ok=True)
-            df.to_csv(path_csv, index=False)
-        else:
-            df=pd.read_csv(path_csv)
+        # Generar datos necesarios para la grafica
+        df = pd.DataFrame(columns=['process_id','degradation_level']+['rank_'+i for i in process_id_suffix]+['not_first_prob'])
 
         for process_id in process_ids:
-            degradation_levels=[np.mean(self.df_degradation[process_id][:i]) for i in range(self.iter_max)]
+            degradation_levels=self.df_degradation[process_id+'_'+global_deg_metric+'_'+local_deg_metric]
 
             if train_or_test=='train':
                 criteria_mag=np.array([self.df_train_mag[process_id+'_'+suffix] for suffix in process_id_suffix]).T
@@ -1633,14 +1762,45 @@ class ProcessIndependentAnalisys():
             df_new = pd.DataFrame(rows_to_add, columns=df.columns)
             df = pd.concat([df, df_new], ignore_index=True)
 
-        df.to_csv('experiments_intuition/results/CriteriaComparison/data/'+train_or_test+'_criteria_rank_by_degradation.csv', index=False)
+        return df
+
+    def read_generate_train_test_grid_rank_by_degradation_data(self,process_ids,global_deg_metric,local_deg_metric,train_or_test,grid_n_ep,freq=None):
+
+        if train_or_test=='train':
+            process_id_suffix=[str(n_ep) for n_ep in grid_n_ep]
+        if train_or_test=='test':
+            if freq==None:
+                process_id_suffix=[str(n_ep)+'_without_extra' for n_ep in grid_n_ep]
+            else:
+                process_id_suffix=[str(n_ep)+'_'+str(freq) for n_ep in grid_n_ep]
+             
+        # Generar datos necesarios para la grafica si ya no estan generados
+        df = pd.DataFrame(columns=['process_id','seq_size','degradation_level']+['rank_'+i for i in process_id_suffix]+['not_first_prob'])
+
+        for process_id in process_ids:
+            
+            degradation_levels=self.df_degradation[process_id+'_'+global_deg_metric+'_'+local_deg_metric]
+            seq_sizes=list(range(1,len(degradation_levels)+1))
+
+            if train_or_test=='train':
+                criteria_mag=np.array([self.df_train_mag[process_id+'_'+suffix] for suffix in process_id_suffix]).T
+            if train_or_test=='test':
+                criteria_mag=np.array([self.df_test_mag[process_id+'_'+suffix] for suffix in process_id_suffix]).T
+
+            criteria_rankings=[Converter.from_list_to_ranking(magnitudes) for magnitudes in criteria_mag]
+            not_first_probs=[Converter.from_list_to_prob_not_first(magnitudes) for magnitudes in criteria_mag]
+
+            rows_to_add=[[process_id,seq_size,degradation_level]+criteria_ranking+[not_first_prob]
+                         for seq_size,degradation_level, criteria_ranking, not_first_prob in zip(seq_sizes,degradation_levels,criteria_rankings,not_first_probs)]
+            df_new = pd.DataFrame(rows_to_add, columns=df.columns)
+            df = pd.concat([df, df_new], ignore_index=True)
 
         return df
 
 
-    def matrix_best_criteria_by_degradation(self,process_ids):
+    def matrix_best_criteria_by_degradation(self,process_ids,global_deg_metric,local_deg_metric):
 
-        df=self.read_generate_criteria_rank_by_degradation_data(process_ids)
+        df=self.read_generate_criteria_rank_by_degradation_data(process_ids,global_deg_metric,local_deg_metric)
         df=df[df['process_id'].isin(process_ids)]
 
         degradation_intervals=list(np.arange(0,1.02,0.02))
@@ -1666,9 +1826,9 @@ class ProcessIndependentAnalisys():
 
         return np.array(matrix_perc),np.array(matrix_prob), degradation_intervals, num_data_per_level
     
-    def matrix_train_test_criteria_by_degradation(self,process_ids,train_or_test):
+    def matrix_train_test_criteria_by_degradation(self,process_ids,global_deg_metric,local_deg_metric,train_or_test):
         
-        df=self.read_generate_train_test_criteria_rank_by_degradation_data(process_ids,train_or_test)
+        df=self.read_generate_train_test_criteria_rank_by_degradation_data(process_ids,global_deg_metric,local_deg_metric,train_or_test)
         df=df[df['process_id'].isin(process_ids)]
 
         degradation_intervals=list(np.arange(0,1.02,0.02))
@@ -1682,6 +1842,32 @@ class ProcessIndependentAnalisys():
 
             perc_list=[]
             not_first_prob_list=[]
+            for j in range(2,df_deg_level.shape[1]-1):
+                perc_list.append((df_deg_level.iloc[:, j]==1).sum()/df_deg_level.shape[0])
+                not_first_prob_list.append(df_deg_level[df_deg_level.iloc[:, j]==1]['not_first_prob'].mean())
+
+            matrix_perc.append(perc_list)
+            matrix_prob.append(not_first_prob_list)
+            num_data_per_level.append(df_deg_level.shape[0])
+
+        return np.array(matrix_perc),np.array(matrix_prob), degradation_intervals, num_data_per_level, df.columns[2:df_deg_level.shape[1]-1].str.replace('rank_', '', regex=False).tolist()
+
+    def matrix_train_test_grid_by_degradation(self,process_ids,global_deg_metric,local_deg_metric,seq_size,train_or_test,grid_n_ep,freq=None):
+
+        df=self.read_generate_train_test_grid_rank_by_degradation_data(process_ids,global_deg_metric,local_deg_metric,train_or_test,grid_n_ep,freq)
+        df=df[df['process_id'].isin(process_ids)]
+
+        degradation_intervals=list(np.arange(0,1.05,0.05))
+        matrix_perc=[]
+        matrix_prob=[]
+        num_data_per_level=[]
+        for i in range(1,len(degradation_intervals)):
+            max_deg_level=degradation_intervals[i]
+            min_deg_level=degradation_intervals[i-1]
+            df_deg_level=df[(df['degradation_level']>=min_deg_level) & (df['degradation_level']<max_deg_level) & (df['seq_size']<=seq_size)]# TODO: si cogemos exactamente las secuencias de ese tamaño, estamos construyendo las graficas solo con tantas secuencias como procesos consideremos. Si en cambio usamos <= seria acomulativo
+
+            perc_list=[]
+            not_first_prob_list=[]
             for j in range(3,df_deg_level.shape[1]-1):
                 perc_list.append((df_deg_level.iloc[:, j]==1).sum()/df_deg_level.shape[0])
                 not_first_prob_list.append(df_deg_level[df_deg_level.iloc[:, j]==1]['not_first_prob'].mean())
@@ -1692,10 +1878,11 @@ class ProcessIndependentAnalisys():
 
         return np.array(matrix_perc),np.array(matrix_prob), degradation_intervals, num_data_per_level, df.columns[3:df_deg_level.shape[1]-1].str.replace('rank_', '', regex=False).tolist()
 
-    def graph_best_criteria_by_degradation(self,process_ids,title):
+
+    def graph_best_criteria_by_degradation(self,process_ids,title,global_deg_metric='mean_update_deg',local_deg_metric='Cp'):
 
         # Generar matriz numerica para la grafica
-        matrix, matrix_prob,degradation_intervals,num_data_per_level=self.matrix_best_criteria_by_degradation(process_ids)
+        matrix, matrix_prob,degradation_intervals,num_data_per_level=self.matrix_best_criteria_by_degradation(process_ids,global_deg_metric,local_deg_metric)
         fig, axes = plt.subplots(2,1,figsize=(10,5),gridspec_kw={'height_ratios': [1, 3]})
         plt.subplots_adjust(left=0.08,bottom=0.27,right=0.97,top=0.92,wspace=0.39,hspace=0.07)
 
@@ -1734,12 +1921,12 @@ class ProcessIndependentAnalisys():
         ax.set_ylabel('Cumulative percentage of\ntimes criterion is the best')
         ax.legend(title='Criterion\nNumber inside: magnitude similarity (in [0,1]) with respect to lower ranks',loc='upper center', bbox_to_anchor=(0.5, -0.25), ncol=3)
 
-        plt.savefig('experiments_intuition/results/CriteriaComparison/figures/best_criterion_by_degradation_'+title+'.pdf')
+        plt.savefig('experiments_intuition/results/CriteriaComparison/figures/best_criteria_by_deg/'+global_deg_metric+'_'+local_deg_metric+'/advanced_'+title+'.pdf')
         #plt.show()
 
-    def graph_best_train_test_criteria_by_degradation(self,process_ids,title,train_or_test):
+    def graph_best_train_test_criteria_by_degradation(self,process_ids,title,train_or_test,global_deg_metric='mean_update_deg',local_deg_metric='Cp'):
         # Generar matriz numerica para la grafica
-        matrix, matrix_prob,degradation_intervals,num_data_per_level,labels=self.matrix_train_test_criteria_by_degradation(process_ids,train_or_test)
+        matrix, matrix_prob,degradation_intervals,num_data_per_level,labels=self.matrix_train_test_criteria_by_degradation(process_ids,global_deg_metric,local_deg_metric,train_or_test)
         fig, axes = plt.subplots(2,1,figsize=(10,5),gridspec_kw={'height_ratios': [1, 3]})
         plt.subplots_adjust(left=0.08,bottom=0.27,right=0.97,top=0.92,wspace=0.39,hspace=0.07)
 
@@ -1751,7 +1938,6 @@ class ProcessIndependentAnalisys():
         ax.set_xlim([-.5,len(degradation_intervals)-1.5])
         ax.set_xticks([])
         ax.set_title(title)
-
 
         # Dibujar las barras apiladas
         ax=list(axes)[1]
@@ -1776,10 +1962,161 @@ class ProcessIndependentAnalisys():
         ax.set_ylabel('Cumulative percentage of\ntimes criterion is the best')
         ax.legend(title=train_or_test+' configuration (n_ep_freq)\nNumber inside: magnitude similarity (in [0,1]) with respect to lower ranks',loc='upper center', bbox_to_anchor=(0.5, -0.25), ncol=len(labels))
 
-        plt.savefig('experiments_intuition/results/CriteriaComparison/figures/'+train_or_test+'_criterion_by_degradation_'+title+'.pdf')
+        plt.savefig('experiments_intuition/results/CriteriaComparison/figures/best_criteria_by_deg/'+global_deg_metric+'_'+local_deg_metric+'/sensitivity_'+train_or_test+'_'+title+'.pdf')
         #plt.show()
- 
 
+    def graph_gain_intuition_best_criteria_by_degradation(self,process_ids,grid_n_ep,grid_freq,grid_time_perc,global_deg_metric='mean_update_deg',local_deg_metric='Cp'):
+
+        # Crear la figura principal y definir la cuadricula principal (sin height_ratios, solo posiciones generales)
+        fig = plt.figure(figsize=(24, 30))
+        outer_grid = gridspec.GridSpec(2+len(grid_freq), len(grid_time_perc), figure=fig, hspace=0.3)  
+
+        def single_graph(outer_grid_ax,num_data_per_level,matrix,degradation_intervals,matrix_prob,labels,x_title,y_title,legend=False):
+            list_outer_grid_ax = gridspec.GridSpecFromSubplotSpec(2, 1, height_ratios=[1, 3], subplot_spec=outer_grid_ax)
+            
+            # Dibujar las barras que indican el numero de datos usados para calcular los datos de las barras apiladas de abajo
+            ax= fig.add_subplot(list_outer_grid_ax[0]) 
+
+            ax.bar(np.arange(len(matrix)), num_data_per_level, color='grey', width=1)
+            #ax.set_ylabel("Number of data\nper interval")
+            #ax.set_yscale('log')
+            ax.set_xlim([-.5,len(degradation_intervals)-1.5])
+            ax.set_xticks([])
+            #ax.set_title(title)
+
+            ax.set_title(x_title)
+
+            # Dibujar las barras apiladas
+            ax= fig.add_subplot(list_outer_grid_ax[1]) 
+
+            bottoms = np.zeros(len(matrix))  # Inicializar las posiciones base para apilar las barras
+            for i in range(len(labels)):
+                ax.bar(np.arange(len(matrix)), matrix[:, i], bottom=bottoms, label=labels[i], width=1)
+
+                # Escribir los valores dentro de las barras
+                for j in range(len(matrix)):
+                    if not math.isnan(matrix_prob[j][i]):
+                        ax.text(j, bottoms[j] + matrix[:, i][j] / 2, str(round(matrix_prob[j][i],1)),ha='center', va='center',fontsize=6, color='black',rotation=0)
+
+                # Actualizar las bases para apilar la siguiente barra
+                bottoms += matrix[:, i] 
+
+            
+            ax.set_xticks(np.arange(len(matrix)+1)-.5)  # Poner los ticks en el inicio de cada barra
+            ax.set_xlim([-.5,max(np.arange(len(matrix)+1)-.5)])
+            ax.set_xticklabels([str(round(i,2)) for i in degradation_intervals], rotation=90) 
+            #ax.set_xlabel('Degradation level')
+            #ax.set_ylabel('Cumulative percentage of\ntimes criterion is the best')
+            if legend:
+                ax.legend(loc="center left", bbox_to_anchor=(1, 0.5))
+
+            ax.set_ylabel(y_title)
+
+        seq_sizes=[int((self.iter_max-self.start_iter)*perc) for perc in grid_time_perc] # Esto diferenciara las columnas
+        for i in range(len(seq_sizes)):
+            if i==0:
+                y_titles=['Train', 'Test freq=1\n(without penalty)']+['Test freq='+str(freq) for freq in grid_freq]
+            else:
+                y_titles=['']*(2+len(grid_freq))
+
+            if i==len(seq_sizes)-1:
+                legend=True
+            else:
+                legend=False
+
+
+            # Primera fila: graficas de train
+            matrix, matrix_prob,degradation_intervals,num_data_per_level,labels=self.matrix_train_test_grid_by_degradation(process_ids,global_deg_metric,local_deg_metric,seq_sizes[i],'train',grid_n_ep)
+            single_graph(outer_grid[i],num_data_per_level,matrix,degradation_intervals,matrix_prob,labels,'Sequences of size: <='+str(int(grid_time_perc[i]*100))+'%',y_titles[0],legend)
+
+            # Segunda fila: graficas de test sin contar el extra de tiempo
+            matrix, matrix_prob,degradation_intervals,num_data_per_level,labels=self.matrix_train_test_grid_by_degradation(process_ids,global_deg_metric,local_deg_metric,seq_sizes[i],'test',grid_n_ep)
+            single_graph(outer_grid[i+len(seq_sizes)],num_data_per_level,matrix,degradation_intervals,matrix_prob,labels,'',y_titles[1],legend)
+
+            # Resto de filas: graficas de test con frecuencia concreta por fila y contando el extra de tiempo
+            for j in range(len(grid_freq)):
+                matrix, matrix_prob,degradation_intervals,num_data_per_level,labels=self.matrix_train_test_grid_by_degradation(process_ids,global_deg_metric,local_deg_metric,seq_sizes[i],'test',grid_n_ep,grid_freq[j])
+                single_graph(outer_grid[i+(j+2)*len(seq_sizes)],num_data_per_level,matrix,degradation_intervals,matrix_prob,labels,'',y_titles[2+j],legend)
+
+        plt.savefig('experiments_intuition/results/CriteriaComparison/figures/best_criteria_by_deg/'+global_deg_metric+'_'+local_deg_metric+'/gaining_intuition.pdf')
+        #plt.show()
+
+
+class SingleProcessAnalisys():
+    '''
+    Esta clase ejecuta un analisis comparativo de criterios completo para un unico proceso. Para el proceso indicado
+    (algortimo, environmnet, semilla, recursos), almacena en una carpeta independiente para el proceso los siguientes resultados graficos:
+    1) Descripcion del proceso: learning-curve con degradation evolution
+    2) Analisis de estimadores de expected epsodic reward: coste de estimacion y precision de estimadores para seleccion
+    3) Ajuste de configuraciones optimas para train y test
+    4) Comparacion de los tres criterios last, train y test (en sus mejores versiones/configuraciones): evoluciones de ranking y magnitudes (con comparacion de areas bajo curvas)
+    '''
+    def __init__(self,algo,env,seed,resources,max_iter):
+            
+        # Generar directorio donde se almacenaran las graficas.
+        os.makedirs('experiments_intuition/results/CriteriaComparison/figures/'+algo+'_'+env+'_seed'+str(seed), exist_ok=True)
+        
+        # Valores de parametros a considerara (se hara el tuning entre estos)
+        list_n_ep=[500,250,100,50,25,5]# Como las bases de datos "mejoradas" tienen almacenadas 1000 validaciones por politica
+        list_freq=[100,50,25,10,5,1]
+        
+        # Representacion del proceso
+        # grapher=EvolutionGrapher(algo,env,seed,resources,max_iter)
+        # grapher.learning_curve()
+        # grapher.graph_degradation_evolution('mean_update_deg','Cp')
+        # grapher.graph_degradation_evolution('weighted_mean_best_later_deg','Cp')
+        # grapher.graph_degradation_evolution('weighted_mean_best_later_deg','paired_diff')
+
+        # Analisis de estimaciones (coste y precision de seleccion)
+        analyzer=EstimationAnalyzer(algo,env,seed,resources,list_n_ep,list_n_ep,max_iter)
+        # analyzer.graph_cost_analysis()
+        analyzer.graph_accuracy_analysis('test')
+        analyzer.graph_accuracy_analysis('train')
+        # analyzer.graph_train_vs_test_estimates()
+
+        # Ajuste de parametros
+        # tuner=CriteriaTuner(algo,env,seed,resources,list_n_ep,list_freq,max_iter)
+        # opt_n_ep_train,opt_n_ep_test,opt_freq_test=tuner.graph_best_val_tuning()
+
+        # # Comparacion de mejor version de criterios existentes
+        # grapher=EvolutionGrapher(algo,env,seed,resources,max_iter,list_n_traj_ep=[opt_n_ep_train],list_n_val_ep=[opt_n_ep_test],list_n_val_freq=[opt_freq_test])
+        # grapher.graph_rank_evolution()
+        # grapher.graph_rank_evolution(True)
+        # grapher.graph_magnitude_evolution()
+        # grapher.graph_magnitude_evolution(True,True)
+
+       
+class ProcessIndependentAnalysis():
+    def __init__(self,process_ids,title,
+                 global_deg_metric,local_deg_metric,intuition=False):
+
+        # Generar datos de degradacion por proceso y magnitudes por criterio
+        analyzer=ProcessIndependentAnalyzer(306,
+                                            global_deg_metric=global_deg_metric,local_deg_metric=local_deg_metric,
+                                            all_possible_conf=True,
+                                            grid_train_n_ep=[500,250,100,50,25,5],grid_test_n_ep=[500,250,100,50,25,5],grid_test_freq=[100,50,25,10,5,1])
+
+        # Analisis avanzado: comparacion de mejores verisones de los tres criterios por nivel de degradacion
+        # - Configuraciones optimas para los criterios train y test en las secuencias de cada proceso generador (algo,env,seed)
+        # - Version original de test con penalizacion de tiempo extra (la magnitud es la diferencia del truth de la piltica seleccionada con el truth best real en la secuencia que hubiesemos generado invirtiendo todo el tiempo en train)
+        # - Para cada nivel de degradacion se consideran las secuencias de cualquir tamaño con esa degradacion
+        analyzer.graph_best_criteria_by_degradation(process_ids,title,global_deg_metric,local_deg_metric)
+
+        # Analisis de sensibilidad para las configuraciones de los criterios train y test: considerar como criterios las mejores versiones de train y test
+        analyzer.graph_best_train_test_criteria_by_degradation(process_ids,title,'train',global_deg_metric,local_deg_metric)
+        analyzer.graph_best_train_test_criteria_by_degradation(process_ids,title,'test',global_deg_metric,local_deg_metric)
+
+        # Analisis para ganar intuicion: 
+        # - Configuraciones explicitamente indicadas
+        # - Incremento de de dificultad test: sin penalizacion, y con penalizacion disminuyendo frecuencia
+        # - Diferentes tamaños de secuencias por separado
+        if intuition:
+            analyzer.graph_gain_intuition_best_criteria_by_degradation(process_ids,[500,250,100,50,25,5],[100,50,25,10,5,1],[0.25,0.5,0.75,1],
+                                                                       global_deg_metric,local_deg_metric)
+
+#==================================================================================================
+# Main: experimentos realizados
+#==================================================================================================
 # Analisis de procesos individuales (306 iteraciones equivalen aproximadamente a 10000000 steps de aprendizaje con 16 environments en paralelo)
 SingleProcessAnalisys('PPO','Ant',1,'16cpu1gpu_mejorado',306)
 SingleProcessAnalisys('PPO','Ant',2,'16cpu1gpu_mejorado',306)
@@ -1793,27 +2130,27 @@ SingleProcessAnalisys('PPO','Humanoid',4,'16cpu1gpu_mejorado',306)
 
 SingleProcessAnalisys('PPO','HumanoidStandup',1,'16cpu1gpu_mejorado',306)
 
-# Analisis general (independiente de proceso)
-analyzer=ProcessIndependentAnalisys(306,all_possible_conf=True)
-analyzer.graph_best_criteria_by_degradation(['PPO_Ant_seed1'],'Ant1')
-analyzer.graph_best_criteria_by_degradation(['PPO_Ant_seed1','PPO_Ant_seed2','PPO_Ant_seed3','PPO_Ant_seed4'],'all_Ant')
-analyzer.graph_best_criteria_by_degradation(['PPO_Humanoid_seed1','PPO_Humanoid_seed2','PPO_Humanoid_seed3','PPO_Humanoid_seed4'],'all_Humanoid')
-analyzer.graph_best_criteria_by_degradation(['PPO_HumanoidStandup_seed1'],'HumanoidStandup1')
-analyzer.graph_best_criteria_by_degradation(['PPO_Ant_seed1','PPO_Ant_seed2','PPO_Ant_seed3','PPO_Ant_seed4',
-                                              'PPO_Humanoid_seed1','PPO_Humanoid_seed2','PPO_Humanoid_seed3','PPO_Humanoid_seed4'],'all_Ant_Humanoid')
-analyzer.graph_best_criteria_by_degradation(['PPO_Ant_seed1','PPO_Ant_seed2','PPO_Ant_seed3','PPO_Ant_seed4',
-                                              'PPO_Humanoid_seed1','PPO_Humanoid_seed2','PPO_Humanoid_seed3','PPO_Humanoid_seed4',
-                                              'PPO_HumanoidStandup_seed1'],'all_Ant_Humanoid_HumanoidStandup')
+# Analisis general (independiente de proceso) usando diferentes metricas de degradacion
+all_process_ids=['PPO_Ant_seed1','PPO_Ant_seed2','PPO_Ant_seed3','PPO_Ant_seed4',
+                'PPO_Humanoid_seed1','PPO_Humanoid_seed2','PPO_Humanoid_seed3','PPO_Humanoid_seed4',
+                'PPO_HumanoidStandup_seed1']
+global_deg_metric='mean_update_deg'
+local_deg_metric='Cp'
+ProcessIndependentAnalysis(all_process_ids[0:4],'all_Ant',global_deg_metric,local_deg_metric)
+ProcessIndependentAnalysis(all_process_ids[4:8],'all_Humanoid',global_deg_metric,local_deg_metric)
+ProcessIndependentAnalysis(all_process_ids,'all_Ant_Humanoid_HumanoidStandup',global_deg_metric,local_deg_metric,True)
 
-# Sensibilidad a configuracion
-analyzer.graph_best_train_test_criteria_by_degradation(['PPO_Ant_seed1','PPO_Ant_seed2','PPO_Ant_seed3','PPO_Ant_seed4'],'all_Ant','train')
-analyzer.graph_best_train_test_criteria_by_degradation(['PPO_Ant_seed1','PPO_Ant_seed2','PPO_Ant_seed3','PPO_Ant_seed4'],'all_Ant','test')
-analyzer.graph_best_train_test_criteria_by_degradation(['PPO_Humanoid_seed1','PPO_Humanoid_seed2','PPO_Humanoid_seed3','PPO_Humanoid_seed4'],'all_Humanoid','train')
-analyzer.graph_best_train_test_criteria_by_degradation(['PPO_Humanoid_seed1','PPO_Humanoid_seed2','PPO_Humanoid_seed3','PPO_Humanoid_seed4'],'all_Humanoid','test')
+global_deg_metric='weighted_mean_best_later_deg'
+local_deg_metric='paired_diff'
+ProcessIndependentAnalysis(all_process_ids[0:4],'all_Ant',global_deg_metric,local_deg_metric)
+ProcessIndependentAnalysis(all_process_ids[4:8],'all_Humanoid',global_deg_metric,local_deg_metric)
+ProcessIndependentAnalysis(all_process_ids,'all_Ant_Humanoid_HumanoidStandup',global_deg_metric,local_deg_metric,True)
 
-analyzer.graph_best_train_test_criteria_by_degradation(['PPO_Ant_seed1','PPO_Ant_seed2','PPO_Ant_seed3','PPO_Ant_seed4',
-                                              'PPO_Humanoid_seed1','PPO_Humanoid_seed2','PPO_Humanoid_seed3','PPO_Humanoid_seed4',
-                                              'PPO_HumanoidStandup_seed1'],'all_Ant_Humanoid_HumanoidStandup','train')
-analyzer.graph_best_train_test_criteria_by_degradation(['PPO_Ant_seed1','PPO_Ant_seed2','PPO_Ant_seed3','PPO_Ant_seed4',
-                                              'PPO_Humanoid_seed1','PPO_Humanoid_seed2','PPO_Humanoid_seed3','PPO_Humanoid_seed4',
-                                              'PPO_HumanoidStandup_seed1'],'all_Ant_Humanoid_HumanoidStandup','test')
+global_deg_metric='weighted_mean_best_later_deg'
+local_deg_metric='Cp'
+ProcessIndependentAnalysis(all_process_ids[0:4],'all_Ant',global_deg_metric,local_deg_metric)
+ProcessIndependentAnalysis(all_process_ids[4:8],'all_Humanoid',global_deg_metric,local_deg_metric)
+ProcessIndependentAnalysis(all_process_ids,'all_Ant_Humanoid_HumanoidStandup',global_deg_metric,local_deg_metric,True)
+
+
+
