@@ -1,4 +1,5 @@
-'''
+'''TODO: este encabezado fue actualizado tras el MAEB (ahora hay mas)
+
 En este scrip se aborda la comparacion grafica de los criterios existentes.
 
 Se consideran 30 procesos de aprendizaje: 
@@ -10,7 +11,7 @@ algo= PPO, env=Ant, learning time=10000000 steps, 16 CPU para interaccion train 
 algo= PPO, env=Humanoid, learning time=10000000 steps, 16 CPU para interaccion train y validacion en 1000 episodios (y device='auto')
 
 - seed=1,...,10
-algo= PPO, env=Humanoid, learning time=10000000 steps, 16 CPU para interaccion train y validacion en 1000 episodios (y device='auto')
+algo= PPO, env=HumanoidStandup, learning time=10000000 steps, 16 CPU para interaccion train y validacion en 1000 episodios (y device='auto')
 
 
 De los 1000 datos de episodic reward almacenados:
@@ -54,7 +55,10 @@ from itertools import chain
 import csv
 import re
 from sklearn.neighbors import KernelDensity
+from scipy.stats import gaussian_kde
 import seaborn as sns
+from matplotlib.ticker import FuncFormatter, FormatStrFormatter, MultipleLocator
+
 
 
 parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -148,9 +152,9 @@ class Estimator:
     #----------------------------------------------------------------------------------------------
     # Para estimaciones de degradacion
     #----------------------------------------------------------------------------------------------
-    def estimate_any_degradation(A,B,degradation_metric,also_dominance=False):
+    def estimate_any_degradation(A,B,degradation_metric,also_dominance=False,additionals=None):
         '''
-        `degradation_metric`: 'greater_prob', 'paired_diff_probpos_meanpos', 'paired_diff_median'
+        `degradation_metric`: 'greater_prob', 'paired_diff_probpos_meanpos', 'paired_diff_median', 'paired_diff_probpos', 'relative_reward_diff'
         
         'greater_prob'
         Transformacion de la estimacion de la probabilidad de que las variables aleatorias de las que provienen las muestras A y B cumplan: X_A < X_B 
@@ -160,8 +164,8 @@ class Estimator:
         cuanto mas cerca de 1 mas degradacion). Esta funcion normaliza C_p en [0,1] cuando C_p toma valores en (0.5,1] (i.e. B=X_prev domina
         a A=X_current) y 0 en los demas casos (A=X_current domina a B=X_prev o son iguales).
 
-        'paired_diff_probpos_meanpos'
-        Estimacion de que la probabilida de la variable aleatoria definida como la diferencia pareada de los episodic reward de dos politicas en
+        'paired_diff_probpos'
+        Estimacion de que la probabilidad de la variable aleatoria definida como la diferencia pareada de los episodic reward de dos politicas en
         la secuencia sea positiva.
         '''
         if degradation_metric=='greater_prob':  
@@ -219,7 +223,22 @@ class Estimator:
 
             return degradation
         
-    def estimate_update_degradations(algo,env,seed,resources, iter_max,degradation_metric='greater_prob'):
+        if degradation_metric=='relative_reward_diff':
+            # NOTE: esta metrica es la unica entre todas que no usa la distribucion (muestra) de los rewards, unicamente usa la media.
+            #Por ello, para qe la degradacion local sea un valor en [0,1] y comparable con otras degradaciones locales de otro par
+            #de politicas asociado otras tareas/procesos, debemos normalizarla/estandarizarla. Para ello necesitamos conocer el reward maximo
+            #y el reward minimo alcanzable en esa tarea (cosa que desconocemos). Como nosotros solo usaremos esta medida para comparar
+            #diferentes pares de politicas en el mismo proceso, aproximaremos esos valores con el maximo y minimo observados en el proceso.
+            #Por tanto, la  metrica resultante es equivalente a la magnitud.
+
+            indicator=[1 if np.mean(B)>np.mean(A) else 0][0]
+            relative_diff=abs(np.mean(A)-np.mean(B))/(additionals[1]-additionals[0])
+            degradation=relative_diff*indicator
+
+            return degradation
+
+        
+    def estimate_update_degradations(algo,env,seed,resources, iter_max,degradation_metric='greater_prob',additionals=None):
         '''
         Calcula la evolucion de la degradacion local entre politicas consecutivas, i.e. update degradation, usando la metrica local indicada.
         '''
@@ -242,10 +261,13 @@ class Estimator:
                 update_dominances.append(dominance)
             if degradation_metric in ['paired_diff_probpos_meanpos','paired_diff_median','paired_diff_probpos']:
                 update_degradations.append(Estimator.estimate_any_degradation(np.array(X_current),np.array(X_prev),degradation_metric))
+            if degradation_metric=='relative_reward_diff':
+                update_degradations.append(Estimator.estimate_any_degradation(np.array(X_current),np.array(X_prev),degradation_metric,
+                                                                              additionals=additionals))
 
         if degradation_metric=='greater_prob':
             return update_degradations,update_dominances
-        if degradation_metric in ['paired_diff_probpos_meanpos','paired_diff_median','paired_diff_probpos']:
+        if degradation_metric in ['paired_diff_probpos_meanpos','paired_diff_median','paired_diff_probpos','relative_reward_diff']:
             return update_degradations
 
     #----------------------------------------------------------------------------------------------
@@ -284,6 +306,8 @@ class Estimator:
         # Calcular estimaciones que usaremos como ground truth con los primeros 500 episodios de validacion
         df_test['ep_rewards']=[ Converter.compress_decompress_list(i,compress=False) for i in df_test['ep_rewards']]
         df_val_estimates=Estimator.read_create_estimates_csv(current_path+'/df_val_estimates.csv',df_train.shape[0])
+        #print([ np.mean(i[:500]) for i in df_test['ep_rewards'] ]==df_val_estimates['truth'].tolist()) NOTE: tras pasar un tiempo y volver a repetir la operacion de descomprension y media, los resultados salen diferentes
+        
         if 'truth' not in df_val_estimates.columns.tolist():
             df_val_estimates['truth']=[ np.mean(i[:500]) for i in df_test['ep_rewards'] ]
             df_val_estimates.to_csv(current_path+'/df_val_estimates.csv', index=False)
@@ -292,7 +316,7 @@ class Estimator:
             df_val_estimates.to_csv(current_path+'/df_val_estimates.csv', index=False)
         
         # Tambien estimaciones de degradacion para añadir a las learning-curve mas informativas (empezar a considerar la degradacion despues del 10% del tiempo)
-        degradation_metrics=['greater_prob','paired_diff_probpos_meanpos','paired_diff_median','paired_diff_probpos']
+        degradation_metrics=['greater_prob','paired_diff_probpos_meanpos','paired_diff_median','paired_diff_probpos','relative_reward_diff']
         for degradation_metric in degradation_metrics:
             if 'update_deg_'+degradation_metric not in df_val_estimates.columns.tolist():
                 if degradation_metric=='greater_prob':
@@ -300,6 +324,9 @@ class Estimator:
                     df_val_estimates['update_dominances']=[0 for _ in range(int(df_test.shape[0]*.1))]+update_dominances[int(df_test.shape[0]*.1):]
                 if degradation_metric in ['paired_diff_probpos_meanpos','paired_diff_median','paired_diff_probpos']:
                     update_degradations=Estimator.estimate_update_degradations(algo,env,seed,resources,df_test.shape[0],degradation_metric)
+                if degradation_metric=='relative_reward_diff':
+                    update_degradations=Estimator.estimate_update_degradations(algo,env,seed,resources,df_test.shape[0],degradation_metric,
+                                                                               additionals=[df_val_estimates['truth'].min(),df_val_estimates['truth'].max()])
 
                 df_val_estimates['update_deg_'+degradation_metric]=[0 for _ in range(int(df_test.shape[0]*.1))]+update_degradations[int(df_test.shape[0]*.1):]
                 df_val_estimates.to_csv(current_path+'/df_val_estimates.csv', index=False)
@@ -410,6 +437,17 @@ class Converter:
             cbar.set_label(cbar_title,fontsize=12, labelpad=5)
             cbar.ax.xaxis.set_tick_params(rotation=0)
 
+    def generate_df(path_csv,column_names):
+
+        if not os.path.exists(path_csv):
+            df_estimates = pd.DataFrame(columns=column_names)
+            os.makedirs(os.path.dirname(path_csv), exist_ok=True)
+            df_estimates.to_csv(path_csv, index=False)
+        else:
+            df_estimates=pd.read_csv(path_csv)
+        
+        return df_estimates
+
     def from_csv_to_png(csv_path,csv_name):
         df = pd.read_csv(csv_path+'/'+csv_name+'.csv')
         df=df.sort_values(by='process_id', ascending=True)
@@ -441,16 +479,31 @@ class Converter:
     
     def from_list_to_prob_not_first(value_list,small_best=True):
         value_list=list(value_list)
-        min_value=min(value_list)
-        value_list.remove(min_value)
-        return np.mean([min_value/value if value!=0 else 1 for value in value_list])
-    
-    # TODO: aunque haya escrito para MAEB, esta es la correcta
-    def MAEB_from_list_to_prob_not_first(value_list,small_best=True):
-        value_list=list(value_list)
         min_value=[min(value_list) if min(value_list)!=0 else 1e-10][0]
         value_list.remove(min(value_list))
         return max([min_value/value if value!=0 else 1 for value in value_list])
+    
+    def from_list_to_diff_not_best(value_list,small_best=True):
+        value_list=list(value_list)
+        min_value= min(value_list)
+        value_list.remove(min_value)
+        next_min_value=min(value_list)
+
+        if next_min_value==0:
+            return 0
+        else:
+            return (next_min_value-min_value)/next_min_value
+    
+    def from_lists_best_worst_to_relative_diff(best_mag,worst_mag):
+        diff=[]
+        for mag1,mag2 in zip(best_mag,worst_mag):
+
+            if mag2==0:
+                diff.append(0)
+            else:
+                diff.append((mag2-mag1)/mag2)
+
+        return diff
 
 
 class EvolutionGenerator:
@@ -506,8 +559,8 @@ class EvolutionGenerator:
     
     def degradation_level(self,elapsed_time,global_metric,local_metric):
         '''
-        `global_metric`: 'mean_update_deg', 'weighted_mean_best_later_deg', 'best_last_deg'
-        `local_metric`: 'greater_prob', 'paired_diff_probpos_meanpos', 'paired_diff_median', 'paired_diff_probpos'
+        `global_metric`: 'mean_update_deg', 'weighted_mean_best_later_deg', 'best_last_deg', 'relative_worsening_to_improvement'
+        `local_metric`: 'greater_prob', 'paired_diff_probpos_meanpos', 'paired_diff_median', 'paired_diff_probpos', 'relative_reward_diff'
         '''
 
         if global_metric=='mean_update_deg':
@@ -544,6 +597,25 @@ class EvolutionGenerator:
             last_ep_rewards=np.array(Converter.compress_decompress_list(self.df_test.loc[last_idx,'ep_rewards'],compress=False)[:500])
             degradation_level=Estimator.estimate_any_degradation(last_ep_rewards,best_ep_rewards,local_metric)
 
+        if global_metric=='relative_worsening_to_improvement':
+            # Indices de la ultima y mejor politica en el tiempo transcurrido
+            truth_best_idx=self.truth_best_policy(elapsed_time)
+            last_idx=self.last_policy(elapsed_time)
+
+            # Identificar la peor y mejor politicas del proceso (para la normmalizacion y que la metrica local este en [0,1])
+            process_worst_ep_truth=self.df_test_estimates['truth'].min()
+            process_best_ep_truth=self.df_test_estimates['truth'].max()
+
+            # Degradacion local entre: mejor-ultima y mejor-primera
+            best_ep_truth=self.df_test_estimates.loc[truth_best_idx,'truth']
+            last_ep_truth=self.df_test_estimates.loc[last_idx,'truth']
+            init_ep_truth=self.df_test_estimates.loc[self.start_iter-1,'truth']
+
+            best_last_deg=Estimator.estimate_any_degradation(last_ep_truth,best_ep_truth,local_metric,additionals=[process_worst_ep_truth,process_best_ep_truth])
+            best_init_deg=Estimator.estimate_any_degradation(init_ep_truth,best_ep_truth,local_metric,additionals=[process_worst_ep_truth,process_best_ep_truth])
+            indicator=[0 if init_ep_truth!=last_ep_truth else 1][0]
+
+            degradation_level=best_last_deg/max(best_init_deg,best_last_deg,indicator)
         return degradation_level
     
     def effectiveness(self,elapsed_time,n_policy,normalized):
@@ -607,6 +679,7 @@ class EvolutionGenerator:
 
         # Indice de la politica (en la subsecuencia de las politicas asociadas a las frecuencias) con mayor mean ER en validacion
         indx_subseq=estimated_EER_seq.index(max(estimated_EER_seq))
+
 
         # Politica seleccionada y tiempo extra total invertido en su seleccion
         return current_val_policies[indx_subseq], sum(times_seq)
@@ -1050,34 +1123,38 @@ class EvolutionGrapher():
         ax.set_xlabel('Learning iteration ($i$)')
 
         # KDE de iteracion actual y previa para comparar similitud entre metrica de degradacion y estimacion truth
-        if local_metric=='greater_prob':
-            dominances=np.array(self.generator.df_test_estimates['update_dominances'][self.start_iter:])
-        else:
-            dominances=[None]*(self.iter_max-self.start_iter)
-
         update_degradation=abs(np.array(self.generator.df_test_estimates['update_deg_'+local_metric][self.start_iter:])) # abs porque al hacer np.array los ceros salen -0.0
-        truth_degradation=[0]+[self.generator.df_test_estimates['truth'][i-1]-self.generator.df_test_estimates['truth'][i] for i in range(1,self.iter_max)]
-        truth_degradation=abs(Converter.normalize_list([i if i>0 else 0 for i in truth_degradation]))[self.start_iter:]
 
-        true_negative=['True negative',min((i for i, deg in enumerate(truth_degradation) if deg==0),key=lambda i: update_degradation[i],default=None)]
-        true_positive=['True positive',max((i for i, deg in enumerate(truth_degradation) if deg>0),key=lambda i: update_degradation[i],default=None)]
-        false_negative=['False negative',max((i for i, deg in enumerate(truth_degradation) if deg==0),key=lambda i: update_degradation[i],default=None)]
-        false_positive=['False positive',max((i for i, deg in enumerate(update_degradation) if deg==0),key=lambda i: truth_degradation[i],default=None)]
-
-        highlighted_iter=[true_negative,true_positive,false_negative,false_positive]
-        for i in range(4):
-            ax=plt.subplot(4,4,13+i) 
-            if highlighted_iter[i][1]!=None:
-                metrics_to_show=[dominances[highlighted_iter[i][1]],update_degradation[highlighted_iter[i][1]],truth_degradation[highlighted_iter[i][1]]]
-                KDE_consecutive_policies(highlighted_iter[i][1]+self.start_iter,ax,highlighted_iter[i][0]+' ($i$='+str(highlighted_iter[i][1]+self.start_iter)+')',local_metric,metrics_to_show,i==0)
+        if local_metric not in ['relative_reward_diff']:
+            if local_metric=='greater_prob':
+                dominances=np.array(self.generator.df_test_estimates['update_dominances'][self.start_iter:])
             else:
-                ax.set_xlabel('No '+highlighted_iter[i][0])
-                ax.set_frame_on(False)  
-                ax.set_xticks([])  
-                ax.set_yticks([])  
-                ax.set_xticklabels([]) 
-                ax.set_yticklabels([])  
+                dominances=[None]*(self.iter_max-self.start_iter)
 
+            truth_degradation=[0]+[self.generator.df_test_estimates['truth'][i-1]-self.generator.df_test_estimates['truth'][i] for i in range(1,self.iter_max)]
+            truth_degradation=abs(Converter.normalize_list([i if i>0 else 0 for i in truth_degradation]))[self.start_iter:]
+
+            true_negative=['True negative',min((i for i, deg in enumerate(truth_degradation) if deg==0),key=lambda i: update_degradation[i],default=None)]
+            true_positive=['True positive',max((i for i, deg in enumerate(truth_degradation) if deg>0),key=lambda i: update_degradation[i],default=None)]
+            false_negative=['False negative',max((i for i, deg in enumerate(truth_degradation) if deg==0),key=lambda i: update_degradation[i],default=None)]
+            false_positive=['False positive',max((i for i, deg in enumerate(update_degradation) if deg==0),key=lambda i: truth_degradation[i],default=None)]
+
+            highlighted_iter=[true_negative,true_positive,false_negative,false_positive]
+            for i in range(4):
+                ax=plt.subplot(4,4,13+i) 
+                if highlighted_iter[i][1]!=None:
+                    metrics_to_show=[dominances[highlighted_iter[i][1]],update_degradation[highlighted_iter[i][1]],truth_degradation[highlighted_iter[i][1]]]
+                    KDE_consecutive_policies(highlighted_iter[i][1]+self.start_iter,ax,highlighted_iter[i][0]+' ($i$='+str(highlighted_iter[i][1]+self.start_iter)+')',local_metric,metrics_to_show,i==0)
+                else:
+                    ax.set_xlabel('No '+highlighted_iter[i][0])
+                    ax.set_frame_on(False)  
+                    ax.set_xticks([])  
+                    ax.set_yticks([])  
+                    ax.set_xticklabels([]) 
+                    ax.set_yticklabels([])  
+        else:
+            for i in range(4):
+                plt.subplot(4,4,13+i).axis('off')
         # Barras de colores
         Converter.generate_colorbar(fig,[0.84, 0.55, 0.015, 0.4],cmap_white_to_red,[0,max(update_degradation)],'Update degradation ($\delta_{i-1,i}$)')
         Converter.generate_colorbar(fig,[0.92, 0.55, 0.015, 0.4],'Greys',[0,max(degradation_level)],'Degradation level ($\delta_i$)')
@@ -1975,9 +2052,12 @@ class ProcessIndependentAnalyzer():
         df_train_eff=Estimator.read_create_estimates_csv('experiments_intuition/results/CriteriaComparison/data/deg_mag/criteria_best_train_eff.csv',iter_max,start_iter)
         df_test_eff=Estimator.read_create_estimates_csv('experiments_intuition/results/CriteriaComparison/data/deg_mag/criteria_best_test_eff.csv',iter_max,start_iter)
         
+        df_test_start_end=Converter.generate_df('experiments_intuition/results/CriteriaComparison/data/test_start_end_perc_time.csv',
+                                                ['process_id','test_conf','start_test','end_test','perc_good','invest_time','last_good','last_time'])
+
         # Leer base de datos donde se almacenan las mejores configuraciones de los criterios por proceso (criteria_conf_by_process.csv)
         df_conf=pd.read_csv('experiments_intuition/results/CriteriaComparison/data/criteria_conf_by_process.csv')
-        
+        '''
         
         # Calcular y guardar por proceso: evolucion de nivel de degradacion y evolucion de magnitudes por criterio (si no estan ya guardados)
         for row in tqdm(range(df_conf.shape[0])):# Aqui estan guardados todos los procesos que consideraremos
@@ -1994,7 +2074,7 @@ class ProcessIndependentAnalyzer():
                 
                 # Calcular y guardar las evolucion de nivel de degradacion
                 df_degradation[process_id+'_'+global_deg_metric+'_'+local_deg_metric]=generator.degradation_evolution(x_times,global_deg_metric,local_deg_metric)
-
+            
                 # Configuracion optima de los criterios train y test 
                 train_n_ep,test_n_ep,test_freq=df_conf.loc[row,['train_n_ep','test_n_ep','test_freq']]
 
@@ -2031,6 +2111,7 @@ class ProcessIndependentAnalyzer():
 
 
             print('if de sensibilidad listo')
+            
             # Almacenar datos de configuraciones indicadas (para analisis intermedio, menos avanzado)
             if grid_train_n_ep!=None:
                 for n_ep in grid_train_n_ep:
@@ -2050,7 +2131,7 @@ class ProcessIndependentAnalyzer():
                         x_times_with_freq=Estimator.time_discretizer(algo,env,seed,'16cpu1gpu_mejorado',1,iter_max,min_time)
                         df_test_eff[process_id+'_'+str(n_ep)+'_without_extra']=generator.effectiveness_evolution(x_times,n_ep=n_ep,freq=x_times_with_freq,criteria='best_val',normalized=True)[0]
 
-
+            
                     # Contando el extra de tiempo de validacion para diferentes frecuencias
                     for freq in grid_test_freq:
                         if process_id+'_'+str(n_ep)+'_'+str(freq) not in list(df_test_mag.columns):
@@ -2060,8 +2141,9 @@ class ProcessIndependentAnalyzer():
                             x_times_with_freq=Estimator.time_discretizer(algo,env,seed,'16cpu1gpu_mejorado',freq,iter_max,min_time)    
                             df_test_mag[process_id+'_'+str(n_ep)+'_'+str(freq)]=generator.effectiveness_evolution(x_times,n_ep=n_ep,freq=x_times_with_freq,criteria='best_val',normalized=True)[0]
 
-
+            
             print('if de intuicion test listo')  
+            
             # Guardar cambios en bases de datos
             df_degradation.to_csv('experiments_intuition/results/CriteriaComparison/data/deg_mag/level_degradation.csv', index=False)
             df_last_mag.to_csv('experiments_intuition/results/CriteriaComparison/data/deg_mag/criteria_last_mag.csv', index=False)
@@ -2071,7 +2153,9 @@ class ProcessIndependentAnalyzer():
             df_last_eff.to_csv('experiments_intuition/results/CriteriaComparison/data/deg_mag/criteria_last_eff.csv', index=False)
             df_train_eff.to_csv('experiments_intuition/results/CriteriaComparison/data/deg_mag/criteria_best_train_eff.csv', index=False)
             df_test_eff.to_csv('experiments_intuition/results/CriteriaComparison/data/deg_mag/criteria_best_test_eff.csv', index=False)
-        
+
+            df_test_start_end.to_csv('experiments_intuition/results/CriteriaComparison/data/test_start_end_perc_time.csv', index=False)
+        '''
         self.df_degradation=df_degradation
         self.df_last_mag=df_last_mag
         self.df_train_mag=df_train_mag
@@ -2079,6 +2163,7 @@ class ProcessIndependentAnalyzer():
         self.df_last_eff=df_last_eff
         self.df_train_eff=df_train_eff
         self.df_test_eff=df_test_eff
+        self.df_test_start_end=df_test_start_end
         self.iter_max=iter_max
 
     def generate_criteria_rank_by_time_data(self,process_ids,train_grid_n_ep,test_grid_n_ep,test_grid_freq,global_deg_metric,local_deg_metric):
@@ -2116,7 +2201,7 @@ class ProcessIndependentAnalyzer():
     def MAEB_generate_criteria_rank_by_time_data(self,process_ids,train_grid_n_ep,test_grid_n_ep,test_grid_freq,global_deg_metric,local_deg_metric):
         
         train_suffix=[str(n_ep) for n_ep in train_grid_n_ep]
-        test_suffix=[str(n_ep) for n_ep in test_grid_n_ep for freq in test_grid_freq]
+        test_suffix=[str(n_ep)+'_'+str(freq) for n_ep in test_grid_n_ep for freq in test_grid_freq]
         
         df = pd.DataFrame(columns=['process_id','seq_size','degradation_level','rank_last']+['rank_'+i for i in train_suffix+test_suffix]+['not_first_prob','first_mag','first_eff'])
         
@@ -2129,19 +2214,19 @@ class ProcessIndependentAnalyzer():
             # Magnitudes
             last_criterion_mag=[self.df_last_mag[process_id].tolist()]
             train_criteria_mag=[self.df_train_mag[process_id+'_'+suffix] for suffix in train_suffix]
-            test_criteria_mag=[self.df_test_mag[process_id+'_'+suffix+'_without_extra'] for suffix in test_suffix]
+            test_criteria_mag=[self.df_test_mag[process_id+'_'+str(n_ep)+'_without_extra'] for n_ep in test_grid_n_ep]
             criteria_mag=np.array(last_criterion_mag+train_criteria_mag+test_criteria_mag).T
 
             # Effectiveness
             last_criterion_eff=[self.df_last_eff[process_id].tolist()]
             train_criteria_eff=[self.df_train_eff[process_id+'_'+suffix] for suffix in train_suffix]
-            test_criteria_eff=[self.df_test_eff[process_id+'_'+suffix+'_without_extra'] for suffix in test_suffix]
+            test_criteria_eff=[self.df_test_eff[process_id+'_'+str(n_ep)+'_without_extra'] for n_ep in test_grid_n_ep]
             criteria_eff=np.array(last_criterion_eff+train_criteria_eff+test_criteria_eff).T
 
 
             # Rankings y similitudes de magnitudes
             criteria_rankings=[Converter.from_list_to_ranking(magnitudes) for magnitudes in criteria_mag]
-            not_first_probs=[Converter.MAEB_from_list_to_prob_not_first(magnitudes) for magnitudes in criteria_mag]
+            not_first_probs=[Converter.from_list_to_diff_not_best(magnitudes) for magnitudes in criteria_mag]
             first_mags=[max(magnitudes) for magnitudes in criteria_mag]
             first_effs=[eff[list(mag).index(min(mag))] for mag,eff in zip(criteria_mag,criteria_eff)]
 
@@ -2156,7 +2241,7 @@ class ProcessIndependentAnalyzer():
     def MAEB2_generate_criteria_rank_by_time_data(self,process_ids,train_grid_n_ep,test_grid_n_ep,test_grid_freq,global_deg_metric,local_deg_metric):
         
         train_suffix=[str(n_ep) for n_ep in train_grid_n_ep]
-        test_suffix=[str(n_ep) for n_ep in test_grid_n_ep for freq in test_grid_freq]
+        test_suffix=[str(n_ep)+'_'+str(freq) for n_ep in test_grid_n_ep for freq in test_grid_freq]
         
         df = pd.DataFrame(columns=['process_id','seq_size','degradation_level','mag_last']+['mag_'+i for i in train_suffix+test_suffix]+['eff_last']+['eff_'+i for i in train_suffix+test_suffix])
         
@@ -2169,13 +2254,13 @@ class ProcessIndependentAnalyzer():
             # Magnitudes
             last_criterion_mag=[self.df_last_mag[process_id].tolist()]
             train_criteria_mag=[self.df_train_mag[process_id+'_'+suffix] for suffix in train_suffix]
-            test_criteria_mag=[self.df_test_mag[process_id+'_'+suffix+'_without_extra'] for suffix in test_suffix]
+            test_criteria_mag=[self.df_test_mag[process_id+'_'+str(n_ep)+'_without_extra'] for n_ep in test_grid_n_ep]
             criteria_mag=np.array(last_criterion_mag+train_criteria_mag+test_criteria_mag).T
 
             # Eficacias
             last_criterion_eff=[self.df_last_eff[process_id].tolist()]
             train_criteria_eff=[self.df_train_eff[process_id+'_'+suffix] for suffix in train_suffix]
-            test_criteria_eff=[self.df_test_eff[process_id+'_'+suffix+'_without_extra'] for suffix in test_suffix]
+            test_criteria_eff=[self.df_test_eff[process_id+'_'+str(n_ep)+'_without_extra'] for n_ep in test_grid_n_ep]
             criteria_eff=np.array(last_criterion_eff+train_criteria_eff+test_criteria_eff).T
 
             # Completar base de datos con datos de proceso
@@ -2393,42 +2478,29 @@ class ProcessIndependentAnalyzer():
         df=self.MAEB_generate_criteria_rank_by_time_data(process_ids,train_grid_n_ep,test_grid_n_ep,test_grid_freq,global_deg_metric,local_deg_metric)
         df=df[df['process_id'].isin(process_ids)]
 
+        deg_intervals=list(np.arange(0,1+1/3,1/3))[::-1]
+        matrix_deg_intervals=[] # Aqui se almacenaran "las distribuciones" de los niveles de degradacion por intervalo de tamaños de secuencia
+        
         seq_size_intervals=list(np.arange(0,1.25,0.25))
         max_size=self.iter_max-self.start_iter
         matrix_perc=[] # Aqui se almacenaran los datos para las barras apiladas
-        matrix_prob=[] # Aqui se almacenaran los datos para los valores dentro de las barras apiladas
-        matrix_mag=[]
-        matrix_deg=[]
-        matrices=[]
 
-        deg_intervals=list(np.arange(0,1+1/3,1/3))[::-1]
-        matrix_deg_intervals=[] # Aqui se almacenaran "las distribuciones" de los niveles de degradacion por intervalo de tamaños de secuencia
 
         split_seq_size=int(max_size*seq_size_intervals[1])
         for i in range(1,len(seq_size_intervals)):
             max_seq_size=split_seq_size*i
             min_seq_size=1+split_seq_size*(i-1)
             df_seq_size=df[(df['seq_size']>=min_seq_size) & (df['seq_size']<max_seq_size) ]
-            matrices.append(df_seq_size[df.columns.tolist()[3:6]])
-
             perc_list=[]
-            not_first_prob_list=[]
-            first_mag_list=[]
-            first_deg_list=[]
             for j in range(3,df_seq_size.shape[1]-2):
                 perc_list.append((df_seq_size.iloc[:, j]==1).sum()/df_seq_size.shape[0])
-                not_first_prob_list.append(df_seq_size[df_seq_size.iloc[:, j]==1]['not_first_prob'].mean())
-                first_mag_list.append(df_seq_size[df_seq_size.iloc[:, j]==1]['first_mag'].mean())
-                first_deg_list.append(df_seq_size[df_seq_size.iloc[:, j]==1]['degradation_level'].mean())
 
+            provisional=list(df_seq_size['degradation_level'])            
+            matrix_deg_intervals.append([ sum((deg_intervals[i] <= deg <= deg_intervals[i-1] if i == 1 else deg_intervals[i] <= deg < deg_intervals[i-1]) for deg in df_seq_size['degradation_level'] )  for i in range(1,len(deg_intervals))])
             matrix_perc.append(perc_list)
-            matrix_prob.append(not_first_prob_list)
-            matrix_mag.append(first_mag_list)
-            matrix_deg.append(first_deg_list)
-            matrix_deg_intervals.append([ sum(deg_intervals[i] <= deg < deg_intervals[i-1] for deg in df_seq_size['degradation_level'] )  for i in range(1,len(deg_intervals))])
 
 
-        return matrices,np.array(matrix_perc),np.array(matrix_prob), np.array(matrix_deg),np.array(matrix_deg_intervals),np.array(matrix_mag),seq_size_intervals, deg_intervals, ['['+str(round(deg_intervals[i],1))+','+str(round(deg_intervals[i-1],1))+')' for i in range(1,len(deg_intervals))], df.columns[3:df_seq_size.shape[1]-2].str.replace('rank_', '', regex=False).tolist(), df
+        return np.array(matrix_perc),np.array(matrix_deg_intervals),seq_size_intervals, ['['+str(round(deg_intervals[i],1))+','+str(round(deg_intervals[i-1],1))+')' for i in range(1,len(deg_intervals))], df
 
     def MAEB2_matrix_best_criteria_by_time(self,process_ids,train_grid_n_ep,test_grid_n_ep,test_grid_freq,global_deg_metric,local_deg_metric):
         df=self.MAEB2_generate_criteria_rank_by_time_data(process_ids,train_grid_n_ep,test_grid_n_ep,test_grid_freq,global_deg_metric,local_deg_metric)
@@ -2436,8 +2508,8 @@ class ProcessIndependentAnalyzer():
 
         seq_size_intervals=list(np.arange(0,1.25,0.25))
         max_size=self.iter_max-self.start_iter
-        matrix_perc=[] # Aqui se almacenaran los datos para las barras apiladas
 
+        # Aqui se almacenaran los datos para las barras apiladas
         matrix_perc_last_train,matrix_diff_last_train,matrix_eff_last_train=[],[[],[]],[[],[]]
         matrix_perc_last_test,matrix_diff_last_test,matrix_eff_last_test=[],[[],[]],[[],[]]
         matrix_perc_train_test,matrix_diff_train_test,matrix_eff_train_test=[],[[],[]],[[],[]]
@@ -2453,36 +2525,15 @@ class ProcessIndependentAnalyzer():
             min_seq_size=1+split_seq_size*(i-1)
             df_seq_size=df[(df['seq_size']>=min_seq_size) & (df['seq_size']<max_seq_size) ]
 
-            #columns=['process_id','seq_size','degradation_level','mag_last']+['mag_'+i for i in train_suffix+test_suffix]
-
-            def compute_diff(best_mag,worst_mag):
-                diff=[]
-                for mag1,mag2 in zip(best_mag,worst_mag):
-
-                    if mag2==0:
-                        diff.append(0)
-                    else:
-                        diff.append((mag2-mag1)/mag2)
-
-
-
-                    # if mag1==0 and mag2==0:
-                    #     diff.append(1)
-                    # elif mag1==0 and mag2!=0:
-                    #     diff.append(1e-10/mag2)
-                    # else:
-                    #     diff.append(mag1/mag2)
-                return diff
-
             # Last vs train
             last_perc=(df_seq_size.iloc[:, 3]<df_seq_size.iloc[:, 4]).sum()/df_seq_size.shape[0]
             matrix_perc_last_train.append([last_perc,1-last_perc])
 
             idx_best_last=df_seq_size.iloc[:, 3]<df_seq_size.iloc[:, 4]
-            matrix_diff_last_train[0]+=compute_diff(df_seq_size.loc[idx_best_last,column_name[3]],df_seq_size.loc[idx_best_last,column_name[4]])
+            matrix_diff_last_train[0]+=Converter.from_lists_best_worst_to_relative_diff(df_seq_size.loc[idx_best_last,column_name[3]],df_seq_size.loc[idx_best_last,column_name[4]])
             matrix_eff_last_train[0]+=list(df_seq_size.loc[idx_best_last,column_name[6]])
             idx_best_train=df_seq_size.iloc[:, 3]>df_seq_size.iloc[:, 4]
-            matrix_diff_last_train[1]+=compute_diff(df_seq_size.loc[idx_best_train,column_name[4]],df_seq_size.loc[idx_best_train,column_name[3]])
+            matrix_diff_last_train[1]+=Converter.from_lists_best_worst_to_relative_diff(df_seq_size.loc[idx_best_train,column_name[4]],df_seq_size.loc[idx_best_train,column_name[3]])
             matrix_eff_last_train[1]+=list(df_seq_size.loc[idx_best_train,column_name[7]])
 
 
@@ -2491,10 +2542,10 @@ class ProcessIndependentAnalyzer():
             matrix_perc_last_test.append([last_perc,1-last_perc])
 
             idx_best_last=df_seq_size.iloc[:, 3]<df_seq_size.iloc[:, 5]
-            matrix_diff_last_test[0]+=compute_diff(df_seq_size.loc[idx_best_last,column_name[3]],df_seq_size.loc[idx_best_last,column_name[5]])
+            matrix_diff_last_test[0]+=Converter.from_lists_best_worst_to_relative_diff(df_seq_size.loc[idx_best_last,column_name[3]],df_seq_size.loc[idx_best_last,column_name[5]])
             matrix_eff_last_test[0]+=list(df_seq_size.loc[idx_best_last,column_name[6]])
             idx_best_test=df_seq_size.iloc[:, 3]>df_seq_size.iloc[:, 5]
-            matrix_diff_last_test[1]+=compute_diff(df_seq_size.loc[idx_best_test,column_name[5]],df_seq_size.loc[idx_best_test,column_name[3]])
+            matrix_diff_last_test[1]+=Converter.from_lists_best_worst_to_relative_diff(df_seq_size.loc[idx_best_test,column_name[5]],df_seq_size.loc[idx_best_test,column_name[3]])
             matrix_eff_last_test[1]+=list(df_seq_size.loc[idx_best_test,column_name[8]])
 
             # train vs test
@@ -2502,44 +2553,17 @@ class ProcessIndependentAnalyzer():
             matrix_perc_train_test.append([train_perc,1-train_perc])
 
             idx_best_train=df_seq_size.iloc[:, 4]<df_seq_size.iloc[:, 5]
-            matrix_diff_train_test[0]+=compute_diff(df_seq_size.loc[idx_best_train,column_name[4]],df_seq_size.loc[idx_best_train,column_name[5]])
+            matrix_diff_train_test[0]+=Converter.from_lists_best_worst_to_relative_diff(df_seq_size.loc[idx_best_train,column_name[4]],df_seq_size.loc[idx_best_train,column_name[5]])
             matrix_eff_train_test[0]+=list(df_seq_size.loc[idx_best_train,column_name[7]])
             idx_best_test=df_seq_size.iloc[:, 4]>df_seq_size.iloc[:, 5]
-            matrix_diff_train_test[1]+=compute_diff(df_seq_size.loc[idx_best_test,column_name[5]],df_seq_size.loc[idx_best_test,column_name[4]])
+            matrix_diff_train_test[1]+=Converter.from_lists_best_worst_to_relative_diff(df_seq_size.loc[idx_best_test,column_name[5]],df_seq_size.loc[idx_best_test,column_name[4]])
             matrix_eff_train_test[1]+=list(df_seq_size.loc[idx_best_test,column_name[8]])
 
-            matrix_deg_intervals.append([ sum(deg_intervals[i] <= deg < deg_intervals[i-1] for deg in df_seq_size['degradation_level'] )  for i in range(1,len(deg_intervals))])
+            matrix_deg_intervals.append([ sum((deg_intervals[i] <= deg <= deg_intervals[i-1] if i == 1 else deg_intervals[i] <= deg < deg_intervals[i-1]) for deg in df_seq_size['degradation_level'] )  for i in range(1,len(deg_intervals))])
     
-        return np.array(matrix_perc),np.array(matrix_perc_last_train),np.array(matrix_perc_last_test),np.array(matrix_perc_train_test),matrix_diff_last_train,matrix_diff_last_test,matrix_diff_train_test,matrix_eff_last_train,matrix_eff_last_test,matrix_eff_train_test,np.array(matrix_deg_intervals), ['['+str(round(deg_intervals[i],1))+','+str(round(deg_intervals[i-1],1))+')' for i in range(1,len(deg_intervals))], df
-
-    def MAEB3_matrix_best_criteria_by_degradation(self,process_ids,train_n_ep,test_n_ep,global_deg_metric,local_deg_metric):
-
-        df=self.MAEB3_generate_criteria_rank_by_degradation_data(process_ids,train_n_ep,test_n_ep,global_deg_metric,local_deg_metric)
-        df=df[df['process_id'].isin(process_ids)]
-
-        degradation_intervals=list(np.arange(0,1+1/3,1/3))
-        matrix_perc=[]
-        matrix_prob=[]
-        num_data_per_level=[]
-        for i in range(1,len(degradation_intervals)):
-            max_deg_level=degradation_intervals[i]
-            min_deg_level=degradation_intervals[i-1]
-            df_deg_level=df[(df['degradation_level']>=min_deg_level) & (df['degradation_level']<max_deg_level)]
-
-            perc_last_first=(df_deg_level['rank_last']==1).sum()/df_deg_level.shape[0]
-            perc_best_train_first=(df_deg_level['rank_best_train']==1).sum()/df_deg_level.shape[0]
-            perc_best_test_first=(df_deg_level['rank_best_test']==1).sum()/df_deg_level.shape[0]
-
-            not_first_prob_last=df_deg_level[df_deg_level['rank_last']==1]['not_first_prob'].mean()
-            not_first_prob_best_train=df_deg_level[df_deg_level['rank_best_train']==1]['not_first_prob'].mean()
-            not_first_prob_best_test=df_deg_level[df_deg_level['rank_best_test']==1]['not_first_prob'].mean()
-
-            matrix_perc.append([perc_last_first,perc_best_train_first,perc_best_test_first])
-            matrix_prob.append([not_first_prob_last,not_first_prob_best_train,not_first_prob_best_test])
-            num_data_per_level.append(df_deg_level.shape[0])
-
-        return np.array(matrix_perc),np.array(matrix_prob), degradation_intervals, num_data_per_level
-  
+        return np.array(matrix_perc_last_train),np.array(matrix_perc_last_test),np.array(matrix_perc_train_test),matrix_diff_last_train,matrix_diff_last_test,matrix_diff_train_test,matrix_eff_last_train,matrix_eff_last_test,matrix_eff_train_test,np.array(matrix_deg_intervals), ['['+str(round(deg_intervals[i],1))+','+str(round(deg_intervals[i-1],1))+')' for i in range(1,len(deg_intervals))], df
+ 
+    
     def graph_best_criteria_by_time(self,process_ids,train_grid_n_ep,test_grid_n_ep,test_grid_freq,global_deg_metric='best_last_deg',local_deg_metric='paired_diff_median'):
 
         # Generar matriz numerica para la grafica
@@ -2749,13 +2773,13 @@ class ProcessIndependentAnalyzer():
         plt.savefig('experiments_intuition/results/CriteriaComparison/figures/best_criteria_by_deg/'+global_deg_metric+'_'+local_deg_metric+'/gaining_intuition.pdf')
         #plt.show()
 
-    def MAEB_graph_best_criteria_by_time(self,title,process_ids,train_grid_n_ep,test_grid_n_ep,test_grid_freq,global_deg_metric='best_last_deg',local_deg_metric='paired_diff_probpos'):
+    def MAEB_graph_best_criteria_by_time(self,title,process_ids,train_grid_n_ep,test_grid_n_ep,test_grid_freq,global_deg_metric='best_last_deg',local_deg_metric='paired_diff_probpos',MAEB=False):
 
         plt.rc('font', family='serif',size=15)
         plt.rc('text', usetex=True)
 
         # Generar matriz numerica para la grafica
-        matrices,matrix, matrix_prob,matrix_deg_first,matrix_deg,matrix_mag,seq_size_intervals,degradation_intervals,deg_labels,criteria_labels,df=self.MAEB_matrix_best_criteria_by_time(process_ids,train_grid_n_ep,test_grid_n_ep,test_grid_freq,global_deg_metric,local_deg_metric)
+        matrix,matrix_deg,seq_size_intervals,deg_labels,df=self.MAEB_matrix_best_criteria_by_time(process_ids,train_grid_n_ep,test_grid_n_ep,test_grid_freq,global_deg_metric,local_deg_metric)
         fig, axes = plt.subplots(2,4,figsize=(14,5),gridspec_kw={'height_ratios': [1, 3]})
         plt.subplots_adjust(left=0.07,bottom=0.15,right=0.99,top=0.85,wspace=0.33,hspace=0.13)
 
@@ -2773,7 +2797,7 @@ class ProcessIndependentAnalyzer():
         ax.set_xticks([])
         ax.set_ylabel("Número de\nsecuencias")#"Number of\nsequences")
         ax.legend(title='Nivel de degradación',loc='upper center', bbox_to_anchor=(1.5, 1.9))
-        ax.set_ylim([0,2000])
+        #ax.set_ylim([0,2000])
 
         # 2) Mejor criterio por tiempo/tamaño de secuencia
         ax=axes[1,0]
@@ -2853,52 +2877,60 @@ class ProcessIndependentAnalyzer():
         ax.set_title('How good is it selecting?')
         ax.set_ylabel("Percentage of objective value\ncompared to the real best")
 
-        plt.savefig('experiments_intuition/results/MAEB/'+global_deg_metric+'_'+local_deg_metric+'_'+title+'.pdf')
-
-        # OTRO: distribucion de la degradacion con la metrica propuesta
-        plt.figure(figsize=[5,2.5])
-        plt.subplots_adjust(left=0.17,bottom=0.21,right=0.94,top=0.82,wspace=0.21,hspace=0.2)
-        sns.kdeplot(df['degradation_level'], bw_adjust=0.5, clip=(0, 1), color='black', fill=True, alpha=0.4)
-        plt.xlabel('Nivel de degradación')
-        plt.ylabel('Densidad')
-        plt.savefig('experiments_intuition/results/MAEB/deg_distribution.pdf')
-
-        # OTRO: una learning-curve por cada caso de degradacion para ilustrar la discretizacion
-        def deg_curve(df_dreg,title):
-            row_max= df.loc[df_dreg['degradation_level'].idxmax()]
-            current_path=parent_dir+'/_bender/project_SB3/data/'+row_max['process_id']+'_16cpu1gpu_mejorado'
-            df_test_estimates=pd.read_csv(current_path+'/df_val_estimates.csv')
-            valores=list(df_test_estimates['truth_norm'])[self.start_iter:self.start_iter+row_max['seq_size']]
-            print('deg level:', row_max['degradation_level'])
-            print('process_id:',row_max['process_id'])
-
-            fig=plt.figure(figsize=[5,2.5])
+        if MAEB:
+            plt.savefig('experiments_intuition/results/MAEB/'+global_deg_metric+'_'+local_deg_metric+'_'+title+'.pdf')
+        
+            # OTRO: distribucion de la degradacion con la metrica propuesta
+            plt.figure(figsize=[5,2.5])
             plt.subplots_adjust(left=0.17,bottom=0.21,right=0.94,top=0.82,wspace=0.21,hspace=0.2)
-            ax=plt.subplot(111)
-            plt.plot(list(range(len(valores))), valores, linewidth=1,color='black')
-            plt.title(title)
-            ax.set_xlabel("Iteraciones de aprendizaje")
-            ax.set_ylabel("$\widetilde{f}(\pi_t)$")
-            plt.savefig('experiments_intuition/results/MAEB/deg_'+title+'.pdf')
-            plt.show()
+            sns.kdeplot(df['degradation_level'], bw_adjust=0.5, clip=(0, 1), color='black', fill=True, alpha=0.4)
+            plt.xlabel('Nivel de degradación')
+            plt.ylabel('Densidad')
+            plt.savefig('experiments_intuition/results/MAEB/deg_distribution.pdf')
 
-        df_catastrophic=df[(df['degradation_level']>0.9) & (df['degradation_level']<0.95)]# 47 (catastrofico)
-        deg_curve(df_catastrophic,'Catastrófico')
-        df_critic=df[df['degradation_level']==0.658]#220 (critico)
-        deg_curve(df_critic,'Crítico')
-        df_moderate=df[df['degradation_level']==0.206]#276 (moderado)
-        deg_curve(df_moderate,'Moderado')
+            # OTRO: una learning-curve por cada caso de degradacion para ilustrar la discretizacion
+            def deg_curve(df_dreg,title):
+                row_max= df.loc[df_dreg['degradation_level'].idxmax()]
+                current_path=parent_dir+'/_bender/project_SB3/data/'+row_max['process_id']+'_16cpu1gpu_mejorado'
+                df_test_estimates=pd.read_csv(current_path+'/df_val_estimates.csv')
+                valores=list(df_test_estimates['truth_norm'])[self.start_iter:self.start_iter+row_max['seq_size']]
+                print('deg level:', row_max['degradation_level'])
+                print('process_id:',row_max['process_id'])
 
-    def MAEB2_graph_best_criteria_by_time(self,title,process_ids,train_grid_n_ep,test_grid_n_ep,test_grid_freq,global_deg_metric='best_last_deg',local_deg_metric='paired_diff_probpos'):
+                fig=plt.figure(figsize=[5,2.5])
+                plt.subplots_adjust(left=0.17,bottom=0.21,right=0.94,top=0.82,wspace=0.21,hspace=0.2)
+                ax=plt.subplot(111)
+                plt.plot(list(range(len(valores))), valores, linewidth=1,color='black')
+                plt.title(title)
+                ax.set_xlabel("Iteraciones de aprendizaje")
+                ax.set_ylabel("$\widetilde{f}(\pi_t)$")
+                plt.savefig('experiments_intuition/results/MAEB/deg_'+title+'.pdf')
+                plt.show()
 
+            df_catastrophic=df[(df['degradation_level']>0.9) & (df['degradation_level']<0.95)]# 47 (catastrofico)
+            deg_curve(df_catastrophic,'Catastrófico')
+            df_critic=df[df['degradation_level']==0.658]#220 (critico)
+            deg_curve(df_critic,'Crítico')
+            df_moderate=df[df['degradation_level']==0.206]#276 (moderado)
+            deg_curve(df_moderate,'Moderado')
+
+        else:
+            plt.savefig('experiments_intuition/results/CriteriaComparison/figures/best_criteria_by_time_related_deg/'+global_deg_metric+'_'+local_deg_metric+'_'+title+'.pdf')
+        
+        
+
+    def MAEB2_graph_best_criteria_by_time(self,title,process_ids,train_grid_n_ep,test_grid_n_ep,test_grid_freq,global_deg_metric='best_last_deg',local_deg_metric='paired_diff_probpos',MAEB=False):
+        
         plt.rc('font', family='serif')
         plt.rc('text', usetex=True)
-        
+
+
         # Generar matriz numerica para la grafica
-        matrix,matrix_last_train,matrix_last_test,matrix_train_test,matrix_diff_last_train,matrix_diff_last_test,matrix_diff_train_test,matrix_eff_last_train,matrix_eff_last_test,matrix_eff_train_test,matrix_deg,deg_labels,df=self.MAEB2_matrix_best_criteria_by_time(process_ids,train_grid_n_ep,test_grid_n_ep,test_grid_freq,global_deg_metric,local_deg_metric)
+        matrix_last_train,matrix_last_test,matrix_train_test,matrix_diff_last_train,matrix_diff_last_test,matrix_diff_train_test,matrix_eff_last_train,matrix_eff_last_test,matrix_eff_train_test,matrix_deg,deg_labels,df=self.MAEB2_matrix_best_criteria_by_time(process_ids,train_grid_n_ep,test_grid_n_ep,test_grid_freq,global_deg_metric,local_deg_metric)
+
         fig, axes = plt.subplots(4,4,figsize=(9,7),gridspec_kw={'height_ratios': [1,3,3,3]})
         plt.subplots_adjust(left=0.1,bottom=0.08,right=0.97,top=0.95,wspace=0.39,hspace=0.42)
-
+        
         # Dibujar grafica que representa distribucion de nivel de degradacion en cada intervalo de tiempo
         ax=axes[0,0]
         colors=[Converter.generate_colormap(round(value,2),'Greys_r',0,1) for value in [0.3,0.55,0.8]]
@@ -2928,14 +2960,15 @@ class ProcessIndependentAnalyzer():
 
         colors=list(mcolors.TABLEAU_COLORS.keys())+['#fbf812','#20fa03','#0d099b','#9b094c']
         barplots_2criteria(axes[1,0],matrix_last_train,[colors[0],colors[1]],[criteria_labels[0],criteria_labels[1]])
+        barplots_2criteria(axes[2,0],matrix_last_test,[colors[0],colors[2]],[criteria_labels[0],criteria_labels[2]])
+        barplots_2criteria(axes[3,0],matrix_train_test,[colors[1],colors[2]],[criteria_labels[1],criteria_labels[2]])
+
         axes[1,0].set_title('How many times is each\ncriterion the best')
-        barplots_2criteria(axes[2,0],matrix_last_train,[colors[0],colors[2]],[criteria_labels[0],criteria_labels[2]])
-        barplots_2criteria(axes[3,0],matrix_last_train,[colors[1],colors[2]],[criteria_labels[1],criteria_labels[2]])
         axes[3,0].set_xlabel("Percentage of total elapsed\nlearning iterations")
 
         # Gafica de degradaciones
         def violinplot_deg_2criteria(ax,criteria_columns,colors,labels):
-
+            
             deg_by_criteria_when_best=[]
             colum_names=df.columns.tolist()
             deg_by_criteria_when_best.append(list(df[df[colum_names[criteria_columns[0]]]<df[colum_names[criteria_columns[1]]]]['degradation_level']))
@@ -2957,12 +2990,13 @@ class ProcessIndependentAnalyzer():
             ax.set_xticks(range(1, len(labels) + 1))
             ax.set_xticklabels(labels)
 
+
         colors=list(mcolors.TABLEAU_COLORS.keys())+['#fbf812','#20fa03','#0d099b','#9b094c']
         violinplot_deg_2criteria(axes[1,1],[3,4],[colors[0],colors[1]],[criteria_labels[0],criteria_labels[1]])
-        axes[1,1].set_title('When is it the best?\n')
-        violinplot_deg_2criteria(axes[2,1],[3,6],[colors[0],colors[2]],[criteria_labels[0],criteria_labels[2]])
-        violinplot_deg_2criteria(axes[3,1],[4,6],[colors[1],colors[2]],[criteria_labels[1],criteria_labels[2]])
+        violinplot_deg_2criteria(axes[2,1],[3,5],[colors[0],colors[2]],[criteria_labels[0],criteria_labels[2]])
+        violinplot_deg_2criteria(axes[3,1],[4,5],[colors[1],colors[2]],[criteria_labels[1],criteria_labels[2]])
         
+        axes[1,1].set_title('When is it the best?\n')
 
         # Grafica de diferencias
         def violinplot_2criteria(ax,data,colors,labels):
@@ -2979,19 +3013,369 @@ class ProcessIndependentAnalyzer():
 
         colors=list(mcolors.TABLEAU_COLORS.keys())+['#fbf812','#20fa03','#0d099b','#9b094c']
         violinplot_2criteria(axes[1,2],matrix_diff_last_train,[colors[0],colors[1]],[criteria_labels[0],criteria_labels[1]])
-        axes[1,2].set_title('How match better is it\nthan the rest?')
         violinplot_2criteria(axes[2,2],matrix_diff_last_test,[colors[0],colors[2]],[criteria_labels[0],criteria_labels[2]])
         violinplot_2criteria(axes[3,2],matrix_diff_train_test,[colors[1],colors[2]],[criteria_labels[1],criteria_labels[2]])
-
         violinplot_2criteria(axes[1,3],matrix_eff_last_train,[colors[0],colors[1]],[criteria_labels[0],criteria_labels[1]])
-        axes[1,3].set_title('How good is it selecting?\n')
         violinplot_2criteria(axes[2,3],matrix_eff_last_test,[colors[0],colors[2]],[criteria_labels[0],criteria_labels[2]])
         violinplot_2criteria(axes[3,3],matrix_eff_train_test,[colors[1],colors[2]],[criteria_labels[1],criteria_labels[2]])
 
-        plt.savefig('experiments_intuition/results/MAEB/vs2_'+global_deg_metric+'_'+local_deg_metric+'_'+title+'.pdf')
+        axes[1,2].set_title('How match better is it\nthan the other?')
+        axes[1,3].set_title('How good is it selecting?\n')
+
+        if MAEB:
+            plt.savefig('experiments_intuition/results/MAEB/vs2_'+global_deg_metric+'_'+local_deg_metric+'_'+title+'.pdf')
+        else:
+            plt.savefig('experiments_intuition/results/CriteriaComparison/figures/best_criteria_by_time_related_deg/vs2_'+global_deg_metric+'_'+local_deg_metric+'_'+title+'.pdf')
         plt.show()
 
    
+    #===============================================================================================
+    # NUEVO ANALISIS
+    #===============================================================================================
+    # Distribucion de degradacion por entorno-tiempo (creo que esta grafica no es necesaria)
+    def graph_deg_distribution_per_env_and_time(self,algo,envs,global_deg_metric,local_deg_metric):
+        '''
+        Distribucion de degradacion por entorno e intervalo de tiempo. Esta grafica permite comparar las degradaciones por 
+        (complejidad) entorno y por tiempo invertido en aprender.
+        '''
+        # Reducir base de datos a la degradacion que nos interesa
+        df=self.df_degradation.filter(like=global_deg_metric+'_'+local_deg_metric)
+
+        fig = plt.figure(figsize=(8,5))
+        plt.subplots_adjust(left=0.08,bottom=0.09,right=0.97,top=0.88,wspace=0.29,hspace=0.07)
+        
+        gs = fig.add_gridspec(4, 2, width_ratios=[2, 1])  # primera col mas ancha
+        colors=list(mcolors.TABLEAU_COLORS.keys())+['#fbf812','#20fa03','#0d099b','#9b094c']
+        x = np.linspace(0, 1, 200)
+
+        # Todos los tiempos juntos
+        ax = fig.add_subplot(gs[:, 0]) 
+        ax.grid(True, alpha=0.3)
+        plt.title('Degradation distribution by environment\nat different percentages of learning time for convergence')
+
+        for i in range(len(envs)):
+            # Generar una lista con las degradaciones acumuladas para ese algo_env
+            process_id_init=algo+'_'+envs[i]            
+            sample=df.filter(like=process_id_init).values.flatten()
+
+            # KDE para esos datos
+            kde= gaussian_kde(sample)
+            ax.plot(x, kde(x), label=envs[i],alpha=0.6,color=colors[i],linewidth=1)
+            ax.fill_between(x, kde(x), alpha=0.4,color=colors[i])
+            ax.axvline(np.median(sample), linestyle="-", linewidth=1.5,color=colors[i])
+
+        ax.set_xlabel("Degradation")
+        ax.set_ylabel("KDE")
+        ax.legend()
+
+        # Dividido por intervalor de tiempo
+        points=np.linspace(0, 1, 4+1)# 4 intervalos
+        intervals= list(zip(points[:-1], points[1:]))
+
+        for i,(start, end) in zip(range(4+1),intervals):
+            ax = fig.add_subplot(gs[i, 1]) 
+
+            # Subconjunto de datos
+            subset = df.iloc[int(len(df) * start):int(len(df) * end)]
+            
+            for j in range(len(envs)):
+                sample=subset.filter(like=envs[j]).values.flatten()
+                kde= gaussian_kde(sample)
+                ax.plot(x, kde(x), label=envs[j],alpha=0.6,color=colors[j],linewidth=1)
+                ax.fill_between(x, kde(x), alpha=0.4,color=colors[j])
+                ax.axvline(np.median(sample), linestyle="-", linewidth=1.5,color=colors[j])
+                
+            ax.set_ylabel(f"{int(start*100)}% - {int(end*100)}%")
+            ax.grid(True, alpha=0.3)
+            
+        ax.set_xlabel("Degradation")
+        plt.savefig('experiments_intuition/results/CriteriaComparison/figures/deg_distribution/'+algo+'_'+global_deg_metric+'_'+local_deg_metric+'.pdf')
+        plt.show()
+
+    # Analisis que cierra todo: ¿cuando usar que criterio?
+    def generate_df_test_strat_end(self, process_id,n_ep,freq):
+
+        algo,env,seed=Converter.process_id_splitter(process_id)
+        process_id=algo+'_'+env+'_seed'+str(seed)
+        test_conf=str(n_ep)+'_'+str(freq)
+        generator=EvolutionGenerator(algo,env,seed,'16cpu1gpu_mejorado',perc_time_start=0.1)
+
+        # Mirar si no se ha llamado antes a esta funcion de la misma manera
+        already_registered=(self.df_test_start_end['process_id']==process_id) & (self.df_test_start_end['test_conf']==test_conf)
+
+        df_add=[]
+        all_time_seq=generator.df_train.loc[self.start_iter:self.iter_max,'time_seconds'].tolist()
+
+        if not np.array(already_registered).any():
+
+            # ------------Test ascendente
+            starts=[0]*len(all_time_seq)
+            ends=list(range(len(all_time_seq)))
+            for start,end in zip(starts,ends):
+                # Apilcando last
+                if start==end:
+                    policy_id=generator.last_policy(all_time_seq[-1])
+                    best_policy_id=generator.truth_best_policy(all_time_seq[-1])
+                    val_time=0
+
+                #Aplicando test en un intervalo diferente
+                else:
+                    policy_id,val_time=generator.best_policy_validation(all_time_seq[end],n_ep,all_time_seq)
+                    best_policy_id=generator.truth_best_policy(all_time_seq[-1])
+
+                perc_good=generator.df_test_estimates.loc[policy_id,'truth']/generator.df_test_estimates.loc[best_policy_id,'truth']
+                invest_time=val_time+all_time_seq[-1]
+
+                #Aplicar last tambien
+                policy_id=generator.last_policy(all_time_seq[end])
+                best_policy_id=generator.truth_best_policy(all_time_seq[end])
+
+                last_good=generator.df_test_estimates.loc[policy_id,'truth']/generator.df_test_estimates.loc[best_policy_id,'truth']
+
+                df_add.append([process_id,test_conf,start,end,perc_good,invest_time,last_good,all_time_seq[end]])
+
+            # -------------Test simetrico
+            starts=list(range(int(len(all_time_seq)/2)))
+            ends=[(self.iter_max-self.start_iter-1)-i for i in starts]
+            for start,end in zip(starts,ends):
+                #Aplicando test en un intervalo diferente
+                if start!=end:
+                    
+                    policy_id,val_time=generator.best_policy_validation(all_time_seq[end],n_ep,all_time_seq[start:])
+                    best_policy_id=generator.truth_best_policy(all_time_seq[-1])
+
+                perc_good=generator.df_test_estimates.loc[policy_id,'truth']/generator.df_test_estimates.loc[best_policy_id,'truth']
+                invest_time=val_time+all_time_seq[-1]
+
+                df_add.append([process_id,test_conf,start,end,perc_good,invest_time,None,None])
+
+            # Añadir nuevas filas a la base de datos existente
+            df_add = pd.DataFrame(df_add, columns=self.df_test_start_end.columns)
+            self.df_test_start_end = pd.concat([self.df_test_start_end, df_add],ignore_index=True)
+            self.df_test_start_end.to_csv('experiments_intuition/results/CriteriaComparison/data/test_start_end_perc_time.csv', index=False)
+        
+    def graph_when_use_test(self,process_ids,n_ep,freq,title,global_deg_metric,local_deg_metric):
+
+        # Generar los datos necesarios
+        # for process_id in tqdm(process_ids):
+        #     self.generate_df_test_strat_end(process_id,n_ep,freq)
+        
+        # Funciones internas de esta funcion
+        def get_perc_time(process_ids,n_ep,freq,ends,test):
+
+            #Seleccionar filas de interes
+            df=self.df_test_start_end
+            if test=='ascendent':
+                rows=df['process_id'].isin(process_ids) & (df['test_conf']==str(n_ep)+'_'+str(freq)) & (df['start_test']==0) & (df['end_test'].isin(ends)) 
+            if test=='simetric':
+                rows=df['process_id'].isin(process_ids) & (df['test_conf']==str(n_ep)+'_'+str(freq)) & (df['start_test']==abs(df['end_test']-(self.iter_max-self.start_iter-1))) & (df['start_test'].isin(ends))
+            
+            if test=='time_conv':
+                rows=df['process_id'].isin(process_ids) & (df['test_conf']==str(n_ep)+'_'+str(freq)) & (df['start_test']==0) & (df['end_test']==0) 
+            if test=='only_last':
+                rows=df['process_id'].isin(process_ids) & (df['test_conf']==str(n_ep)+'_'+str(freq)) & (df['start_test']==0) & (df['end_test'].isin(ends)) 
+            
+            if test=='only_last':
+                return np.mean(df.loc[rows,'last_good']), np.mean(df.loc[rows,'last_time'])
+            else:
+                return np.mean(df.loc[rows,'perc_good']), np.mean(df.loc[rows,'invest_time'])
+        
+        def graph_ascendent_simetric(lista1,lista2,lista3,test,inner):
+            axes = inner.subplots(sharey=True)
+
+            # Grafica 1: cuando se aplica test
+            axes[0].grid(True, alpha=0.3,color='black',linewidth=0.3)
+
+            for i, (x1, x2) in enumerate(lista1):
+                if test=='ascendent':
+                    min_x = min(x1 for x1, _ in lista1)
+                    if i==len(lista1)-1:
+                        axes[0].barh(i, x2 - x1, left=x1, color="orange", alpha=0.6, height=1, linewidth=0.0 )#se aplica alguna vez test
+                        axes[0].barh(i, x1 - min_x, left=min_x, color="orange", height=1)#se aplica test fijo
+                    else:
+                        axes[0].barh(i, x2 - x1, left=x1, color="green", alpha=0.6, height=1, linewidth=0.0 )#se aplica alguna vez test
+                        axes[0].barh(i, x1 - min_x, left=min_x, color="green", height=1)#se aplica test fijo
+
+                if test=='simetric':
+                    axes[0].barh(i, x2 - x1, left=x1, color="green", alpha=0.6, height=1, linewidth=0.0 )#se aplica alguna vez test
+                    axes[0].barh(i, (1-x1) - (1-x2), left=1-x2, color="green", alpha=0.6, height=1, linewidth=0.0 )#se aplica alguna vez test
+                    axes[0].barh(i, (1-x2) - x2, left=x2, color="green", height=1)#se aplica test fijo
+
+            # Grafica 2: como de buena es la politica seleccionada con respecto a la mejor
+            axes[1].grid(True, alpha=0.3,color='black',linewidth=0.3)
+            lista2_improv=[]
+            for i, val in enumerate(lista2):
+                axes[1].barh(i, -val, color="grey", height=1,alpha=0.5)
+                if i<len(lista2)-1:
+                    if test=='ascendent':
+                        lista2_improv.append([lista2[i]-lista2[i+1] if lista2[i]-lista2[i+1]>0 else 0][0])
+                    if test=='simetric':
+                        lista2_improv.append([lista2[i+1]-lista2[i] if lista2[i+1]-lista2[i]>0 else 0][0])
+            axes[1].xaxis.set_major_formatter(FuncFormatter(lambda x, pos: f"{abs(x):.1f}"))
+            axes[1].set_xlim(-1,0)
+            axes[1].plot(-np.array(lista2_improv)[::-1], list(range(len(lista2)-1))[::-1], "-", color="grey")
+
+            # Grafica 3: tiempo invertido en total
+            axes[2].grid(True, alpha=0.3,color='black',linewidth=0.3)
+            lista3_improv=[]
+            for i, val in enumerate(lista3):
+                axes[2].barh(i, val, color="red", height=1,alpha=0.5)
+                if i<len(lista3)-1:
+                    if test=='ascendent':
+                        lista3_improv.append([lista3[i]-lista3[i+1] if lista3[i]-lista3[i+1]>0 else 0][0])
+                    if test=='simetric':
+                        lista3_improv.append([lista3[i+1]-lista3[i] if lista3[i+1]-lista3[i]>0 else 0][0])
+
+            axes[2].ticklabel_format(style='sci', axis='x', scilimits=(0,0))
+            axes[2].set_xlim(1,round(max(lista3),4)+(round(max(lista3),4)-1)*0.1)
+               
+
+            if test=='ascendent':
+                axes[1].plot(-np.array(lista3_improv), list(range(len(lista3)-1)), "-", color="red")
+                axes[0].set_title("When is test (green)\nand last (orange) applied?")
+                axes[1].set_title("How good is the selected policy?")
+                axes[2].set_title("How much time is required?")
+                for ax in axes:
+                    ax.set_xticklabels([]) 
+                    ax.tick_params(axis='x')
+            if test=='simetric':
+                axes[1].plot(-np.array(lista3_improv), list(range(len(lista3)-1))[::-1], "-", color="red")
+                axes[0].set_xlabel("Percentage of learning time\nfor convergence")
+                axes[1].set_xlabel("Reward percentage of selected policy\nrelative to the best")
+                axes[2].set_xlabel("Invest time percentage relative to\nthat required to converge")
+
+            for ax in axes:
+                ax.set_yticks(list(range(0,len(lista1)+2,2)))
+                ax.set_yticklabels([]) 
+                ax.tick_params(axis='y')
+            #axes[1].xaxis.set_major_locator(MultipleLocator(0.1))
+            #axes[2].xaxis.set_major_locator(MultipleLocator(0.01))
+
+        def graph_test_application_perc_time(process_ids,test_type,outer):
+
+            if test_type=='ascendent':
+                interval=(np.linspace(0, 1, 10+1)**1).tolist() #TODO: aqui se podria definir una reparametrizacion del intervalo [0,1], para que el ritmo con que se aumenta/disminuye el start/end de test no sea lineal
+            if test_type=='simetric':
+                interval=(np.linspace(0, 0.5, 10+1)**1).tolist()
+
+
+            _,time_conv=get_perc_time(process_ids,n_ep,freq,None,test='time_conv')
+            variable_start_end=[]# Para la grafica ilustrativa de aplicacion de test
+            all_perc_good,all_invest_time=[],[] # Para las graficas de perc y time
+
+            for i in range(len(interval)-1):
+                ends=range(int(interval[i]*(self.iter_max-self.start_iter)),int(interval[i+1]*(self.iter_max-self.start_iter))+1)
+                perc_good,invest_time=get_perc_time(process_ids,n_ep,freq,ends,test_type)
+                variable_start_end.append([ends[0]/(self.iter_max-self.start_iter),ends[-1]/(self.iter_max-self.start_iter)])
+                all_perc_good.append(perc_good)
+                all_invest_time.append(invest_time/time_conv)
+
+            if test_type=='ascendent':
+                variable_start_end=variable_start_end[::-1]
+                all_perc_good=all_perc_good[::-1]
+                all_invest_time=all_invest_time[::-1]
+
+                ends=range(int(interval[i-1]*(self.iter_max-self.start_iter)),int(interval[i+1]*(self.iter_max-self.start_iter))+1)
+                perc_good,invest_time=get_perc_time(process_ids,n_ep,freq,ends,'only_last')
+                all_perc_good.append(perc_good)
+                all_invest_time.append(1)
+                variable_start_end.append([ends[0]/(self.iter_max-self.start_iter),ends[-1]/(self.iter_max-self.start_iter)])
+
+                graph_ascendent_simetric(variable_start_end,all_perc_good,all_invest_time,'ascendent',
+                                         outer.subgridspec(1, 3, wspace=0.1, hspace=0.3))
+                
+                return all_perc_good,all_invest_time, ends
+            
+            if test_type=='simetric':
+                graph_ascendent_simetric(variable_start_end[::-1],all_perc_good[::-1],all_invest_time[::-1],'simetric',
+                                         outer.subgridspec(1, 3, wspace=0.1, hspace=0.3))
+                
+                return all_perc_good,all_invest_time
+        
+        def graph_optimal_test_application(process_ids,ascen_perc_good,sim_perc_good,ascen_perc_time,sim_perc_time,
+                                           ends_last,global_deg_metric,local_deg_metric,sub_title):
+
+            # Datos de interes
+            regex = "|".join(process_ids) 
+            df_degradation=self.df_degradation[self.df_degradation['n_policy'].isin(ends_last)]
+            df_interest_process = df_degradation.filter(regex=regex)
+            df_interest_deg=df_interest_process.filter(like=global_deg_metric+'_'+local_deg_metric)
+            ends_deg_distribution=df_interest_deg.values.flatten().tolist()
+
+            fig = plt.figure(figsize=(9, 4))
+            plt.subplots_adjust(left=0.07,bottom=0.15,right=0.97,top=0.88,wspace=0.2,hspace=0.19)
+            gs = fig.add_gridspec(2, 2, height_ratios=[1, 3])  # fila1 ocupa 1, fila2 ocupa 3
+
+            # Grafica 1: distribucion de degradacion en tiempos proximos a convergencia
+            ax1 = fig.add_subplot(gs[0, 0])
+            kde = gaussian_kde(ends_deg_distribution)
+            x = np.linspace(0, 1, 200)
+            ax1.fill_between(x, kde(x), color="orange") 
+            ax1.set_xlabel('Degradation in times close to convergence')
+
+            # Grafica 2: porcentage de reward de la politica seleccionada, test ascendente vs simetrico
+            ax2 = fig.add_subplot(gs[1, 0])
+            ax2.plot(ascen_perc_good, np.arange(len(ascen_perc_good)), color="gray", linestyle="-", label="ascendent")
+            ax2.plot(sim_perc_good, np.arange(len(sim_perc_good)), color="gray", linestyle="--", label="simetric")
+            ax2.plot(ascen_perc_good[-1], len(ascen_perc_good)-1, 'o', color="orange", markersize=8)
+
+            ax2.invert_xaxis() 
+            ax2.set_yticklabels([])
+            ax2.grid(True, linestyle=":", alpha=0.7)
+            ax2.set_title("")
+            ax2.set_xlabel("Reward percentage of selected policy\nrelative to the best")
+            ax2.legend(title='Test type')
+
+            # Grafica 3: porcentage de tiempo usando test, test ascendente vs simetrico
+            ax3 = fig.add_subplot(gs[1, 1])
+            ax3.plot(ascen_perc_time, np.arange(len(ascen_perc_time)), color="red", linestyle="-", label="ascendent")
+            ax3.plot(sim_perc_time, np.arange(len(sim_perc_time)), color="red", linestyle="--", label="simetric")
+
+            ax3.legend(title='Test type')
+            ax3.ticklabel_format(style='sci', axis='x', scilimits=(0,0))
+            ax3.set_yticklabels([])
+            ax3.grid(True, linestyle=":", alpha=0.7)
+            ax3.set_title("")
+            ax3.set_xlabel("Invest time percentage relative to\nthat required to converge")
+
+            plt.savefig('experiments_intuition/results/CriteriaComparison/figures/when_criteria/'+title+'_'+sub_title+'_opt.pdf')
+            plt.show()
+        
+            return df_interest_deg
+            
+        # Graficas
+        fig = plt.figure(figsize=(13, 4))
+        plt.subplots_adjust(left=0.08,bottom=0.15,right=0.97,top=0.88,wspace=0.2,hspace=0.07)
+
+        outer = fig.add_gridspec(2,1)
+        ascen_perc_good,ascen_perc_time,ends_last=graph_test_application_perc_time(process_ids,'ascendent',outer[0])
+        sim_perc_good,sim_perc_time=graph_test_application_perc_time(process_ids,'simetric',outer[1])
+
+        plt.savefig('experiments_intuition/results/CriteriaComparison/figures/conclusion_criteria_application/'+title+'.pdf')
+        plt.show()
+
+        df_interest_deg=graph_optimal_test_application(process_ids,ascen_perc_good,sim_perc_good,ascen_perc_time,sim_perc_time,
+                                       ends_last,global_deg_metric,local_deg_metric,'')
+        
+        # Solo quedarnos con los procesos indicados que tienen la degradacion indicada en los tiempos de convergencia
+        # process_ids_with_deg = df_interest_deg.columns[(df_interest_deg > 0.5).all()]
+        # new_process_ids=[s for s in process_ids if any(s in t for t in process_ids_with_deg)]
+        # print(new_process_ids)
+        # fig = plt.figure(figsize=(13, 4))
+        # plt.subplots_adjust(left=0.08,bottom=0.15,right=0.97,top=0.88,wspace=0.2,hspace=0.07)
+
+        # outer = fig.add_gridspec(2,1)
+        # ascen_perc_good,ascen_perc_time,ends_last=graph_test_application_perc_time(new_process_ids,'ascendent',outer[0])
+        # sim_perc_good,sim_perc_time=graph_test_application_perc_time(new_process_ids,'simetric',outer[1])
+
+        # plt.savefig('experiments_intuition/results/CriteriaComparison/figures/when_criteria/'+title+'_with_deg.pdf')
+        # plt.show()
+
+        # _=graph_optimal_test_application(new_process_ids,ascen_perc_good,sim_perc_good,ascen_perc_time,sim_perc_time,
+        #                                ends_last,global_deg_metric,local_deg_metric,'with_deg')
+
+
+
 class SingleProcessAnalisys():
     '''
     Esta clase ejecuta un analisis comparativo de criterios completo para un unico proceso. Para el proceso indicado
@@ -3012,31 +3396,32 @@ class SingleProcessAnalisys():
         
         # Representacion del proceso (considerando diferentes definiciones de metrica global y local de degradacion)
         grapher=EvolutionGrapher(algo,env,seed,resources,max_iter)
-        grapher.learning_curve()
-        grapher.graph_degradation_evolution('mean_update_deg','greater_prob')
-        grapher.graph_degradation_evolution('weighted_mean_best_later_deg','greater_prob')
-        grapher.graph_degradation_evolution('weighted_mean_best_later_deg','paired_diff_probpos_meanpos')
-        grapher.graph_degradation_evolution('best_last_deg','greater_prob')
-        grapher.graph_degradation_evolution('best_last_deg','paired_diff_median')
-        grapher.graph_degradation_evolution('best_last_deg','paired_diff_probpos')
+        #grapher.learning_curve()
+        # grapher.graph_degradation_evolution('mean_update_deg','greater_prob')
+        # grapher.graph_degradation_evolution('weighted_mean_best_later_deg','greater_prob')
+        # grapher.graph_degradation_evolution('weighted_mean_best_later_deg','paired_diff_probpos_meanpos')
+        # grapher.graph_degradation_evolution('best_last_deg','greater_prob')
+        # grapher.graph_degradation_evolution('best_last_deg','paired_diff_median')
+        # grapher.graph_degradation_evolution('best_last_deg','paired_diff_probpos')
+        grapher.graph_degradation_evolution('relative_worsening_to_improvement','relative_reward_diff')
     
         # Analisis de estimaciones (coste y precision de seleccion)
         analyzer=EstimationAnalyzer(algo,env,seed,resources,list_n_ep,list_n_ep,max_iter)
         analyzer.graph_cost_analysis()
-        analyzer.graph_accuracy_analysis('test')
-        analyzer.graph_accuracy_analysis('train')
-        analyzer.graph_train_vs_test_estimates()
+        # analyzer.graph_accuracy_analysis('test')
+        # analyzer.graph_accuracy_analysis('train')
+        # analyzer.graph_train_vs_test_estimates()
 
         # Ajuste de parametros
         tuner=CriteriaTuner(algo,env,seed,resources,list_n_ep,list_freq,max_iter)
         opt_n_ep_train,opt_n_ep_test,opt_freq_test=tuner.graph_best_val_tuning()
 
         # Comparacion de mejor version de criterios existentes
-        grapher=EvolutionGrapher(algo,env,seed,resources,max_iter,list_n_traj_ep=[opt_n_ep_train],list_n_val_ep=[opt_n_ep_test],list_n_val_freq=[opt_freq_test])
-        grapher.graph_rank_evolution()
-        grapher.graph_rank_evolution(True)
-        grapher.graph_magnitude_evolution()
-        grapher.graph_magnitude_evolution(True,True)
+        # grapher=EvolutionGrapher(algo,env,seed,resources,max_iter,list_n_traj_ep=[opt_n_ep_train],list_n_val_ep=[opt_n_ep_test],list_n_val_freq=[opt_freq_test])
+        # grapher.graph_rank_evolution()
+        # grapher.graph_rank_evolution(True)
+        # grapher.graph_magnitude_evolution()
+        # grapher.graph_magnitude_evolution(True,True)
 
 class ProcessIndependentAnalysis():
     def __init__(self,process_ids,title,
@@ -3084,67 +3469,74 @@ class ProcessIndependentAnalysis():
             analyzer.graph_gain_intuition_best_criteria_by_degradation(process_ids,[500,250,100,50,25,5],[100,50,25,10,5,1],[0.25,0.5,0.75,1],
                                                                        global_deg_metric,local_deg_metric)
 
+###################################################################################################
+experiments_intuition=False
+MAEB_ISG_experiments=False
+
 #==================================================================================================
 # Main: experimentos realizados para ganar intuicion 
 # (esta experimentación esta resumida cronologicamente en experiments_intuition/README/main.pdf )
 #==================================================================================================
-# Analisis de procesos individuales (306 iteraciones equivalen aproximadamente a 10000000 steps de aprendizaje con 16 environments en paralelo)
-for i in [2,3,4,5,6,7,8,9,10]:
-    SingleProcessAnalisys('PPO','Ant',i,'16cpu1gpu_mejorado',306)
-    SingleProcessAnalisys('PPO','Humanoid',i,'16cpu1gpu_mejorado',306)
-    SingleProcessAnalisys('PPO','HumanoidStandup',i,'16cpu1gpu_mejorado',306)
 
-# Analisis general (independiente de proceso): comparacion de criterios por nivel de degradacion (usando diferentes metricas de degradacion)
-all_process_ids=['PPO_Ant_seed1','PPO_Ant_seed2','PPO_Ant_seed3','PPO_Ant_seed4',
-                'PPO_Humanoid_seed1','PPO_Humanoid_seed2','PPO_Humanoid_seed3','PPO_Humanoid_seed4',
-                'PPO_HumanoidStandup_seed1']
-global_deg_metric='mean_update_deg'
-local_deg_metric='greater_prob'
-ProcessIndependentAnalysis(all_process_ids[0:4],'all_Ant',global_deg_metric,local_deg_metric)
-ProcessIndependentAnalysis(all_process_ids[4:8],'all_Humanoid',global_deg_metric,local_deg_metric)
-ProcessIndependentAnalysis(all_process_ids,'all_Ant_Humanoid_HumanoidStandup',global_deg_metric,local_deg_metric)
+if experiments_intuition:
+    # Analisis de procesos individuales (306 iteraciones equivalen aproximadamente a 10000000 steps de aprendizaje con 16 environments en paralelo)
+    for i in [1,2,3,4,5,6,7,8,9,10]:
+        SingleProcessAnalisys('PPO','Ant',i,'16cpu1gpu_mejorado',306)
+        SingleProcessAnalisys('PPO','Humanoid',i,'16cpu1gpu_mejorado',306)
+        SingleProcessAnalisys('PPO','HumanoidStandup',i,'16cpu1gpu_mejorado',306)
 
-global_deg_metric='weighted_mean_best_later_deg'
-local_deg_metric='paired_diff_probpos_meanpos'
-ProcessIndependentAnalysis(all_process_ids[0:4],'all_Ant',global_deg_metric,local_deg_metric)
-ProcessIndependentAnalysis(all_process_ids[4:8],'all_Humanoid',global_deg_metric,local_deg_metric)
-ProcessIndependentAnalysis(all_process_ids,'all_Ant_Humanoid_HumanoidStandup',global_deg_metric,local_deg_metric)
+    # Analisis general (independiente de proceso): comparacion de criterios por nivel de degradacion (usando diferentes metricas de degradacion)
+    all_process_ids=['PPO_Ant_seed1','PPO_Ant_seed2','PPO_Ant_seed3','PPO_Ant_seed4',
+                    'PPO_Humanoid_seed1','PPO_Humanoid_seed2','PPO_Humanoid_seed3','PPO_Humanoid_seed4',
+                    'PPO_HumanoidStandup_seed1']
+    global_deg_metric='mean_update_deg'
+    local_deg_metric='greater_prob'
+    ProcessIndependentAnalysis(all_process_ids[0:4],'all_Ant',global_deg_metric,local_deg_metric)
+    ProcessIndependentAnalysis(all_process_ids[4:8],'all_Humanoid',global_deg_metric,local_deg_metric)
+    ProcessIndependentAnalysis(all_process_ids,'all_Ant_Humanoid_HumanoidStandup',global_deg_metric,local_deg_metric)
 
-global_deg_metric='weighted_mean_best_later_deg'
-local_deg_metric='greater_prob'
-ProcessIndependentAnalysis(all_process_ids[0:4],'all_Ant',global_deg_metric,local_deg_metric)
-ProcessIndependentAnalysis(all_process_ids[4:8],'all_Humanoid',global_deg_metric,local_deg_metric)
-ProcessIndependentAnalysis(all_process_ids,'all_Ant_Humanoid_HumanoidStandup',global_deg_metric,local_deg_metric)
+    global_deg_metric='weighted_mean_best_later_deg'
+    local_deg_metric='paired_diff_probpos_meanpos'
+    ProcessIndependentAnalysis(all_process_ids[0:4],'all_Ant',global_deg_metric,local_deg_metric)
+    ProcessIndependentAnalysis(all_process_ids[4:8],'all_Humanoid',global_deg_metric,local_deg_metric)
+    ProcessIndependentAnalysis(all_process_ids,'all_Ant_Humanoid_HumanoidStandup',global_deg_metric,local_deg_metric)
 
-# Analisis general (independiente de proceso): comparacion de criterios por tiempos de aprendizaje
-df1=pd.read_csv('experiments_intuition/results/CriteriaComparison/data/test_affordable_n_ep_by_process.csv')
-df2=pd.read_csv('experiments_intuition/results/CriteriaComparison/data/criteria_conf_by_process.csv')
-print('Maximo numero de episodios promedio con el que se consume menos o igual del 25% de tiempo validando: ',df1['n_ep_0.25'].mean())# 151.11111111111111
-print('Numeros de episodio optimos observados para train: ',list(set(df2['train_n_ep'])))
-print('Frecuencias optimas observadas para test: ',list(set(df2['test_freq'])))
+    global_deg_metric='weighted_mean_best_later_deg'
+    local_deg_metric='greater_prob'
+    ProcessIndependentAnalysis(all_process_ids[0:4],'all_Ant',global_deg_metric,local_deg_metric)
+    ProcessIndependentAnalysis(all_process_ids[4:8],'all_Humanoid',global_deg_metric,local_deg_metric)
+    ProcessIndependentAnalysis(all_process_ids,'all_Ant_Humanoid_HumanoidStandup',global_deg_metric,local_deg_metric)
 
-grid_train_n_ep=[500,250,100,50,25] # Numeros de episodios optimos observados para train
-grid_test_n_ep=[150,50,25,5] # Maximo valor considerado aquel que no supera de media el 25% del tiempo total
-grid_test_freq=[5,1] # Frecuencias optimas observadas despues de los tunings
+    # Analisis general (independiente de proceso): comparacion de criterios por tiempos de aprendizaje
+    df1=pd.read_csv('experiments_intuition/results/CriteriaComparison/data/test_affordable_n_ep_by_process.csv')
+    df2=pd.read_csv('experiments_intuition/results/CriteriaComparison/data/criteria_conf_by_process.csv')
+    print('Maximo numero de episodios promedio con el que se consume menos o igual del 25% de tiempo validando: ',df1['n_ep_0.25'].mean())# 151.11111111111111
+    print('Numeros de episodio optimos observados para train: ',list(set(df2['train_n_ep'])))
+    print('Frecuencias optimas observadas para test: ',list(set(df2['test_freq'])))
+
+    grid_train_n_ep=[500,250,100,50,25] # Numeros de episodios optimos observados para train
+    grid_test_n_ep=[150,50,25,5] # Maximo valor considerado aquel que no supera de media el 25% del tiempo total
+    grid_test_freq=[5,1] # Frecuencias optimas observadas despues de los tunings
 
 
-global_deg_metric='weighted_mean_best_later_deg'
-local_deg_metric='greater_prob'
-ProcessIndependentAnalysis(all_process_ids,'all_Ant_Humanoid_HumanoidStandup',global_deg_metric,local_deg_metric,
-                           grid_train_n_ep=grid_train_n_ep,grid_test_n_ep=grid_test_n_ep,grid_test_freq=grid_test_freq,customized='criteria_by_time')
+    global_deg_metric='weighted_mean_best_later_deg'
+    local_deg_metric='greater_prob'
+    ProcessIndependentAnalysis(all_process_ids,'all_Ant_Humanoid_HumanoidStandup',global_deg_metric,local_deg_metric,
+                            grid_train_n_ep=grid_train_n_ep,grid_test_n_ep=grid_test_n_ep,grid_test_freq=grid_test_freq,customized='criteria_by_time')
 
-local_deg_metric='paired_diff_median'
-ProcessIndependentAnalysis(all_process_ids,'all_Ant_Humanoid_HumanoidStandup',global_deg_metric,local_deg_metric,
-                           grid_train_n_ep=grid_train_n_ep,grid_test_n_ep=grid_test_n_ep,grid_test_freq=grid_test_freq,customized='criteria_by_time')
+    local_deg_metric='paired_diff_median'
+    ProcessIndependentAnalysis(all_process_ids,'all_Ant_Humanoid_HumanoidStandup',global_deg_metric,local_deg_metric,
+                            grid_train_n_ep=grid_train_n_ep,grid_test_n_ep=grid_test_n_ep,grid_test_freq=grid_test_freq,customized='criteria_by_time')
 
-global_deg_metric='best_last_deg'
-local_deg_metric='greater_prob'
-ProcessIndependentAnalysis(all_process_ids,'all_Ant_Humanoid_HumanoidStandup',global_deg_metric,local_deg_metric,
-                           grid_train_n_ep=grid_train_n_ep,grid_test_n_ep=grid_test_n_ep,grid_test_freq=grid_test_freq,customized='criteria_by_time')
+    global_deg_metric='best_last_deg'
+    local_deg_metric='greater_prob'
+    ProcessIndependentAnalysis(all_process_ids,'all_Ant_Humanoid_HumanoidStandup',global_deg_metric,local_deg_metric,
+                            grid_train_n_ep=grid_train_n_ep,grid_test_n_ep=grid_test_n_ep,grid_test_freq=grid_test_freq,customized='criteria_by_time')
 
-local_deg_metric='paired_diff_median'
-ProcessIndependentAnalysis(all_process_ids,'all_Ant_Humanoid_HumanoidStandup',global_deg_metric,local_deg_metric,
-                           grid_train_n_ep=grid_train_n_ep,grid_test_n_ep=grid_test_n_ep,grid_test_freq=grid_test_freq,customized='criteria_by_time')
+    local_deg_metric='paired_diff_median'
+    ProcessIndependentAnalysis(all_process_ids,'all_Ant_Humanoid_HumanoidStandup',global_deg_metric,local_deg_metric,
+                            grid_train_n_ep=grid_train_n_ep,grid_test_n_ep=grid_test_n_ep,grid_test_freq=grid_test_freq,customized='criteria_by_time')
+
 
 #==================================================================================================
 # Generación de graficas adaptadas para MAEB e ISG charla
@@ -3200,10 +3592,109 @@ def MAEB_ISG_generate_graphs():
     analyzer.MAEB2_graph_best_criteria_by_time('all_HumanoidStandup',humanidstandup_process_ids,grid_train_n_ep,grid_test_n_ep,grid_test_freq,global_deg_metric,local_deg_metric)
     analyzer.MAEB2_graph_best_criteria_by_time(title,all_process_ids,grid_train_n_ep,grid_test_n_ep,grid_test_freq,global_deg_metric,local_deg_metric)
 
+if MAEB_ISG_experiments:
+    MAEB_ISG_generate_graphs()
+
+#==================================================================================================
+# NUEVO ANALISIS
+#==================================================================================================
+#--------------------------------------------------------------------------------------------------
+# Replicar experimentos SingleProcess mas importantes para nuevos entornos
+#--------------------------------------------------------------------------------------------------
+#------------- Mas environments
+for i in range(1,11):
+    SingleProcessAnalisys('PPO','HalfCheetah',i,'16cpu1gpu_mejorado',306)
+    #SingleProcessAnalisys('PPO','Walker2d',i,'16cpu1gpu_mejorado',306)
+
+#------------- Configuraciones optimas por entorno
+df=pd.read_csv('experiments_intuition/results/CriteriaComparison/data/criteria_conf_by_process.csv')
+df_opt_conf_per_env=[]
+for env in ['HalfCheetah','Ant','Humanoid','HumanoidStandup']:
+    # Filas asociadas al env
+    df_env=df[df["process_id"].str.contains(env+'_')]
+    opt_train_n_ep=max(set(df_env['train_n_ep']), key=list(df_env['train_n_ep']).count)
+    print(df_env.value_counts(subset=["test_n_ep", "test_freq"]))
+    opt_test_n_ep,opt_test_freq = df_env.value_counts(subset=["test_n_ep", "test_freq"]).idxmax()
+    df_opt_conf_per_env.append(['PPO',env,opt_train_n_ep,opt_test_n_ep,opt_test_freq])
+# Todos los entornos
+opt_train_n_ep=max(set(df['train_n_ep']), key=list(df_env['train_n_ep']).count)
+opt_test_n_ep,opt_test_freq = df.value_counts(subset=["test_n_ep", "test_freq"]).idxmax()
+df_opt_conf_per_env.append(['PPO','All',opt_train_n_ep,opt_test_n_ep,opt_test_freq])
+
+df_opt_conf_per_env=pd.DataFrame(df_opt_conf_per_env,columns=['algo','env','train_n_ep','test_n_ep','test_freq'])
+df_opt_conf_per_env.to_csv("experiments_intuition/results/CriteriaComparison/data/opt_criteria_conf_by_env.csv", index=False)
+
+#---------------- Comparacion de criterios por entorno
+global_deg_metric='relative_worsening_to_improvement'
+local_deg_metric='relative_reward_diff'
+
+analyzer=ProcessIndependentAnalyzer(306,grid_test_freq=[1],grid_test_n_ep=[500,100,5],grid_train_n_ep=[500,250,100,50,25,5],
+                                    global_deg_metric=global_deg_metric,local_deg_metric=local_deg_metric)
+
+halfcheetah_process_ids=['PPO_HalfCheetah_seed'+str(seed) for seed in range(1,11)]
+ant_process_ids=['PPO_Ant_seed'+str(seed) for seed in range(1,11)]
+humanoid_process_ids=['PPO_Humanoid_seed'+str(seed) for seed in range(1,11)]
+humanidstandup_process_ids=['PPO_HumanoidStandup_seed'+str(seed) for seed in range(1,11)]
+process_ids= ['PPO_Ant_seed'+str(seed) for seed in range(1,11)]+['PPO_Humanoid_seed'+str(seed) for seed in range(1,11)]+['PPO_HumanoidStandup_seed'+str(seed) for seed in range(1,11)]+ ['PPO_HalfCheetah_seed'+str(seed) for seed in range(1,11)]
+
+analyzer.MAEB_graph_best_criteria_by_time('All_envs',process_ids,[500],[5],[1],global_deg_metric,local_deg_metric)
+analyzer.MAEB_graph_best_criteria_by_time('HalfCheetah',halfcheetah_process_ids,[500],[5],[1],global_deg_metric,local_deg_metric)
+analyzer.MAEB_graph_best_criteria_by_time('Ant',ant_process_ids,[50],[5],[1],global_deg_metric,local_deg_metric)
+analyzer.MAEB_graph_best_criteria_by_time('Humanoid',humanoid_process_ids,[500],[100],[1],global_deg_metric,local_deg_metric)
+analyzer.MAEB_graph_best_criteria_by_time('HumanoidStandup',humanidstandup_process_ids,[500],[500],[1],global_deg_metric,local_deg_metric)
+
+analyzer.MAEB2_graph_best_criteria_by_time('All_envs',process_ids,[500],[5],[1],global_deg_metric,local_deg_metric)
+analyzer.MAEB2_graph_best_criteria_by_time('HalfCheetah',halfcheetah_process_ids,[500],[5],[1],global_deg_metric,local_deg_metric)
+analyzer.MAEB2_graph_best_criteria_by_time('Ant',ant_process_ids,[50],[5],[1],global_deg_metric,local_deg_metric)
+analyzer.MAEB2_graph_best_criteria_by_time('Humanoid',humanoid_process_ids,[500],[100],[1],global_deg_metric,local_deg_metric)
+analyzer.MAEB2_graph_best_criteria_by_time('HumanoidStandup',humanidstandup_process_ids,[500],[500],[1],global_deg_metric,local_deg_metric)
+
+#--------------------------------------------------------------------------------------------------
+# Graficas para conclusion final: cuando usar que criterio en funcion del tiempo disponible
+#--------------------------------------------------------------------------------------------------
  
-MAEB_ISG_generate_graphs()
+analyzer.graph_when_use_test(process_ids,5,1,'All_envs',global_deg_metric=global_deg_metric,local_deg_metric=local_deg_metric)
+analyzer.graph_when_use_test(process_ids,500,1,'All_envs_500',global_deg_metric=global_deg_metric,local_deg_metric=local_deg_metric)
+
+analyzer.graph_when_use_test(halfcheetah_process_ids,5,1,'HalfCheetah',global_deg_metric=global_deg_metric,local_deg_metric=local_deg_metric)
+analyzer.graph_when_use_test(ant_process_ids,5,1,'Ant',global_deg_metric=global_deg_metric,local_deg_metric=local_deg_metric)
+analyzer.graph_when_use_test(humanoid_process_ids,100,1,'Humanoid',global_deg_metric=global_deg_metric,local_deg_metric=local_deg_metric)
+analyzer.graph_when_use_test(humanidstandup_process_ids,500,1,'HumanoidStandup',global_deg_metric=global_deg_metric,local_deg_metric=local_deg_metric)
+
+'''
+TODO:
+- bajar del cluster los datos de Walker2d, y reproducir los mismos experimentos con el
+(para tener calculadas las estimaciones, configuraciones optimas, degradaciones asociadas,...)
+
+- fijar configuracion optima de train y test global para todos los entornos. Añadir al analisis 
+actual (solo max magnitudes) el porcentage de tiempo de validacion con respecto a aprender. La 
+configuracion optima de test puede ser el maximo n_ep que no supera el 25%.
+
+- hacer analisis comparativos individuales por entornos (la metrica de magnitud y degradacion
+pueden no ser comparables entre entornos).
+
+- en comparaciones pares entre criterios, contar los empates como 0.5 para cada uno en ved de 1.
+
+- dejar mismo tiempo fijo para diferentes entornos (no meternos en convergencia)
+
+- en el analisis que concluye las consecuencias de aplicar cada criterio last-test, en lugar de
+la aplicacion simetrica de test, considerar la diagonal inversa a la hecha, empezar en iter. x y
+validar el reto de iteraciones hasta el final.
+
+- entender porque es mas costosa la validacion en entornos mas simples (puede que sea la 
+longitud de los episodios) y train no es tan malo en entornos simples (puede ser por lo 
+tolerante que es el entorno a politicas diferentes)
+
+- modificaciones en definicion de degradacion para mas adelante. Definirla en funcion de f 
+es mas simple y concuerda con la definicion del problema, pero causa problemas en comparar
+degradaciones de diferentes entornos (por la escala del reward). Definirla en funcion de la
+distribucion de reward sobre los estados iniciales se aleja mas de la definicion del problema
+y es mas compleja, pero es comparable en diferentes entornos. Hay un paper que habla sobre como
+normalizar los rewards de diferentes entornos para que sean comparables!!
 
 
-
-
+FIXME: 
+- Si recalculo los truth de la misma manera (los guardados para Ant, Humanoid, HumanoidSatndup),
+  no salen igual que la vez pasada (puede ser por la version de la libreria que descomprime).
+'''
 

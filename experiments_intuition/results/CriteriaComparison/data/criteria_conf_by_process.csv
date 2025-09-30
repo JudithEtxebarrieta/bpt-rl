@@ -29,3 +29,13 @@ PPO_HumanoidStandup_seed7,500,5,1
 PPO_HumanoidStandup_seed8,5,25,1
 PPO_HumanoidStandup_seed9,500,5,1
 PPO_HumanoidStandup_seed10,500,500,1
+PPO_HalfCheetah_seed1,500,5,1
+PPO_HalfCheetah_seed2,250,5,1
+PPO_HalfCheetah_seed3,500,5,1
+PPO_HalfCheetah_seed4,500,5,1
+PPO_HalfCheetah_seed5,500,5,1
+PPO_HalfCheetah_seed6,25,5,1
+PPO_HalfCheetah_seed7,100,5,1
+PPO_HalfCheetah_seed8,500,5,1
+PPO_HalfCheetah_seed9,500,5,1
+PPO_HalfCheetah_seed10,500,5,1
