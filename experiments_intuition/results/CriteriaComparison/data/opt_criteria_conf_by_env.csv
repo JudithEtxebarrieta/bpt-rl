@@ -1,5 +1,6 @@
 algo,env,train_n_ep,test_n_ep,test_freq
 PPO,HalfCheetah,500,5,1
+PPO,Walker2d,100,5,1
 PPO,Ant,50,5,1
 PPO,Humanoid,25,100,1
 PPO,HumanoidStandup,500,5,1

@@ -597,7 +597,41 @@ class EvolutionGenerator:
             last_ep_rewards=np.array(Converter.compress_decompress_list(self.df_test.loc[last_idx,'ep_rewards'],compress=False)[:500])
             degradation_level=Estimator.estimate_any_degradation(last_ep_rewards,best_ep_rewards,local_metric)
 
+        if global_metric=='relative_best_last_deg':
+            # Indices de la ultima y mejor politica
+            last_idx=self.last_policy(elapsed_time)
+            init_idx=last_idx-self.start_iter+1
+            truth_best_idx=self.df_test_estimates.loc[init_idx:(last_idx+1),'truth'].idxmax()
+
+            # Degradacion local entre ellas
+            best_ep_rewards=np.array(Converter.compress_decompress_list(self.df_test.loc[truth_best_idx,'ep_rewards'],compress=False)[:500])
+            last_ep_rewards=np.array(Converter.compress_decompress_list(self.df_test.loc[last_idx,'ep_rewards'],compress=False)[:500])
+            degradation_level=Estimator.estimate_any_degradation(last_ep_rewards,best_ep_rewards,local_metric)
+            
+
         if global_metric=='relative_worsening_to_improvement':
+            # Indices de la ultima y mejor politica en el tiempo transcurrido
+            last_idx=self.last_policy(elapsed_time)
+            init_idx=last_idx-self.start_iter+1
+            truth_best_idx=self.df_test_estimates.loc[init_idx:(last_idx+1),'truth'].idxmax()
+
+
+            # Identificar la peor y mejor politicas del proceso (para la normmalizacion y que la metrica local este en [0,1])
+            process_worst_ep_truth=self.df_test_estimates['truth'].min()
+            process_best_ep_truth=self.df_test_estimates['truth'].max()
+
+            # Degradacion local entre: mejor-ultima y mejor-primera (de ventana)
+            best_ep_truth=self.df_test_estimates.loc[truth_best_idx,'truth']
+            last_ep_truth=self.df_test_estimates.loc[last_idx,'truth']
+            init_ep_truth=self.df_test_estimates.loc[init_idx,'truth']
+
+            best_last_deg=Estimator.estimate_any_degradation(last_ep_truth,best_ep_truth,local_metric,additionals=[process_worst_ep_truth,process_best_ep_truth])
+            best_init_deg=Estimator.estimate_any_degradation(init_ep_truth,best_ep_truth,local_metric,additionals=[process_worst_ep_truth,process_best_ep_truth])
+            indicator=[0 if init_ep_truth!=last_ep_truth else 1][0]
+
+            degradation_level=best_last_deg/max(best_init_deg,best_last_deg,indicator)
+
+        if global_metric=='worsening_to_improvement':
             # Indices de la ultima y mejor politica en el tiempo transcurrido
             truth_best_idx=self.truth_best_policy(elapsed_time)
             last_idx=self.last_policy(elapsed_time)
@@ -616,6 +650,7 @@ class EvolutionGenerator:
             indicator=[0 if init_ep_truth!=last_ep_truth else 1][0]
 
             degradation_level=best_last_deg/max(best_init_deg,best_last_deg,indicator)
+
         return degradation_level
     
     def effectiveness(self,elapsed_time,n_policy,normalized):
@@ -630,7 +665,7 @@ class EvolutionGenerator:
         EER_criteria_best=EER_list[n_policy-self.start_iter+1]
 
         return EER_criteria_best/EER_real_best
-    
+        
     #----------------------------------------------------------------------------------------------
     # Criterios de seleccion
     #----------------------------------------------------------------------------------------------
@@ -665,7 +700,7 @@ class EvolutionGenerator:
         for time in current_val_times:
             policy_id=self.df_train.loc[(self.df_train['time_seconds']<=time) & (self.df_train['time_seconds']>=self.start_time)].index.max()
 
-            current_val_policies.append(policy_id)  
+            current_val_policies.append(policy_id) 
             esti_time_seq.append(self.df_test_estimates[self.df_test_estimates['n_policy']==policy_id][str(n_val_ep)+'_val_ep'].values[0])
 
         esti_time_seq= [Converter.compress_decompress_list(i,compress=False) for i in esti_time_seq]
@@ -776,6 +811,7 @@ class EvolutionGenerator:
         else:
             return y_eff
         
+
 class EvolutionGrapher():
     '''
     Las funciones de esta clase permiten representar graficamente la evolucion de diferentes metricas.
@@ -1195,6 +1231,7 @@ class EvolutionGrapher():
         #plt.show()
         plt.close()
 
+
 class EstimationAnalyzer():  
     '''
     Las funciones de esta clase permiten analizar graficamente el coste de las estimaciones de expected episodic reward
@@ -1219,7 +1256,7 @@ class EstimationAnalyzer():
         # Leer o generar un csv en  donde se guaradara el valor mas grande para n_ep que consume menos o igual que l 25% del timepo disponible en validacion
         path_csv='experiments_intuition/results/CriteriaComparison/data/test_affordable_n_ep_by_process.csv'
         if not os.path.exists(path_csv):
-            df = pd.DataFrame(columns=['process_id','n_ep_0.25'])
+            df = pd.DataFrame(columns=['process_id','n_ep_0.25','n_ep_0.20','n_ep_0.10','n_ep_0.05'])
             df.to_csv(path_csv, index=False)
 
         # Guardar el resto de variables
@@ -1265,12 +1302,15 @@ class EstimationAnalyzer():
             matrix[i]=np.array(matrix[i])/np.array(matrix[1])
             for_affordable_n_ep.append(matrix[i][self.start_iter-1:])
 
-        # Guardar minimo entre los maximos valores de list_n_val_ep por politica que tienen un porcentage de validacion menor que 0.25
+        # Guardar media entre los maximos valores de list_n_val_ep por politica que tienen un porcentage de validacion menor que 0.25
         for_affordable_n_ep=np.array(for_affordable_n_ep).T
-        max_n_ep_by_policy=[next((self.list_n_val_ep[i] for i, perc in enumerate(percs_n_ep) if perc <= 0.25), 0) for percs_n_ep in for_affordable_n_ep]
+        max_n_ep_by_policy=[]
+        for affordable_perc in [0.25,0.20,0.1,0.05]:
+            max_n_ep_by_policy.append(int(np.mean([next((self.list_n_val_ep[i] for i, perc in enumerate(percs_n_ep) if perc <= affordable_perc), 0) for percs_n_ep in for_affordable_n_ep])))
+        
         with open(self.path_csv_affordable_n_ep_by_process, "a", newline="") as f:
             writer = csv.writer(f)
-            writer.writerow([self.algo+'_'+self.env+'_seed'+str(self.seed)]+[int(np.mean(max_n_ep_by_policy))]) 
+            writer.writerow([self.algo+'_'+self.env+'_seed'+str(self.seed)]+max_n_ep_by_policy) 
 
         # Normalizar tiempos de interaccion
         matrix[1]=Converter.normalize_list(matrix[1])
@@ -1634,6 +1674,56 @@ class EstimationAnalyzer():
         plt.savefig('experiments_intuition/results/MAEB/'+self.algo+'_'+self.env+'_seed'+str(self.seed)+'_estimation_cost_analysis.pdf')
         plt.close()
    
+    def graph_truth_train_test_estimates_together(self,perc_val,ax,title,train_n_ep,test_n_ep,
+                                               first_graph=False,first_row=False,first_column=False,last_row=False):
+        '''
+        Esta funcion esta pensada para ser llamada por graph_truth_train_test_estimates_together de la clase 
+        ProcessIndependentAnalyzer. Esta funcion dibuja graficas dentro de las cuadriculas ya definidas por la otra 
+        funcion. La otra funcion representara las estimaciones de diferentes entornos para diferentes
+        semillas en una cuadricula, y esta se encarga de dibujar el caso concreto de un entorno y semilla en un cuadro.
+        '''
+        # Para obtener los maximos de las estimaciones en diferentes tiempos
+        def best_dots(x,y):
+            x_dots=[]
+            y_dots=[]
+            for i in [49,99,149,199,249,299]: #cada 50 iteraciones
+                idxmax=y.index(max(y[:i+1]))
+                x_dots.append(x[idxmax])
+                y_dots.append(y[idxmax])
+
+            return x_dots,y_dots
+
+        colors=list(mcolors.TABLEAU_COLORS.keys())
+        x=range(self.iter_max)
+        
+        # Evolucion de estimaciones truth
+        y_last=self.generator.df_test_estimates['truth'][:self.iter_max].tolist()
+        x_dots,y_dots=best_dots(x,y_last)
+        ax.plot(x, y_last, label="Truth",color=colors[0])
+
+        # Evolucion de estimaciones train
+        y_train=self.generator.df_train_estimates[str(train_n_ep)+'_traj_ep'][:self.iter_max].tolist()
+        x_dots,y_dots=best_dots(x,y_train)
+        ax.plot(x, y_train, label="Train",color=colors[1])
+        ax.scatter(x_dots,y_dots, color=colors[1], s=25, zorder=5, label="max Train")
+        
+        # Evolucion de estimaciones test (que suponen un coste maximo de perc_val frente a aprender)
+        y_test=[Converter.compress_decompress_list(i,compress=False)[0] for i in self.generator.df_test_estimates[str(test_n_ep)+'_val_ep']]
+        x_dots,y_dots=best_dots(x,y_test)
+        ax.plot(x, y_test, label="Test ("+str(perc_val)+'% cost)',color=colors[2],alpha=0.5)
+        ax.scatter(x_dots,y_dots, color=colors[2], s=25, zorder=5, label="max "+"Test ("+str(perc_val)+'% cost)')
+        
+        if last_row:
+            ax.set_xlabel("Learning iteration")
+        if first_column:
+            ax.set_ylabel("Estimated reward")
+        if first_graph:
+            ax.legend(loc="center left", bbox_to_anchor=(-0.9, 0.5))
+        if first_row:
+            ax.set_title(title+'(train_n_ep='+str(train_n_ep)+'; test_n_ep='+str(test_n_ep)+')')
+        ax.grid(True)
+
+    
 class CriteriaTuner():
     '''
     Esta clase esta enfocada a fijar la configuracion optima de los criterios train (n_ep) y test (n_ep y freq),
@@ -2032,8 +2122,18 @@ class CriteriaTuner():
 
     
 class ProcessIndependentAnalyzer():
+    '''
+    Esta clase contiene las funciones que permiten comparar los tres criterios independientemente de como
+    haya sido generado el proceso de aprendizaje. Se pueden comparar los criterios ( y diferentes de sus configuraciones)
+    por tiempos de aprendizaje, por degradacion, y ambas cosas combinadas. En cada analisis posible se puede especificar
+    cuales son los procesos que se quiere que participen en el analisis comparativo de los criterios. 
+
+    NOTE: por simplicidad, lo mejor es identificar las configuraciones de train y test que son buenas en promedio
+    entre todos los entornos, para tener una unica version de cada criterio.
+    '''
+
     def __init__(self,iter_max,perc_time_start=0.1,
-                 global_deg_metric='mean_update_deg',local_deg_metric='greater_prob',
+                 global_deg_metric='mean_update_deg',local_deg_metric='greater_prob',relative_deg_metric=None,
                  all_possible_conf=False, # Para generar datos relacionados con el analisis de sensibilidad
                  grid_train_n_ep=None,grid_test_n_ep=None,grid_test_freq=None # Para almacenar datos relacionados con el analisis para ganar intuicion
                  ):
@@ -2054,27 +2154,36 @@ class ProcessIndependentAnalyzer():
         
         df_test_start_end=Converter.generate_df('experiments_intuition/results/CriteriaComparison/data/test_start_end_perc_time.csv',
                                                 ['process_id','test_conf','start_test','end_test','perc_good','invest_time','last_good','last_time'])
-
+        df_criteria_start_end=Converter.generate_df('experiments_intuition/results/CriteriaComparison/data/criteria_start_end_good_time.csv',
+                                                ['process_id','train_conf','test_conf','end_last','start_train','end_train','start_test','end_test','perc_good','perc_time_val_learn','invest_time'])
+        
         # Leer base de datos donde se almacenan las mejores configuraciones de los criterios por proceso (criteria_conf_by_process.csv)
         df_conf=pd.read_csv('experiments_intuition/results/CriteriaComparison/data/criteria_conf_by_process.csv')
+        df_test_affordable_conf=pd.read_csv('experiments_intuition/results/CriteriaComparison/data/test_affordable_n_ep_by_process.csv')
         '''
-        
         # Calcular y guardar por proceso: evolucion de nivel de degradacion y evolucion de magnitudes por criterio (si no estan ya guardados)
         for row in tqdm(range(df_conf.shape[0])):# Aqui estan guardados todos los procesos que consideraremos
             process_id=df_conf.loc[row,'process_id']
             print(process_id)
             algo,env,seed=Converter.process_id_splitter(process_id)
-
+            
+            # Generar las estimaciones necesarios para las graficas con las configuraciones indicadas
+            if len(grid_train_n_ep)+len(grid_test_n_ep)==0:
+                Estimator.compute_estimates(algo,env,seed,'16cpu1gpu_mejorado',None,None)
+            for n_ep in tqdm(grid_train_n_ep):
+                Estimator.compute_estimates(algo,env,seed,'16cpu1gpu_mejorado',n_ep,'train')
+            for n_ep in tqdm(grid_test_n_ep):
+                Estimator.compute_estimates(algo,env,seed,'16cpu1gpu_mejorado',n_ep,'test')
+            
             generator=EvolutionGenerator(algo,env,seed,'16cpu1gpu_mejorado',perc_time_start)
             x_times=generator.df_train['time_seconds'].tolist()[start_iter:iter_max]  
             min_time=generator.df_train.loc[start_iter,'time_seconds']
             
             # Si los datos del proceso no estan ya almacenados calcularlos y almacenarlos (configuraciones optimas en cada proceso)
             if  process_id not in list(df_degradation.columns):
-                
+                    
                 # Calcular y guardar las evolucion de nivel de degradacion
                 df_degradation[process_id+'_'+global_deg_metric+'_'+local_deg_metric]=generator.degradation_evolution(x_times,global_deg_metric,local_deg_metric)
-            
                 # Configuracion optima de los criterios train y test 
                 train_n_ep,test_n_ep,test_freq=df_conf.loc[row,['train_n_ep','test_n_ep','test_freq']]
 
@@ -2129,9 +2238,9 @@ class ProcessIndependentAnalyzer():
                         df_test_mag[process_id+'_'+str(n_ep)+'_without_extra']=generator.magnitude_evolution(x_times,n_ep=n_ep,freq=x_times_with_freq,criteria='best_val',normalized=True)[0]
                     if process_id+'_'+str(n_ep)+'_without_extra' not in list(df_test_eff.columns):  
                         x_times_with_freq=Estimator.time_discretizer(algo,env,seed,'16cpu1gpu_mejorado',1,iter_max,min_time)
-                        df_test_eff[process_id+'_'+str(n_ep)+'_without_extra']=generator.effectiveness_evolution(x_times,n_ep=n_ep,freq=x_times_with_freq,criteria='best_val',normalized=True)[0]
+                        df_test_eff[process_id+'_'+str(n_ep)+'_without_extra']=generator.effectiveness_evolution(x_times,n_ep=n_ep,freq=x_times_with_freq,criteria='best_val',normalized=True,for_analyzer=True)[0]
 
-            
+                    
                     # Contando el extra de tiempo de validacion para diferentes frecuencias
                     for freq in grid_test_freq:
                         if process_id+'_'+str(n_ep)+'_'+str(freq) not in list(df_test_mag.columns):
@@ -2140,12 +2249,13 @@ class ProcessIndependentAnalyzer():
                         if process_id+'_'+str(n_ep)+'_'+str(freq) not in list(df_test_eff.columns):
                             x_times_with_freq=Estimator.time_discretizer(algo,env,seed,'16cpu1gpu_mejorado',freq,iter_max,min_time)    
                             df_test_mag[process_id+'_'+str(n_ep)+'_'+str(freq)]=generator.effectiveness_evolution(x_times,n_ep=n_ep,freq=x_times_with_freq,criteria='best_val',normalized=True)[0]
-
-            
+                    
+        
             print('if de intuicion test listo')  
             
             # Guardar cambios en bases de datos
             df_degradation.to_csv('experiments_intuition/results/CriteriaComparison/data/deg_mag/level_degradation.csv', index=False)
+
             df_last_mag.to_csv('experiments_intuition/results/CriteriaComparison/data/deg_mag/criteria_last_mag.csv', index=False)
             df_train_mag.to_csv('experiments_intuition/results/CriteriaComparison/data/deg_mag/criteria_best_train_mag.csv', index=False)
             df_test_mag.to_csv('experiments_intuition/results/CriteriaComparison/data/deg_mag/criteria_best_test_mag.csv', index=False)
@@ -2155,6 +2265,7 @@ class ProcessIndependentAnalyzer():
             df_test_eff.to_csv('experiments_intuition/results/CriteriaComparison/data/deg_mag/criteria_best_test_eff.csv', index=False)
 
             df_test_start_end.to_csv('experiments_intuition/results/CriteriaComparison/data/test_start_end_perc_time.csv', index=False)
+            df_criteria_start_end.to_csv('experiments_intuition/results/CriteriaComparison/data/criteria_start_end_good_time.csv',index=False)
         '''
         self.df_degradation=df_degradation
         self.df_last_mag=df_last_mag
@@ -2165,7 +2276,15 @@ class ProcessIndependentAnalyzer():
         self.df_test_eff=df_test_eff
         self.df_test_start_end=df_test_start_end
         self.iter_max=iter_max
+        self.df_criteria_start_end=df_criteria_start_end
+        self.df_test_affordable_conf=df_test_affordable_conf
+        self.df_conf=df_conf
 
+    #===============================================================================================
+    # Analisis comparativos de criterios en multiples procesos al mismo tiempo
+    # (independientemente de el algo,env,seed,tiempo con que se defina)
+    #===============================================================================================
+    # Funciones para generar datos
     def generate_criteria_rank_by_time_data(self,process_ids,train_grid_n_ep,test_grid_n_ep,test_grid_freq,global_deg_metric,local_deg_metric):
         
         train_suffix=[str(n_ep) for n_ep in train_grid_n_ep]
@@ -2354,7 +2473,7 @@ class ProcessIndependentAnalyzer():
 
         return df
 
-
+    # Funciones que estructuran los datos en formatos apropiados para las graficas
     def matrix_best_criteria_by_time(self,process_ids,train_grid_n_ep,test_grid_n_ep,test_grid_freq,global_deg_metric,local_deg_metric):
         df=self.generate_criteria_rank_by_time_data(process_ids,train_grid_n_ep,test_grid_n_ep,test_grid_freq,global_deg_metric,local_deg_metric)
         df=df[df['process_id'].isin(process_ids)]
@@ -2525,7 +2644,10 @@ class ProcessIndependentAnalyzer():
             min_seq_size=1+split_seq_size*(i-1)
             df_seq_size=df[(df['seq_size']>=min_seq_size) & (df['seq_size']<max_seq_size) ]
 
+            #['process_id','seq_size','degradation_level','mag_last']+['mag_'+i for i in train_suffix+test_suffix]+['eff_last']+['eff_'+i for i in train_suffix+test_suffix]
+
             # Last vs train
+            # last_perc=((df_seq_size.iloc[:, 3]<df_seq_size.iloc[:, 4]).sum()+(df_seq_size.iloc[:, 3]==df_seq_size.iloc[:, 4]).sum()/2)/df_seq_size.shape[0] # Los empates suman 0.5
             last_perc=(df_seq_size.iloc[:, 3]<df_seq_size.iloc[:, 4]).sum()/df_seq_size.shape[0]
             matrix_perc_last_train.append([last_perc,1-last_perc])
 
@@ -2538,6 +2660,7 @@ class ProcessIndependentAnalyzer():
 
 
             # Last vs test
+            # last_perc=((df_seq_size.iloc[:, 3]<df_seq_size.iloc[:, 5]).sum()+(df_seq_size.iloc[:, 3]==df_seq_size.iloc[:, 5]).sum()/2)/df_seq_size.shape[0]
             last_perc=(df_seq_size.iloc[:, 3]<df_seq_size.iloc[:, 5]).sum()/df_seq_size.shape[0]
             matrix_perc_last_test.append([last_perc,1-last_perc])
 
@@ -2549,6 +2672,7 @@ class ProcessIndependentAnalyzer():
             matrix_eff_last_test[1]+=list(df_seq_size.loc[idx_best_test,column_name[8]])
 
             # train vs test
+            # train_perc=((df_seq_size.iloc[:, 4]<df_seq_size.iloc[:, 5]).sum()+(df_seq_size.iloc[:, 4]==df_seq_size.iloc[:, 5]).sum()/2)/df_seq_size.shape[0]
             train_perc=(df_seq_size.iloc[:, 4]<df_seq_size.iloc[:, 5]).sum()/df_seq_size.shape[0]
             matrix_perc_train_test.append([train_perc,1-train_perc])
 
@@ -2563,7 +2687,7 @@ class ProcessIndependentAnalyzer():
     
         return np.array(matrix_perc_last_train),np.array(matrix_perc_last_test),np.array(matrix_perc_train_test),matrix_diff_last_train,matrix_diff_last_test,matrix_diff_train_test,matrix_eff_last_train,matrix_eff_last_test,matrix_eff_train_test,np.array(matrix_deg_intervals), ['['+str(round(deg_intervals[i],1))+','+str(round(deg_intervals[i-1],1))+')' for i in range(1,len(deg_intervals))], df
  
-    
+    # Funciones que generan las graficas a partir de los datos estructurados
     def graph_best_criteria_by_time(self,process_ids,train_grid_n_ep,test_grid_n_ep,test_grid_freq,global_deg_metric='best_last_deg',local_deg_metric='paired_diff_median'):
 
         # Generar matriz numerica para la grafica
@@ -2917,8 +3041,6 @@ class ProcessIndependentAnalyzer():
         else:
             plt.savefig('experiments_intuition/results/CriteriaComparison/figures/best_criteria_by_time_related_deg/'+global_deg_metric+'_'+local_deg_metric+'_'+title+'.pdf')
         
-        
-
     def MAEB2_graph_best_criteria_by_time(self,title,process_ids,train_grid_n_ep,test_grid_n_ep,test_grid_freq,global_deg_metric='best_last_deg',local_deg_metric='paired_diff_probpos',MAEB=False):
         
         plt.rc('font', family='serif')
@@ -2971,8 +3093,10 @@ class ProcessIndependentAnalyzer():
             
             deg_by_criteria_when_best=[]
             colum_names=df.columns.tolist()
+            
             deg_by_criteria_when_best.append(list(df[df[colum_names[criteria_columns[0]]]<df[colum_names[criteria_columns[1]]]]['degradation_level']))
             deg_by_criteria_when_best.append(list(df[df[colum_names[criteria_columns[1]]]<df[colum_names[criteria_columns[0]]]]['degradation_level']))
+
 
             # Añadir franjas horizontales (rangos de degradacion)
             colors_grey=[Converter.generate_colormap(round(value,2),'Greys_r',0,1) for value in [0.3,0.55,0.8]]
@@ -2982,7 +3106,7 @@ class ProcessIndependentAnalyzer():
         
 
             # Crear violin plots
-            vp = ax.violinplot(deg_by_criteria_when_best, showmeans=False, showmedians=False, showextrema=False)
+            vp = ax.violinplot(deg_by_criteria_when_best,showmeans=False, showmedians=False, showextrema=False)
             for i, body in enumerate(vp['bodies']): # Asignar colores a cada violín
                 body.set_facecolor(colors[i])
                 body.set_edgecolor(colors[i])
@@ -3026,356 +3150,371 @@ class ProcessIndependentAnalyzer():
             plt.savefig('experiments_intuition/results/MAEB/vs2_'+global_deg_metric+'_'+local_deg_metric+'_'+title+'.pdf')
         else:
             plt.savefig('experiments_intuition/results/CriteriaComparison/figures/best_criteria_by_time_related_deg/vs2_'+global_deg_metric+'_'+local_deg_metric+'_'+title+'.pdf')
-        plt.show()
 
-   
     #===============================================================================================
-    # NUEVO ANALISIS
+    # NUEVOS ANALISIS
     #===============================================================================================
-    # Distribucion de degradacion por entorno-tiempo (creo que esta grafica no es necesaria)
-    def graph_deg_distribution_per_env_and_time(self,algo,envs,global_deg_metric,local_deg_metric):
-        '''
-        Distribucion de degradacion por entorno e intervalo de tiempo. Esta grafica permite comparar las degradaciones por 
-        (complejidad) entorno y por tiempo invertido en aprender.
-        '''
-        # Reducir base de datos a la degradacion que nos interesa
-        df=self.df_degradation.filter(like=global_deg_metric+'_'+local_deg_metric)
 
-        fig = plt.figure(figsize=(8,5))
-        plt.subplots_adjust(left=0.08,bottom=0.09,right=0.97,top=0.88,wspace=0.29,hspace=0.07)
-        
-        gs = fig.add_gridspec(4, 2, width_ratios=[2, 1])  # primera col mas ancha
-        colors=list(mcolors.TABLEAU_COLORS.keys())+['#fbf812','#20fa03','#0d099b','#9b094c']
-        x = np.linspace(0, 1, 200)
-
-        # Todos los tiempos juntos
-        ax = fig.add_subplot(gs[:, 0]) 
-        ax.grid(True, alpha=0.3)
-        plt.title('Degradation distribution by environment\nat different percentages of learning time for convergence')
-
-        for i in range(len(envs)):
-            # Generar una lista con las degradaciones acumuladas para ese algo_env
-            process_id_init=algo+'_'+envs[i]            
-            sample=df.filter(like=process_id_init).values.flatten()
-
-            # KDE para esos datos
-            kde= gaussian_kde(sample)
-            ax.plot(x, kde(x), label=envs[i],alpha=0.6,color=colors[i],linewidth=1)
-            ax.fill_between(x, kde(x), alpha=0.4,color=colors[i])
-            ax.axvline(np.median(sample), linestyle="-", linewidth=1.5,color=colors[i])
-
-        ax.set_xlabel("Degradation")
-        ax.set_ylabel("KDE")
-        ax.legend()
-
-        # Dividido por intervalor de tiempo
-        points=np.linspace(0, 1, 4+1)# 4 intervalos
-        intervals= list(zip(points[:-1], points[1:]))
-
-        for i,(start, end) in zip(range(4+1),intervals):
-            ax = fig.add_subplot(gs[i, 1]) 
-
-            # Subconjunto de datos
-            subset = df.iloc[int(len(df) * start):int(len(df) * end)]
-            
-            for j in range(len(envs)):
-                sample=subset.filter(like=envs[j]).values.flatten()
-                kde= gaussian_kde(sample)
-                ax.plot(x, kde(x), label=envs[j],alpha=0.6,color=colors[j],linewidth=1)
-                ax.fill_between(x, kde(x), alpha=0.4,color=colors[j])
-                ax.axvline(np.median(sample), linestyle="-", linewidth=1.5,color=colors[j])
-                
-            ax.set_ylabel(f"{int(start*100)}% - {int(end*100)}%")
-            ax.grid(True, alpha=0.3)
-            
-        ax.set_xlabel("Degradation")
-        plt.savefig('experiments_intuition/results/CriteriaComparison/figures/deg_distribution/'+algo+'_'+global_deg_metric+'_'+local_deg_metric+'.pdf')
-        plt.show()
-
-    # Analisis que cierra todo: ¿cuando usar que criterio?
-    def generate_df_test_strat_end(self, process_id,n_ep,freq):
+    # Analisis 1: valoracion de que criterio o combinacion de criterios combiene aplicar (segun la calidad y tiempo que estemos dispuestos a asumir)
+    def generate_df_criteria_strat_end(self, process_id,train_n_ep,test_n_ep,test_freq):
 
         algo,env,seed=Converter.process_id_splitter(process_id)
         process_id=algo+'_'+env+'_seed'+str(seed)
-        test_conf=str(n_ep)+'_'+str(freq)
+        test_conf=str(test_n_ep)+'_'+str(test_freq)
         generator=EvolutionGenerator(algo,env,seed,'16cpu1gpu_mejorado',perc_time_start=0.1)
 
         # Mirar si no se ha llamado antes a esta funcion de la misma manera
-        already_registered=(self.df_test_start_end['process_id']==process_id) & (self.df_test_start_end['test_conf']==test_conf)
+        already_registered=(self.df_criteria_start_end['process_id']==process_id) & (self.df_criteria_start_end['test_conf']==test_conf) & (self.df_criteria_start_end['train_conf']==train_n_ep)
 
         df_add=[]
         all_time_seq=generator.df_train.loc[self.start_iter:self.iter_max,'time_seconds'].tolist()
 
         if not np.array(already_registered).any():
 
-            # ------------Test ascendente
-            starts=[0]*len(all_time_seq)
-            ends=list(range(len(all_time_seq)))
-            for start,end in zip(starts,ends):
-                # Apilcando last
-                if start==end:
-                    policy_id=generator.last_policy(all_time_seq[-1])
-                    best_policy_id=generator.truth_best_policy(all_time_seq[-1])
-                    val_time=0
+            
+            starts=list(range(len(all_time_seq)))# Test ascendente
+            global_best_policy_id=generator.truth_best_policy(all_time_seq[-1])# Aprendemos hasta el tiempo limite
 
-                #Aplicando test en un intervalo diferente
-                else:
-                    policy_id,val_time=generator.best_policy_validation(all_time_seq[end],n_ep,all_time_seq)
-                    best_policy_id=generator.truth_best_policy(all_time_seq[-1])
+            for start in starts:
+                #----------------- Datos necesarios
+    
+                if start!=starts[-1]:
+                    #Aplicando train-test en un intervalo diferente
+                    start_train_policy_id=generator.best_policy_training(all_time_seq[start],train_n_ep)
+                    end_test_policy_id,end_val_time=generator.best_policy_validation(all_time_seq[-1],test_n_ep,all_time_seq[start+1:])
 
-                perc_good=generator.df_test_estimates.loc[policy_id,'truth']/generator.df_test_estimates.loc[best_policy_id,'truth']
-                invest_time=val_time+all_time_seq[-1]
+                if start!=0:
+                    #Aplicando test-train en un intervalo diferente
+                    estimated_EER_seq=generator.df_train_estimates[(generator.df_train['time_seconds']<=all_time_seq[-1]) & (generator.df_train['time_seconds']>=all_time_seq[start])][str(train_n_ep)+'_traj_ep'].tolist()
+                    end_train_policy_id=estimated_EER_seq.index(max(estimated_EER_seq))+self.start_iter-1 
+                    start_test_policy_id,start_val_time=generator.best_policy_validation(all_time_seq[start],test_n_ep,all_time_seq[:start])
 
-                #Aplicar last tambien
-                policy_id=generator.last_policy(all_time_seq[end])
-                best_policy_id=generator.truth_best_policy(all_time_seq[end])
-
-                last_good=generator.df_test_estimates.loc[policy_id,'truth']/generator.df_test_estimates.loc[best_policy_id,'truth']
-
-                df_add.append([process_id,test_conf,start,end,perc_good,invest_time,last_good,all_time_seq[end]])
-
-            # -------------Test simetrico
-            starts=list(range(int(len(all_time_seq)/2)))
-            ends=[(self.iter_max-self.start_iter-1)-i for i in starts]
-            for start,end in zip(starts,ends):
-                #Aplicando test en un intervalo diferente
-                if start!=end:
                     
-                    policy_id,val_time=generator.best_policy_validation(all_time_seq[end],n_ep,all_time_seq[start:])
-                    best_policy_id=generator.truth_best_policy(all_time_seq[-1])
+                #Para el caso en que solo aplicamos last o train
+                last_policy_id=generator.last_policy(all_time_seq[-start-1])
+                train_only_policy_id=generator.best_policy_training(all_time_seq[-start-1],train_n_ep)
+                current_best_policy_id=generator.truth_best_policy(all_time_seq[-start-1])
 
-                perc_good=generator.df_test_estimates.loc[policy_id,'truth']/generator.df_test_estimates.loc[best_policy_id,'truth']
-                invest_time=val_time+all_time_seq[-1]
+                #---------- Almacenar datos para cada caso que nos interesa
+                #Solo aplicamos last
+                perc_good=generator.df_test_estimates.loc[last_policy_id,'truth']/generator.df_test_estimates.loc[current_best_policy_id,'truth']
+                df_add.append([process_id,train_n_ep,test_conf,len(all_time_seq)-start-1,0,0,0,0,perc_good,0,all_time_seq[-start-1]])
 
-                df_add.append([process_id,test_conf,start,end,perc_good,invest_time,None,None])
+                #Solo aplicamos train
+                perc_good=generator.df_test_estimates.loc[train_only_policy_id,'truth']/generator.df_test_estimates.loc[current_best_policy_id,'truth']
+                df_add.append([process_id,train_n_ep,test_conf,0,0,len(all_time_seq)-start-1,0,0,perc_good,0,all_time_seq[-start-1]])
+
+                if start!=starts[-1]:
+                    #Solo aplicamos test
+                    perc_good=generator.df_test_estimates.loc[end_test_policy_id,'truth']/generator.df_test_estimates.loc[global_best_policy_id,'truth']
+                    df_add.append([process_id,train_n_ep,test_conf,0,0,0,start+1,len(all_time_seq)-1,perc_good,end_val_time/all_time_seq[-1],end_val_time+all_time_seq[-1]])
+
+                    #Aplicamos train-test
+                    truth_train=generator.df_test_estimates.loc[start_train_policy_id,'truth']
+                    truth_test=generator.df_test_estimates.loc[end_test_policy_id,'truth']
+                    selected_policy_id=[start_train_policy_id if max(truth_train,truth_test)==truth_train else end_test_policy_id ][0]
+
+                    perc_good=generator.df_test_estimates.loc[selected_policy_id,'truth']/generator.df_test_estimates.loc[global_best_policy_id,'truth']
+                    df_add.append([process_id,train_n_ep,test_conf,0,0,start,start+1,len(all_time_seq)-1,perc_good,end_val_time/all_time_seq[-1],end_val_time+all_time_seq[-1]])
+
+                if start!=0:
+                    #Aplicamos test-train
+                    truth_train=generator.df_test_estimates.loc[end_train_policy_id,'truth']
+                    truth_test=generator.df_test_estimates.loc[start_test_policy_id,'truth']
+                    selected_policy_id=[end_train_policy_id if max(truth_train,truth_test)==truth_train else start_test_policy_id ][0]
+
+                    perc_good=generator.df_test_estimates.loc[selected_policy_id,'truth']/generator.df_test_estimates.loc[global_best_policy_id,'truth']
+                    df_add.append([process_id,train_n_ep,test_conf,0,start+1,len(all_time_seq)-1,0,start,perc_good,start_val_time/all_time_seq[-1],start_val_time+all_time_seq[-1]])
+
+
 
             # Añadir nuevas filas a la base de datos existente
-            df_add = pd.DataFrame(df_add, columns=self.df_test_start_end.columns)
-            self.df_test_start_end = pd.concat([self.df_test_start_end, df_add],ignore_index=True)
-            self.df_test_start_end.to_csv('experiments_intuition/results/CriteriaComparison/data/test_start_end_perc_time.csv', index=False)
-        
-    def graph_when_use_test(self,process_ids,n_ep,freq,title,global_deg_metric,local_deg_metric):
+            df_add = pd.DataFrame(df_add, columns=self.df_criteria_start_end.columns)
+            self.df_criteria_start_end = pd.concat([self.df_criteria_start_end, df_add],ignore_index=True)
+            self.df_criteria_start_end.to_csv('experiments_intuition/results/CriteriaComparison/data/test_start_end_perc_time.csv', index=False)
 
-        # Generar los datos necesarios
+        self.df_criteria_start_end.to_csv('experiments_intuition/results/CriteriaComparison/data/criteria_start_end_good_time.csv', index=False)
+ 
+    def graph_when_which_criteria(self,process_ids,train_n_ep,test_n_ep,test_freq,global_deg_metric,local_deg_metric,title):
+        
+        # # Generar datos necesarios
         # for process_id in tqdm(process_ids):
-        #     self.generate_df_test_strat_end(process_id,n_ep,freq)
+        #     self.generate_df_criteria_strat_end( process_id,train_n_ep,test_n_ep,test_freq)
         
-        # Funciones internas de esta funcion
-        def get_perc_time(process_ids,n_ep,freq,ends,test):
+        # Funciones auxiliare
+        #--------- Grafica de degradaciones
+        def subgraph_deg(inner,global_deg_per_time):
+            '''
+            global_deg_per_time es la lista de listas, en donde cada sublista 
+            contiene las degradaciones globales en procesos/secuencias de una longitud en un intervalo concreto.
+            '''
+            # Transformar cada lista con sublistas de valores de degradacion, en sublistas de porcentages de degradaciones en los tres intervalos
+            def from_deg_prop(all_deg):
+                deg1 = sum(1 for deg in all_deg if 0 <= deg <= 0.33) 
+                deg2 = sum(1 for deg in all_deg if 0.33 < deg <= 0.66) 
+                deg3 = sum(1 for deg in all_deg if 0.66 < deg <= 1) 
+                return [deg3, deg2, deg1]
 
-            #Seleccionar filas de interes
-            df=self.df_test_start_end
-            if test=='ascendent':
-                rows=df['process_id'].isin(process_ids) & (df['test_conf']==str(n_ep)+'_'+str(freq)) & (df['start_test']==0) & (df['end_test'].isin(ends)) 
-            if test=='simetric':
-                rows=df['process_id'].isin(process_ids) & (df['test_conf']==str(n_ep)+'_'+str(freq)) & (df['start_test']==abs(df['end_test']-(self.iter_max-self.start_iter-1))) & (df['start_test'].isin(ends))
-            
-            if test=='time_conv':
-                rows=df['process_id'].isin(process_ids) & (df['test_conf']==str(n_ep)+'_'+str(freq)) & (df['start_test']==0) & (df['end_test']==0) 
-            if test=='only_last':
-                rows=df['process_id'].isin(process_ids) & (df['test_conf']==str(n_ep)+'_'+str(freq)) & (df['start_test']==0) & (df['end_test'].isin(ends)) 
-            
-            if test=='only_last':
-                return np.mean(df.loc[rows,'last_good']), np.mean(df.loc[rows,'last_time'])
-            else:
-                return np.mean(df.loc[rows,'perc_good']), np.mean(df.loc[rows,'invest_time'])
-        
-        def graph_ascendent_simetric(lista1,lista2,lista3,test,inner):
+            proportions = [from_deg_prop(deg_in_interval) for deg_in_interval in global_deg_per_time ] 
+
+            # Dibujar grafica de dirtribuciones de degradacion en cada intervalo de tiempo en la posicion indicada
             axes = inner.subplots(sharey=True)
 
-            # Grafica 1: cuando se aplica test
-            axes[0].grid(True, alpha=0.3,color='black',linewidth=0.3)
+            colores = ["#525252", "#969696","#d9d9d9" ]
+            x = np.arange(10) * 10 # cada grupo ocupa 10 unidades
 
-            for i, (x1, x2) in enumerate(lista1):
-                if test=='ascendent':
-                    min_x = min(x1 for x1, _ in lista1)
-                    if i==len(lista1)-1:
-                        axes[0].barh(i, x2 - x1, left=x1, color="orange", alpha=0.6, height=1, linewidth=0.0 )#se aplica alguna vez test
-                        axes[0].barh(i, x1 - min_x, left=min_x, color="orange", height=1)#se aplica test fijo
-                    else:
-                        axes[0].barh(i, x2 - x1, left=x1, color="green", alpha=0.6, height=1, linewidth=0.0 )#se aplica alguna vez test
-                        axes[0].barh(i, x1 - min_x, left=min_x, color="green", height=1)#se aplica test fijo
+            for i, props in enumerate(proportions):
+                below = 0
+                for j, val in enumerate(props):
+                    axes[0].bar(x[i] +5, val, width=10, bottom=below, color=colores[j])
+                    below += val
 
-                if test=='simetric':
-                    axes[0].barh(i, x2 - x1, left=x1, color="green", alpha=0.6, height=1, linewidth=0.0 )#se aplica alguna vez test
-                    axes[0].barh(i, (1-x1) - (1-x2), left=1-x2, color="green", alpha=0.6, height=1, linewidth=0.0 )#se aplica alguna vez test
-                    axes[0].barh(i, (1-x2) - x2, left=x2, color="green", height=1)#se aplica test fijo
+            for limit in range(0,110,10):
+                axes[0].axvline(limit, color="black", linestyle="--", linewidth=0.8)
 
-            # Grafica 2: como de buena es la politica seleccionada con respecto a la mejor
-            axes[1].grid(True, alpha=0.3,color='black',linewidth=0.3)
-            lista2_improv=[]
-            for i, val in enumerate(lista2):
-                axes[1].barh(i, -val, color="grey", height=1,alpha=0.5)
-                if i<len(lista2)-1:
-                    if test=='ascendent':
-                        lista2_improv.append([lista2[i]-lista2[i+1] if lista2[i]-lista2[i+1]>0 else 0][0])
-                    if test=='simetric':
-                        lista2_improv.append([lista2[i+1]-lista2[i] if lista2[i+1]-lista2[i]>0 else 0][0])
+            axes[0].set_xticks([0, 25, 50, 75, 100])
+            axes[0].set_xticklabels([])
+            axes[0].set_xlim(0, 100)
+            axes[0].set_ylabel("Proportion")
+            axes[0].set_title("Global degradation distribution per interval")
+
+            axes[1].axis('off')
+            axes[2].axis('off')
+
+
+        #--------- Grafica compuesta de aplicacion criterios solos
+        def subgraph_single_criterion(inner,last_period,ascendant_periods,perc_goods,perc_val_learn_times):
+            '''
+            last_period, ascendent_period: son los intervalos de porcentage de tiempo en que se ha aplicado al menos alguno de los criterios en algun punto
+
+            perc_goods,perc_val_learn_times,total_times: son listas con valores de los porcentages de lo vuenas que son las politicas seleccionadas por los criterios,
+            los porcentages de tiempo de validacion frente a aprendizaje, y los tiempos totales invertidos, en cada caso de aplicacion.
+            '''
+
+            axes = inner.subplots(sharey=True)
+
+            # Grafica de cuando se aplica cada criterio
+            colores = ['blue', 'orange']
+            for i, color in enumerate(colores):
+                v1, v2 = last_period
+                axes[0].barh(i, v1,height=1, color=color)
+                axes[0].barh(i, v2 - v1,height=1, left=v1, color=color, alpha=0.5)
+
+            for i in range(len(ascendant_periods) - 1):
+                v1, v2 = ascendant_periods[i], ascendant_periods[i+1]
+                axes[0].barh(i+2, v2 - v1,height=1, left=v1, color='green', alpha=0.5)
+                axes[0].barh(i+2, 1 - v2,height=1, left=v2, color='green')
+
+            axes[0].set_xlim(0, 1)
+            axes[0].set_xticklabels([])
+            axes[0].set_yticklabels([])
+            axes[0].set_ylabel("Appliying single criterion")
+
+            # Grafica de porcentajes de calidad y tiempo en validacion
+
+            axes[1].barh(np.arange(len(perc_goods)), [-val for val in perc_goods], color='black',height=1,alpha=0.5) 
+            axes[1].set_xlim(-1, 0)
+            axes[1].set_xticklabels([])
+            axes[1].invert_yaxis()
+            axes[1].set_title("How good is the\nselected policy?")
+
+            axes[2].barh(np.arange(len(perc_val_learn_times)), perc_val_learn_times, color='red',height=1,alpha=0.5)
+            axes[2].set_xticklabels([])
+            axes[2].invert_yaxis()
+            axes[2].set_title("How much time\nis required?")
+
+        #--------- Grafica compuesta de aplicacion criterios combinados (train-test)
+        def subgraph_combined_criteria(inner,ascendant_periods,perc_goods,perc_val_learn_times):
+            axes = inner.subplots(sharey=True)
+
+            # Grafica de cuando se aplica cada criterio
+            for i in range(len(ascendant_periods) - 1):
+                v1, v2 = ascendant_periods[i], ascendant_periods[i+1]
+                axes[0].barh(i, 1 - v2, height=1,left=v2,color='darkorange')
+                axes[0].barh(i, v2 - v1, height=1,left=v1, color='green', alpha=0.5)
+                axes[0].barh(i, v1 , height=1, color='green')
+                
+
+            for i in range(1,len(ascendant_periods) - 1):
+                v1, v2 = ascendant_periods[i], ascendant_periods[i+1]
+                axes[0].barh(i+len(ascendant_periods)-2, v1, height=1,color='darkorange')
+                axes[0].barh(i+len(ascendant_periods)-2, v2 - v1, height=1,left=v1, color='green', alpha=0.5)
+                axes[0].barh(i+len(ascendant_periods)-2, 1 - v2, height=1,left=v2, color='green')
+
+            axes[0].set_xlim(0, 1)
+            axes[0].set_xticks([0,.25,.50,.75,1])
+            axes[0].set_xticklabels(['0', '25', '50', '75', '100'])
+            axes[0].set_yticklabels([])
+            axes[0].set_ylabel("Applying combined criteria")
+            axes[0].set_xlabel("Percentage of learning time")
+
+            # Grafica de porcentajes de calidad y tiempo en validacion
+            axes[1].barh(np.arange(len(perc_goods)), [-val for val in perc_goods], color='black',height=1,alpha=0.5) 
+            axes[1].set_xlim(-1, 0)
             axes[1].xaxis.set_major_formatter(FuncFormatter(lambda x, pos: f"{abs(x):.1f}"))
-            axes[1].set_xlim(-1,0)
-            axes[1].plot(-np.array(lista2_improv)[::-1], list(range(len(lista2)-1))[::-1], "-", color="grey")
+            axes[1].set_xlabel("Reward percentage of\nselected policy\nrelative to the best")
 
-            # Grafica 3: tiempo invertido en total
-            axes[2].grid(True, alpha=0.3,color='black',linewidth=0.3)
-            lista3_improv=[]
-            for i, val in enumerate(lista3):
-                axes[2].barh(i, val, color="red", height=1,alpha=0.5)
-                if i<len(lista3)-1:
-                    if test=='ascendent':
-                        lista3_improv.append([lista3[i]-lista3[i+1] if lista3[i]-lista3[i+1]>0 else 0][0])
-                    if test=='simetric':
-                        lista3_improv.append([lista3[i+1]-lista3[i] if lista3[i+1]-lista3[i]>0 else 0][0])
+            axes[2].barh(np.arange(len(perc_val_learn_times)), perc_val_learn_times, color='red',height=1,alpha=0.5)
+            axes[2].set_xlabel("Percentage of invest\ntime in validation")
 
-            axes[2].ticklabel_format(style='sci', axis='x', scilimits=(0,0))
-            axes[2].set_xlim(1,round(max(lista3),4)+(round(max(lista3),4)-1)*0.1)
-               
+        #--------- Subdatos
+        def get_df_graph_data(criteria_application,starts=None,ends=None):
+            df=self.df_criteria_start_end
 
-            if test=='ascendent':
-                axes[1].plot(-np.array(lista3_improv), list(range(len(lista3)-1)), "-", color="red")
-                axes[0].set_title("When is test (green)\nand last (orange) applied?")
-                axes[1].set_title("How good is the selected policy?")
-                axes[2].set_title("How much time is required?")
-                for ax in axes:
-                    ax.set_xticklabels([]) 
-                    ax.tick_params(axis='x')
-            if test=='simetric':
-                axes[1].plot(-np.array(lista3_improv), list(range(len(lista3)-1))[::-1], "-", color="red")
-                axes[0].set_xlabel("Percentage of learning time\nfor convergence")
-                axes[1].set_xlabel("Reward percentage of selected policy\nrelative to the best")
-                axes[2].set_xlabel("Invest time percentage relative to\nthat required to converge")
-
-            for ax in axes:
-                ax.set_yticks(list(range(0,len(lista1)+2,2)))
-                ax.set_yticklabels([]) 
-                ax.tick_params(axis='y')
-            #axes[1].xaxis.set_major_locator(MultipleLocator(0.1))
-            #axes[2].xaxis.set_major_locator(MultipleLocator(0.01))
-
-        def graph_test_application_perc_time(process_ids,test_type,outer):
-
-            if test_type=='ascendent':
-                interval=(np.linspace(0, 1, 10+1)**1).tolist() #TODO: aqui se podria definir una reparametrizacion del intervalo [0,1], para que el ritmo con que se aumenta/disminuye el start/end de test no sea lineal
-            if test_type=='simetric':
-                interval=(np.linspace(0, 0.5, 10+1)**1).tolist()
-
-
-            _,time_conv=get_perc_time(process_ids,n_ep,freq,None,test='time_conv')
-            variable_start_end=[]# Para la grafica ilustrativa de aplicacion de test
-            all_perc_good,all_invest_time=[],[] # Para las graficas de perc y time
-
-            for i in range(len(interval)-1):
-                ends=range(int(interval[i]*(self.iter_max-self.start_iter)),int(interval[i+1]*(self.iter_max-self.start_iter))+1)
-                perc_good,invest_time=get_perc_time(process_ids,n_ep,freq,ends,test_type)
-                variable_start_end.append([ends[0]/(self.iter_max-self.start_iter),ends[-1]/(self.iter_max-self.start_iter)])
-                all_perc_good.append(perc_good)
-                all_invest_time.append(invest_time/time_conv)
-
-            if test_type=='ascendent':
-                variable_start_end=variable_start_end[::-1]
-                all_perc_good=all_perc_good[::-1]
-                all_invest_time=all_invest_time[::-1]
-
-                ends=range(int(interval[i-1]*(self.iter_max-self.start_iter)),int(interval[i+1]*(self.iter_max-self.start_iter))+1)
-                perc_good,invest_time=get_perc_time(process_ids,n_ep,freq,ends,'only_last')
-                all_perc_good.append(perc_good)
-                all_invest_time.append(1)
-                variable_start_end.append([ends[0]/(self.iter_max-self.start_iter),ends[-1]/(self.iter_max-self.start_iter)])
-
-                graph_ascendent_simetric(variable_start_end,all_perc_good,all_invest_time,'ascendent',
-                                         outer.subgridspec(1, 3, wspace=0.1, hspace=0.3))
+            if criteria_application=='last':
                 
-                return all_perc_good,all_invest_time, ends
+                rows= ( df['process_id'].isin(process_ids) & 
+                       (df['train_conf']==train_n_ep) & (df['test_conf']==str(test_n_ep)+'_'+str(test_freq)) &
+                       (df[['start_train', 'end_train','start_test','end_test']].eq(0).all(axis=1)) &
+                       (df['end_last'].isin(ends))
+                )
+
+            if criteria_application=='train':
+                rows= ( df['process_id'].isin(process_ids) & 
+                       (df['train_conf']==train_n_ep) & (df['test_conf']==str(test_n_ep)+'_'+str(test_freq)) &
+                       (df[['start_train', 'end_last','start_test','end_test']].eq(0).all(axis=1)) &
+                       (df['end_train'].isin(ends))
+                )
+
+            if criteria_application=='test':
+                rows= ( df['process_id'].isin(process_ids) & 
+                       (df['train_conf']==train_n_ep) & (df['test_conf']==str(test_n_ep)+'_'+str(test_freq)) &
+                       (df[['end_last','start_train', 'end_train']].eq(0).all(axis=1)) &
+                       df['end_test'].isin(ends) & df['start_test'].isin(starts) 
+                )
+
+            if criteria_application=='train_test':
+                rows= ( df['process_id'].isin(process_ids) & 
+                       (df['train_conf']==train_n_ep) & (df['test_conf']==str(test_n_ep)+'_'+str(test_freq)) &
+                       (df[['end_last','start_train']].eq(0).all(axis=1)) &
+                       df['start_test'].isin(starts) & df['end_test'].isin(ends) &  (df['end_train']+1==df['start_test'])
+                )
+
+            if criteria_application=='test_train':
+                rows= ( df['process_id'].isin(process_ids) & 
+                       (df['train_conf']==train_n_ep) & (df['test_conf']==str(test_n_ep)+'_'+str(test_freq)) &
+                       (df[['end_last','start_test']].eq(0).all(axis=1)) &
+                       df['start_train'].isin(starts) & df['end_train'].isin(ends) &  (df['end_test']+1==df['start_train'])
+                )
+
+
+
+            return min(df.loc[rows,'perc_good']),max(df.loc[rows,'perc_time_val_learn']), max(df.loc[rows,'invest_time'])
             
-            if test_type=='simetric':
-                graph_ascendent_simetric(variable_start_end[::-1],all_perc_good[::-1],all_invest_time[::-1],'simetric',
-                                         outer.subgridspec(1, 3, wspace=0.1, hspace=0.3))
-                
-                return all_perc_good,all_invest_time
-        
-        def graph_optimal_test_application(process_ids,ascen_perc_good,sim_perc_good,ascen_perc_time,sim_perc_time,
-                                           ends_last,global_deg_metric,local_deg_metric,sub_title):
+        def get_deg_list_in_period(end_period):
+            interest_policies=range(end_period[0],end_period[1],1)
 
-            # Datos de interes
             regex = "|".join(process_ids) 
-            df_degradation=self.df_degradation[self.df_degradation['n_policy'].isin(ends_last)]
+            df_degradation=self.df_degradation[self.df_degradation['n_policy'].isin(interest_policies)]
             df_interest_process = df_degradation.filter(regex=regex)
-            df_interest_deg=df_interest_process.filter(like=global_deg_metric+'_'+local_deg_metric)
-            ends_deg_distribution=df_interest_deg.values.flatten().tolist()
+            df_interest_deg=df_interest_process.filter(like=global_deg_metric+'_'+local_deg_metric)            
 
-            fig = plt.figure(figsize=(9, 4))
-            plt.subplots_adjust(left=0.07,bottom=0.15,right=0.97,top=0.88,wspace=0.2,hspace=0.19)
-            gs = fig.add_gridspec(2, 2, height_ratios=[1, 3])  # fila1 ocupa 1, fila2 ocupa 3
+            return df_interest_deg.values.flatten().tolist()
 
-            # Grafica 1: distribucion de degradacion en tiempos proximos a convergencia
-            ax1 = fig.add_subplot(gs[0, 0])
-            kde = gaussian_kde(ends_deg_distribution)
-            x = np.linspace(0, 1, 200)
-            ax1.fill_between(x, kde(x), color="orange") 
-            ax1.set_xlabel('Degradation in times close to convergence')
-
-            # Grafica 2: porcentage de reward de la politica seleccionada, test ascendente vs simetrico
-            ax2 = fig.add_subplot(gs[1, 0])
-            ax2.plot(ascen_perc_good, np.arange(len(ascen_perc_good)), color="gray", linestyle="-", label="ascendent")
-            ax2.plot(sim_perc_good, np.arange(len(sim_perc_good)), color="gray", linestyle="--", label="simetric")
-            ax2.plot(ascen_perc_good[-1], len(ascen_perc_good)-1, 'o', color="orange", markersize=8)
-
-            ax2.invert_xaxis() 
-            ax2.set_yticklabels([])
-            ax2.grid(True, linestyle=":", alpha=0.7)
-            ax2.set_title("")
-            ax2.set_xlabel("Reward percentage of selected policy\nrelative to the best")
-            ax2.legend(title='Test type')
-
-            # Grafica 3: porcentage de tiempo usando test, test ascendente vs simetrico
-            ax3 = fig.add_subplot(gs[1, 1])
-            ax3.plot(ascen_perc_time, np.arange(len(ascen_perc_time)), color="red", linestyle="-", label="ascendent")
-            ax3.plot(sim_perc_time, np.arange(len(sim_perc_time)), color="red", linestyle="--", label="simetric")
-
-            ax3.legend(title='Test type')
-            ax3.ticklabel_format(style='sci', axis='x', scilimits=(0,0))
-            ax3.set_yticklabels([])
-            ax3.grid(True, linestyle=":", alpha=0.7)
-            ax3.set_title("")
-            ax3.set_xlabel("Invest time percentage relative to\nthat required to converge")
-
-            plt.savefig('experiments_intuition/results/CriteriaComparison/figures/when_criteria/'+title+'_'+sub_title+'_opt.pdf')
-            plt.show()
         
-            return df_interest_deg
-            
-        # Graficas
-        fig = plt.figure(figsize=(13, 4))
-        plt.subplots_adjust(left=0.08,bottom=0.15,right=0.97,top=0.88,wspace=0.2,hspace=0.07)
+        # Preparar datos para la grafica y dibujarlas
+        fig = plt.figure(figsize=(8,7))
+        plt.subplots_adjust(left=0.08,bottom=0.15,right=0.97,top=0.92,wspace=0.2,hspace=0.07)
 
-        outer = fig.add_gridspec(2,1)
-        ascen_perc_good,ascen_perc_time,ends_last=graph_test_application_perc_time(process_ids,'ascendent',outer[0])
-        sim_perc_good,sim_perc_time=graph_test_application_perc_time(process_ids,'simetric',outer[1])
+        
+        outer = fig.add_gridspec(3,1,height_ratios=[1,2,4])
 
-        plt.savefig('experiments_intuition/results/CriteriaComparison/figures/conclusion_criteria_application/'+title+'.pdf')
+        #--------- Degradaciones por tiempos
+        inner=outer[0].subgridspec(1, 3, wspace=0.1, hspace=0.3,width_ratios=[2,1,1])
+
+        time_intervals=np.array(np.linspace(0, 1, 11))*(self.iter_max-self.start_iter)
+        global_deg_per_time=[]
+        for i in range(len(time_intervals)-1):
+            end_period=[int(time_intervals[i])+self.start_iter,int(time_intervals[i+1])+self.start_iter]
+            global_deg_per_time.append(get_deg_list_in_period(end_period))
+
+        subgraph_deg(inner,global_deg_per_time)
+
+        #--------- Aplicacion de un solo criterio
+        inner=outer[1].subgridspec(1, 3, wspace=0.1, hspace=0.3,width_ratios=[2,1,1])
+
+        intervals=(np.linspace(0, 1, 10+1)**1).tolist()
+        last_interval=np.array(intervals[-2:])
+
+        interest_ends=range(int(last_interval[0]*(self.iter_max-self.start_iter-1)),int(last_interval[1]*(self.iter_max-self.start_iter-1)))
+        last_perc_good,last_perc_val,last_invest_time=get_df_graph_data('last',ends=interest_ends)
+        train_perc_good,train_perc_val,train_invest_time=get_df_graph_data('train',ends=interest_ends)
+
+        all_perc_good=[last_perc_good,train_perc_good]
+        all_perc_val=[last_perc_val,train_perc_val]
+        for i in range(len(intervals)-1):
+            interest_starts=range(int(intervals[i]*(self.iter_max-self.start_iter-1)),int(intervals[i+1]*(self.iter_max-self.start_iter-1)))
+            test_perc_goods,test_perc_val,test_invest_time=get_df_graph_data('test',starts=interest_starts,ends=[self.iter_max-self.start_iter-1])
+
+            all_perc_good.append(test_perc_goods)
+            all_perc_val.append(test_perc_val)
+
+
+        subgraph_single_criterion(inner,last_interval,intervals,all_perc_good,all_perc_val)
+
+        #--------- Aplicacion de cirterios combinados
+        inner=outer[2].subgridspec(1, 3, wspace=0.1, hspace=0.3,width_ratios=[2,1,1])
+
+        all_perc_good=[]
+        all_perc_val=[]
+        for i in range(len(intervals)-1):
+            interest_starts=range(int(intervals[i]*(self.iter_max-self.start_iter-1)),int(intervals[i+1]*(self.iter_max-self.start_iter-1)))
+            test_perc_goods,test_perc_val,test_invest_time=get_df_graph_data('test_train',starts=interest_starts,ends=[self.iter_max-self.start_iter-1])
+            all_perc_good.append(test_perc_goods)
+            all_perc_val.append(test_perc_val)
+        
+        for i in range(1,len(intervals)-1):
+            interest_starts=range(int(intervals[i]*(self.iter_max-self.start_iter-1)),int(intervals[i+1]*(self.iter_max-self.start_iter-1)))
+            test_perc_goods,test_perc_val,test_invest_time=get_df_graph_data('train_test',starts=interest_starts,ends=[self.iter_max-self.start_iter-1])
+            all_perc_good.append(test_perc_goods)
+            all_perc_val.append(test_perc_val)
+
+
+        subgraph_combined_criteria(inner,intervals,all_perc_good,all_perc_val)
+        plt.savefig('experiments_intuition/results/CriteriaComparison/figures/conclusion_criteria_application/'+title+'_'+global_deg_metric+'_'+local_deg_metric+'.pdf')
+        plt.show()
+        
+    # Analisis 2 (peticion Aritz): estimaciones truth vs train vs test en todos los procesos que tenemos generados
+    def graph_truth_train_test_estimates_together(self,algo,envs,seeds,perc_val_cost,opt_conf_per_env=False):
+
+        '''
+        perc_val_cost: ahora mismo solo puede ser [25,20,10,05]
+        opt_conf_per_env: es True o False, si se consideran los n_ep optimos de train y test en general para todos los entornos, o de cada env en particular
+        '''
+
+        fig, axs = plt.subplots(len(seeds),len(envs), figsize=(5*8,10*5))
+
+        #Configuraciones generales
+        if not opt_conf_per_env:
+            name='conf_general'
+            train_n_ep=self.df_conf['train_n_ep'].mode()[0]
+            test_n_ep=self.df_test_affordable_conf['n_ep_0.'+str(perc_val_cost)].mean().astype(int)
+        
+        # Ir rellenando la cuadricula de graficas con los correspondientes envs-seeds
+        for i,(algo,env) in enumerate(zip([algo]*len(envs),envs)):
+            if opt_conf_per_env:
+                name='conf_per_env'
+                train_n_ep=self.df_conf[self.df_conf['process_id'].str.contains(algo + '_' + env + '_seed')]['train_n_ep'].mode()[0]
+                test_n_ep=self.df_test_affordable_conf[self.df_test_affordable_conf['process_id'].str.contains(algo + '_' + env + '_seed')]['n_ep_0.10'].mean().astype(int)
+
+            for j in range(len(seeds)):
+                first_graph,first_row,first_column,last_row=[False]*4
+                if i==0 and j==0:
+                    first_graph=True
+                if j==0:
+                    first_row=True
+                if i==0:
+                    first_column=True
+                if j==len(seeds)-1:
+                    last_row=True
+
+                analyze=EstimationAnalyzer(algo,env,seeds[j],'16cpu1gpu_mejorado',[train_n_ep],[test_n_ep],306)
+                analyze.graph_truth_train_test_estimates_together(perc_val_cost,axs[j,i],env,train_n_ep,test_n_ep,first_graph,first_row,first_column,last_row)
+
+        plt.savefig('experiments_intuition/results/CriteriaComparison/figures/estimates_together/estimates_truth_train_test_'+name+'.pdf')
         plt.show()
 
-        df_interest_deg=graph_optimal_test_application(process_ids,ascen_perc_good,sim_perc_good,ascen_perc_time,sim_perc_time,
-                                       ends_last,global_deg_metric,local_deg_metric,'')
-        
-        # Solo quedarnos con los procesos indicados que tienen la degradacion indicada en los tiempos de convergencia
-        # process_ids_with_deg = df_interest_deg.columns[(df_interest_deg > 0.5).all()]
-        # new_process_ids=[s for s in process_ids if any(s in t for t in process_ids_with_deg)]
-        # print(new_process_ids)
-        # fig = plt.figure(figsize=(13, 4))
-        # plt.subplots_adjust(left=0.08,bottom=0.15,right=0.97,top=0.88,wspace=0.2,hspace=0.07)
-
-        # outer = fig.add_gridspec(2,1)
-        # ascen_perc_good,ascen_perc_time,ends_last=graph_test_application_perc_time(new_process_ids,'ascendent',outer[0])
-        # sim_perc_good,sim_perc_time=graph_test_application_perc_time(new_process_ids,'simetric',outer[1])
-
-        # plt.savefig('experiments_intuition/results/CriteriaComparison/figures/when_criteria/'+title+'_with_deg.pdf')
-        # plt.show()
-
-        # _=graph_optimal_test_application(new_process_ids,ascen_perc_good,sim_perc_good,ascen_perc_time,sim_perc_time,
-        #                                ends_last,global_deg_metric,local_deg_metric,'with_deg')
-
-
-
+# Estas dos clases estan pensadas para reproducir los esperimentos hechos usando las clases anteriores
 class SingleProcessAnalisys():
     '''
     Esta clase ejecuta un analisis comparativo de criterios completo para un unico proceso. Para el proceso indicado
@@ -3395,7 +3534,7 @@ class SingleProcessAnalisys():
         list_freq=[100,50,25,10,5,1]
         
         # Representacion del proceso (considerando diferentes definiciones de metrica global y local de degradacion)
-        grapher=EvolutionGrapher(algo,env,seed,resources,max_iter)
+        #grapher=EvolutionGrapher(algo,env,seed,resources,max_iter)
         #grapher.learning_curve()
         # grapher.graph_degradation_evolution('mean_update_deg','greater_prob')
         # grapher.graph_degradation_evolution('weighted_mean_best_later_deg','greater_prob')
@@ -3403,7 +3542,7 @@ class SingleProcessAnalisys():
         # grapher.graph_degradation_evolution('best_last_deg','greater_prob')
         # grapher.graph_degradation_evolution('best_last_deg','paired_diff_median')
         # grapher.graph_degradation_evolution('best_last_deg','paired_diff_probpos')
-        grapher.graph_degradation_evolution('relative_worsening_to_improvement','relative_reward_diff')
+        #grapher.graph_degradation_evolution('relative_worsening_to_improvement','relative_reward_diff')
     
         # Analisis de estimaciones (coste y precision de seleccion)
         analyzer=EstimationAnalyzer(algo,env,seed,resources,list_n_ep,list_n_ep,max_iter)
@@ -3413,8 +3552,8 @@ class SingleProcessAnalisys():
         # analyzer.graph_train_vs_test_estimates()
 
         # Ajuste de parametros
-        tuner=CriteriaTuner(algo,env,seed,resources,list_n_ep,list_freq,max_iter)
-        opt_n_ep_train,opt_n_ep_test,opt_freq_test=tuner.graph_best_val_tuning()
+        # tuner=CriteriaTuner(algo,env,seed,resources,list_n_ep,list_freq,max_iter)
+        # opt_n_ep_train,opt_n_ep_test,opt_freq_test=tuner.graph_best_val_tuning()
 
         # Comparacion de mejor version de criterios existentes
         # grapher=EvolutionGrapher(algo,env,seed,resources,max_iter,list_n_traj_ep=[opt_n_ep_train],list_n_val_ep=[opt_n_ep_test],list_n_val_freq=[opt_freq_test])
@@ -3598,86 +3737,121 @@ if MAEB_ISG_experiments:
 #==================================================================================================
 # NUEVO ANALISIS
 #==================================================================================================
+experiment_more_env=False
+experiments_when_which=False
+experiment_estimates_together=False
 #--------------------------------------------------------------------------------------------------
 # Replicar experimentos SingleProcess mas importantes para nuevos entornos
 #--------------------------------------------------------------------------------------------------
-#------------- Mas environments
-for i in range(1,11):
-    SingleProcessAnalisys('PPO','HalfCheetah',i,'16cpu1gpu_mejorado',306)
-    #SingleProcessAnalisys('PPO','Walker2d',i,'16cpu1gpu_mejorado',306)
+if experiment_more_env:
+    #------------- Mas environments
+    for i in range(1,11):
+        SingleProcessAnalisys('PPO','HalfCheetah',i,'16cpu1gpu_mejorado',306)
+        SingleProcessAnalisys('PPO','Walker2d',i,'16cpu1gpu_mejorado',306)
+        SingleProcessAnalisys('PPO','Ant',i,'16cpu1gpu_mejorado',306)
+        SingleProcessAnalisys('PPO','Humanoid',i,'16cpu1gpu_mejorado',306)
+        SingleProcessAnalisys('PPO','HumanoidStandup',i,'16cpu1gpu_mejorado',306)
 
-#------------- Configuraciones optimas por entorno
-df=pd.read_csv('experiments_intuition/results/CriteriaComparison/data/criteria_conf_by_process.csv')
-df_opt_conf_per_env=[]
-for env in ['HalfCheetah','Ant','Humanoid','HumanoidStandup']:
-    # Filas asociadas al env
-    df_env=df[df["process_id"].str.contains(env+'_')]
-    opt_train_n_ep=max(set(df_env['train_n_ep']), key=list(df_env['train_n_ep']).count)
-    print(df_env.value_counts(subset=["test_n_ep", "test_freq"]))
-    opt_test_n_ep,opt_test_freq = df_env.value_counts(subset=["test_n_ep", "test_freq"]).idxmax()
-    df_opt_conf_per_env.append(['PPO',env,opt_train_n_ep,opt_test_n_ep,opt_test_freq])
-# Todos los entornos
-opt_train_n_ep=max(set(df['train_n_ep']), key=list(df_env['train_n_ep']).count)
-opt_test_n_ep,opt_test_freq = df.value_counts(subset=["test_n_ep", "test_freq"]).idxmax()
-df_opt_conf_per_env.append(['PPO','All',opt_train_n_ep,opt_test_n_ep,opt_test_freq])
+    #------------- Configuraciones optimas por entorno
+    df=pd.read_csv('experiments_intuition/results/CriteriaComparison/data/criteria_conf_by_process.csv')
+    df_opt_conf_per_env=[]
+    for env in ['HalfCheetah','Walker2d','Ant','Humanoid','HumanoidStandup']:
+        # Filas asociadas al env
+        df_env=df[df["process_id"].str.contains(env+'_')]
+        opt_train_n_ep=max(set(df_env['train_n_ep']), key=list(df_env['train_n_ep']).count)
+        opt_test_n_ep,opt_test_freq = df_env.value_counts(subset=["test_n_ep", "test_freq"]).idxmax()
+        df_opt_conf_per_env.append(['PPO',env,opt_train_n_ep,opt_test_n_ep,opt_test_freq])
+    # Todos los entornos
+    opt_train_n_ep=max(set(df['train_n_ep']), key=list(df_env['train_n_ep']).count)
+    opt_test_n_ep,opt_test_freq = df.value_counts(subset=["test_n_ep", "test_freq"]).idxmax()
+    df_opt_conf_per_env.append(['PPO','All',opt_train_n_ep,opt_test_n_ep,opt_test_freq])
 
-df_opt_conf_per_env=pd.DataFrame(df_opt_conf_per_env,columns=['algo','env','train_n_ep','test_n_ep','test_freq'])
-df_opt_conf_per_env.to_csv("experiments_intuition/results/CriteriaComparison/data/opt_criteria_conf_by_env.csv", index=False)
+    df_opt_conf_per_env=pd.DataFrame(df_opt_conf_per_env,columns=['algo','env','train_n_ep','test_n_ep','test_freq'])
+    df_opt_conf_per_env.to_csv("experiments_intuition/results/CriteriaComparison/data/opt_criteria_conf_by_env.csv", index=False)
 
-#---------------- Comparacion de criterios por entorno
-global_deg_metric='relative_worsening_to_improvement'
-local_deg_metric='relative_reward_diff'
 
-analyzer=ProcessIndependentAnalyzer(306,grid_test_freq=[1],grid_test_n_ep=[500,100,5],grid_train_n_ep=[500,250,100,50,25,5],
-                                    global_deg_metric=global_deg_metric,local_deg_metric=local_deg_metric)
+    #---------------- Comparacion de criterios por entorno
+    # global_deg_metric='relative_worsening_to_improvement'
+    # local_deg_metric='relative_reward_diff'
 
-halfcheetah_process_ids=['PPO_HalfCheetah_seed'+str(seed) for seed in range(1,11)]
-ant_process_ids=['PPO_Ant_seed'+str(seed) for seed in range(1,11)]
-humanoid_process_ids=['PPO_Humanoid_seed'+str(seed) for seed in range(1,11)]
-humanidstandup_process_ids=['PPO_HumanoidStandup_seed'+str(seed) for seed in range(1,11)]
-process_ids= ['PPO_Ant_seed'+str(seed) for seed in range(1,11)]+['PPO_Humanoid_seed'+str(seed) for seed in range(1,11)]+['PPO_HumanoidStandup_seed'+str(seed) for seed in range(1,11)]+ ['PPO_HalfCheetah_seed'+str(seed) for seed in range(1,11)]
+    global_deg_metric='best_last_deg'
+    local_deg_metric='paired_diff_probpos'
 
-analyzer.MAEB_graph_best_criteria_by_time('All_envs',process_ids,[500],[5],[1],global_deg_metric,local_deg_metric)
-analyzer.MAEB_graph_best_criteria_by_time('HalfCheetah',halfcheetah_process_ids,[500],[5],[1],global_deg_metric,local_deg_metric)
-analyzer.MAEB_graph_best_criteria_by_time('Ant',ant_process_ids,[50],[5],[1],global_deg_metric,local_deg_metric)
-analyzer.MAEB_graph_best_criteria_by_time('Humanoid',humanoid_process_ids,[500],[100],[1],global_deg_metric,local_deg_metric)
-analyzer.MAEB_graph_best_criteria_by_time('HumanoidStandup',humanidstandup_process_ids,[500],[500],[1],global_deg_metric,local_deg_metric)
+    train_n_ep=[500]# n_ep mas comun entre todos los procesos de todos los entornos despues del tuning (criteria_conf_by_process.csv)
+    test_n_ep=[32]# n_ep minimo del maximo que no supera el 25% de tiempo en validar entre todos los procesos de todos los entornos (test_affordable_n_ep_by_process.csv)
+    test_freq=[1]# freq mas comun entre todos los procesos de todos los entornos despues del tuning (criteria_conf_by_process.csv)
 
-analyzer.MAEB2_graph_best_criteria_by_time('All_envs',process_ids,[500],[5],[1],global_deg_metric,local_deg_metric)
-analyzer.MAEB2_graph_best_criteria_by_time('HalfCheetah',halfcheetah_process_ids,[500],[5],[1],global_deg_metric,local_deg_metric)
-analyzer.MAEB2_graph_best_criteria_by_time('Ant',ant_process_ids,[50],[5],[1],global_deg_metric,local_deg_metric)
-analyzer.MAEB2_graph_best_criteria_by_time('Humanoid',humanoid_process_ids,[500],[100],[1],global_deg_metric,local_deg_metric)
-analyzer.MAEB2_graph_best_criteria_by_time('HumanoidStandup',humanidstandup_process_ids,[500],[500],[1],global_deg_metric,local_deg_metric)
+
+    analyzer=ProcessIndependentAnalyzer(306,grid_test_freq=test_freq,grid_test_n_ep=test_n_ep,grid_train_n_ep=train_n_ep,
+                                        global_deg_metric=global_deg_metric,local_deg_metric=local_deg_metric,relative_deg_metric=relative_deg_metric)
+
+    halfcheetah_process_ids=['PPO_HalfCheetah_seed'+str(seed) for seed in range(1,11)]
+    walker2d_process_ids=['PPO_Walker2d_seed'+str(seed) for seed in range(1,11)]
+    ant_process_ids=['PPO_Ant_seed'+str(seed) for seed in range(1,11)]
+    humanoid_process_ids=['PPO_Humanoid_seed'+str(seed) for seed in range(1,11)]
+    humanidstandup_process_ids=['PPO_HumanoidStandup_seed'+str(seed) for seed in range(1,11)]
+
+    analyzer.MAEB_graph_best_criteria_by_time('HalfCheetah',halfcheetah_process_ids,train_n_ep,test_n_ep,test_freq,global_deg_metric,local_deg_metric)
+    analyzer.MAEB_graph_best_criteria_by_time('Walker2d',walker2d_process_ids,train_n_ep,test_n_ep,test_freq,global_deg_metric,local_deg_metric)
+    analyzer.MAEB_graph_best_criteria_by_time('Ant',ant_process_ids,train_n_ep,test_n_ep,test_freq,global_deg_metric,local_deg_metric)
+    analyzer.MAEB_graph_best_criteria_by_time('Humanoid',humanoid_process_ids,train_n_ep,test_n_ep,test_freq,global_deg_metric,local_deg_metric)
+    analyzer.MAEB_graph_best_criteria_by_time('HumanoidStandup',humanidstandup_process_ids,train_n_ep,test_n_ep,test_freq,global_deg_metric,local_deg_metric)
+
+    analyzer.MAEB2_graph_best_criteria_by_time('HalfCheetah',halfcheetah_process_ids,train_n_ep,test_n_ep,test_freq,global_deg_metric,local_deg_metric)
+    analyzer.MAEB2_graph_best_criteria_by_time('Walker2d',walker2d_process_ids,train_n_ep,test_n_ep,test_freq,global_deg_metric,local_deg_metric)
+    analyzer.MAEB2_graph_best_criteria_by_time('Ant',ant_process_ids,train_n_ep,test_n_ep,test_freq,global_deg_metric,local_deg_metric)
+    analyzer.MAEB2_graph_best_criteria_by_time('Humanoid',humanoid_process_ids,train_n_ep,test_n_ep,test_freq,global_deg_metric,local_deg_metric)
+    analyzer.MAEB2_graph_best_criteria_by_time('HumanoidStandup',humanidstandup_process_ids,train_n_ep,test_n_ep,test_freq,global_deg_metric,local_deg_metric)
 
 #--------------------------------------------------------------------------------------------------
 # Graficas para conclusion final: cuando usar que criterio en funcion del tiempo disponible
 #--------------------------------------------------------------------------------------------------
- 
-analyzer.graph_when_use_test(process_ids,5,1,'All_envs',global_deg_metric=global_deg_metric,local_deg_metric=local_deg_metric)
-analyzer.graph_when_use_test(process_ids,500,1,'All_envs_500',global_deg_metric=global_deg_metric,local_deg_metric=local_deg_metric)
+if experiments_when_which:
+    global_deg_metric='best_last_deg'
+    local_deg_metric='paired_diff_probpos'
 
-analyzer.graph_when_use_test(halfcheetah_process_ids,5,1,'HalfCheetah',global_deg_metric=global_deg_metric,local_deg_metric=local_deg_metric)
-analyzer.graph_when_use_test(ant_process_ids,5,1,'Ant',global_deg_metric=global_deg_metric,local_deg_metric=local_deg_metric)
-analyzer.graph_when_use_test(humanoid_process_ids,100,1,'Humanoid',global_deg_metric=global_deg_metric,local_deg_metric=local_deg_metric)
-analyzer.graph_when_use_test(humanidstandup_process_ids,500,1,'HumanoidStandup',global_deg_metric=global_deg_metric,local_deg_metric=local_deg_metric)
+    analyzer=ProcessIndependentAnalyzer(306,grid_test_freq=test_freq,grid_test_n_ep=test_n_ep,grid_train_n_ep=train_n_ep,
+                                        global_deg_metric=global_deg_metric,local_deg_metric=local_deg_metric)
+
+    analyzer.graph_when_which_criteria(halfcheetah_process_ids,500,20,1,global_deg_metric,local_deg_metric,'HalfCheetah')
+    analyzer.graph_when_which_criteria(ant_process_ids,500,20,1,global_deg_metric,local_deg_metric,'Ant')
+    analyzer.graph_when_which_criteria(walker2d_process_ids,500,20,1,global_deg_metric,local_deg_metric,'Walker2d')
+    analyzer.graph_when_which_criteria(humanoid_process_ids,500,20,1,global_deg_metric,local_deg_metric,'Humanoid')
+    analyzer.graph_when_which_criteria(humanidstandup_process_ids,500,20,1,global_deg_metric,local_deg_metric,'HumanoidStandup')
+
+
+#--------------------------------------------------------------------------------------------------
+# Estimaciones truth vs train vs test (peticion de Aritz)
+#--------------------------------------------------------------------------------------------------
+if experiment_estimates_together:
+    envs=['HalfCheetah','Walker2d','Ant','Humanoid','HumanoidStandup']
+    seeds=list(range(1,11))
+
+    analyzer=ProcessIndependentAnalyzer(306)
+    analyzer.graph_truth_train_test_estimates_together('PPO',envs,seeds,10)
+    analyzer.graph_truth_train_test_estimates_together('PPO',envs,seeds,10,opt_conf_per_env=True)
+
 
 '''
 TODO:
-- bajar del cluster los datos de Walker2d, y reproducir los mismos experimentos con el
+X bajar del cluster los datos de Walker2d, y reproducir los mismos experimentos con el
 (para tener calculadas las estimaciones, configuraciones optimas, degradaciones asociadas,...)
 
-- fijar configuracion optima de train y test global para todos los entornos. Añadir al analisis 
+X fijar configuracion optima de train y test global para todos los entornos. Añadir al analisis 
 actual (solo max magnitudes) el porcentage de tiempo de validacion con respecto a aprender. La 
 configuracion optima de test puede ser el maximo n_ep que no supera el 25%.
 
-- hacer analisis comparativos individuales por entornos (la metrica de magnitud y degradacion
+X hacer analisis comparativos individuales por entornos (la metrica de magnitud y degradacion
 pueden no ser comparables entre entornos).
 
 - en comparaciones pares entre criterios, contar los empates como 0.5 para cada uno en ved de 1.
+NOTE: ahora estan comentadas esas lineas, hasta ahora no tengo en cuenta los empates
 
 - dejar mismo tiempo fijo para diferentes entornos (no meternos en convergencia)
+NOTE: con el experimento de Aritz, veo que los steps totales que estaba considerando no son
+suficientes para la convergencia de los entornos mas complejos
 
-- en el analisis que concluye las consecuencias de aplicar cada criterio last-test, en lugar de
+X en el analisis que concluye las consecuencias de aplicar cada criterio last-test, en lugar de
 la aplicacion simetrica de test, considerar la diagonal inversa a la hecha, empezar en iter. x y
 validar el reto de iteraciones hasta el final.
 
@@ -3691,10 +3865,17 @@ degradaciones de diferentes entornos (por la escala del reward). Definirla en fu
 distribucion de reward sobre los estados iniciales se aleja mas de la definicion del problema
 y es mas compleja, pero es comparable en diferentes entornos. Hay un paper que habla sobre como
 normalizar los rewards de diferentes entornos para que sean comparables!!
+NOTE: he implementado lo de la ventana. Esta mejor asi para definir una medida relativa de reward,
+pero no es apropiado para una medida global. Con una medida relativa podemos obtener conclusiones 
+en las graficas poco intuitivas como: test es el mejor en degradaciones bajas (y eso es porque aunque
+en un tramo ultimo relativo no haya convergencia, ese tramo puede estar muy por debajo del maximo)
 
 
 FIXME: 
 - Si recalculo los truth de la misma manera (los guardados para Ant, Humanoid, HumanoidSatndup),
   no salen igual que la vez pasada (puede ser por la version de la libreria que descomprime).
 '''
+
+
+
 

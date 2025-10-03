@@ -39,3 +39,13 @@ PPO_HalfCheetah_seed7,100,5,1
 PPO_HalfCheetah_seed8,500,5,1
 PPO_HalfCheetah_seed9,500,5,1
 PPO_HalfCheetah_seed10,500,5,1
+PPO_Walker2d_seed1,50,25,5
+PPO_Walker2d_seed2,500,25,1
+PPO_Walker2d_seed3,500,5,1
+PPO_Walker2d_seed4,100,5,1
+PPO_Walker2d_seed5,500,5,5
+PPO_Walker2d_seed6,50,25,5
+PPO_Walker2d_seed7,100,5,1
+PPO_Walker2d_seed8,250,5,5
+PPO_Walker2d_seed9,5,5,1
+PPO_Walker2d_seed10,100,25,5
