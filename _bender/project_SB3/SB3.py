@@ -404,7 +404,9 @@ class ModifiedFunctions_OnPolicy:
 
         # Crear bases de datos donde ire escribiendo los datos por iteracion
         df_traj_csv=pd.DataFrame(columns=['n_policy','n_timesteps','time_seconds','traj_rewards','traj_ep_end','traj_inits',
-                                          'traj_advantages','traj_values','traj_returns','policy_loss','value_loss','entropy_loss','KL_div'])
+                                          'traj_advantages','traj_values','traj_returns',
+                                          'policy_loss','value_loss','entropy_loss','policy_gradient_loss',
+                                          'KL_div','explained_variance','log_std'])
         df_traj_csv.to_csv(join(process_dir, "df_traj.csv"), index=False)
         df_val_csv=pd.DataFrame(columns=['n_policy','ep_inits','ep_rewards','ep_lens','n_val_ep','elapsed_val_time'])
         df_val_csv.to_csv(join(process_dir, "df_val.csv"), index=False)
@@ -731,7 +733,10 @@ class ModifiedFunctions_OnPolicy:
         df_traj_csv.iloc[-1, df_traj_csv.columns.get_loc('policy_loss')] = loss.item()
         df_traj_csv.iloc[-1, df_traj_csv.columns.get_loc('value_loss')] = np.mean(value_losses)
         df_traj_csv.iloc[-1, df_traj_csv.columns.get_loc('entropy_loss')] = -np.mean(entropy_losses)
+        df_traj_csv.iloc[-1, df_traj_csv.columns.get_loc('policy_gradient_loss')] = np.mean(pg_losses)
         df_traj_csv.iloc[-1, df_traj_csv.columns.get_loc('KL_div')] = np.mean(approx_kl_divs)
+        df_traj_csv.iloc[-1, df_traj_csv.columns.get_loc('explained_variance')] =  explained_var
+        df_traj_csv.iloc[-1, df_traj_csv.columns.get_loc('log_std')] = th.exp(self.policy.log_std).mean().item()
 
         df_traj_csv.to_csv(join(process_dir, "df_traj.csv"), index=False)
         total_time_seconds.resume()
