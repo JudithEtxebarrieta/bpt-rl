@@ -225,8 +225,8 @@ class Estimator:
         
         if degradation_metric=='relative_reward_diff':
             # NOTE: esta metrica es la unica entre todas que no usa la distribucion (muestra) de los rewards, unicamente usa la media.
-            #Por ello, para qe la degradacion local sea un valor en [0,1] y comparable con otras degradaciones locales de otro par
-            #de politicas asociado otras tareas/procesos, debemos normalizarla/estandarizarla. Para ello necesitamos conocer el reward maximo
+            #Por ello, para que la degradacion local sea un valor en [0,1] y comparable con otras degradaciones locales de otro par
+            #de politicas asociado a otras tareas/procesos, debemos normalizarla/estandarizarla. Para ello, necesitamos conocer el reward maximo
             #y el reward minimo alcanzable en esa tarea (cosa que desconocemos). Como nosotros solo usaremos esta medida para comparar
             #diferentes pares de politicas en el mismo proceso, aproximaremos esos valores con el maximo y minimo observados en el proceso.
             #Por tanto, la  metrica resultante es equivalente a la magnitud.
@@ -236,8 +236,7 @@ class Estimator:
             degradation=relative_diff*indicator
 
             return degradation
-
-        
+   
     def estimate_update_degradations(algo,env,seed,resources, iter_max,degradation_metric='greater_prob',additionals=None):
         '''
         Calcula la evolucion de la degradacion local entre politicas consecutivas, i.e. update degradation, usando la metrica local indicada.
@@ -812,6 +811,9 @@ class EvolutionGenerator:
             return y_eff
         
 
+
+        
+
 class EvolutionGrapher():
     '''
     Las funciones de esta clase permiten representar graficamente la evolucion de diferentes metricas.
@@ -1245,10 +1247,10 @@ class EstimationAnalyzer():
                  iter_max,perc_time_start=0.1):
         
         # Primero generar los datos necesarios para las graficas
-        for n_ep in tqdm(list_n_traj_ep):
-            Estimator.compute_estimates(algo,env,seed,resources,n_ep,'train')
-        for n_ep in tqdm(list_n_val_ep):
-            Estimator.compute_estimates(algo,env,seed,resources,n_ep,'test')
+        # for n_ep in tqdm(list_n_traj_ep):
+        #     Estimator.compute_estimates(algo,env,seed,resources,n_ep,'train')
+        # for n_ep in tqdm(list_n_val_ep):
+        #     Estimator.compute_estimates(algo,env,seed,resources,n_ep,'test')
 
         # Guardar en una variable las 4 bases de datos
         self.generator=EvolutionGenerator(algo,env,seed,resources,perc_time_start)
@@ -1674,7 +1676,7 @@ class EstimationAnalyzer():
         plt.savefig('experiments_intuition/results/MAEB/'+self.algo+'_'+self.env+'_seed'+str(self.seed)+'_estimation_cost_analysis.pdf')
         plt.close()
    
-    def graph_truth_train_test_estimates_together(self,perc_val,ax,title,train_n_ep,test_n_ep,
+    def graph_truth_train_test_estimates_together(self,perc_val,ax,title,train_n_ep,test_n_ep,estimates_conv,
                                                first_graph=False,first_row=False,first_column=False,last_row=False):
         '''
         Esta funcion esta pensada para ser llamada por graph_truth_train_test_estimates_together de la clase 
@@ -1696,26 +1698,37 @@ class EstimationAnalyzer():
         colors=list(mcolors.TABLEAU_COLORS.keys())
         x=range(self.iter_max)
         
-        # Evolucion de estimaciones truth
-        y_last=self.generator.df_test_estimates['truth'][:self.iter_max].tolist()
-        x_dots,y_dots=best_dots(x,y_last)
-        ax.plot(x, y_last, label="Truth",color=colors[0])
+        if estimates_conv=='estimates':
+            # Evolucion de estimaciones truth
+            y_last=self.generator.df_test_estimates['truth'][:self.iter_max].tolist()
+            x_dots,y_dots=best_dots(x,y_last)
+            ax.plot(x, y_last, label="Truth",color=colors[0])
 
-        # Evolucion de estimaciones train
-        y_train=self.generator.df_train_estimates[str(train_n_ep)+'_traj_ep'][:self.iter_max].tolist()
-        x_dots,y_dots=best_dots(x,y_train)
-        ax.plot(x, y_train, label="Train",color=colors[1])
-        ax.scatter(x_dots,y_dots, color=colors[1], s=25, zorder=5, label="max Train")
-        
-        # Evolucion de estimaciones test (que suponen un coste maximo de perc_val frente a aprender)
-        y_test=[Converter.compress_decompress_list(i,compress=False)[0] for i in self.generator.df_test_estimates[str(test_n_ep)+'_val_ep']]
-        x_dots,y_dots=best_dots(x,y_test)
-        ax.plot(x, y_test, label="Test ("+str(perc_val)+'% cost)',color=colors[2],alpha=0.5)
-        ax.scatter(x_dots,y_dots, color=colors[2], s=25, zorder=5, label="max "+"Test ("+str(perc_val)+'% cost)')
-        
+            # Evolucion de estimaciones train
+            y_train=self.generator.df_train_estimates[str(train_n_ep)+'_traj_ep'][:self.iter_max].tolist()
+            x_dots,y_dots=best_dots(x,y_train)
+            ax.plot(x, y_train, label="Train",color=colors[1])
+            ax.scatter(x_dots,y_dots, color=colors[1], s=25, zorder=5, label="max Train")
+            
+            # Evolucion de estimaciones test (que suponen un coste maximo de perc_val frente a aprender)
+            y_test=[Converter.compress_decompress_list(i,compress=False)[0] for i in self.generator.df_test_estimates[str(test_n_ep)+'_val_ep']]
+            x_dots,y_dots=best_dots(x,y_test)
+            ax.plot(x, y_test, label="Test ("+str(perc_val)+'% cost)',color=colors[2],alpha=0.5)
+            ax.scatter(x_dots,y_dots, color=colors[2], s=25, zorder=5, label="max "+"Test ("+str(perc_val)+'% cost)')
+
+        ############# Evolucion de metricas de convergencia
+        if estimates_conv=='conv':
+                            
+            if title in ['HalfCheetah','Walker2d']:
+                y_ent=self.generator.df_train['entropy_loss'][:self.iter_max].tolist()
+                ax.plot(x, y_ent, label="Entropy",color=colors[3])
+
+                y_ent=self.generator.df_train['KL_div'][:self.iter_max].tolist()
+                ax.plot(x, y_ent, label="KL_div",color=colors[4])
+            
         if last_row:
             ax.set_xlabel("Learning iteration")
-        if first_column:
+        if first_column and estimates_conv=='estimates':
             ax.set_ylabel("Estimated reward")
         if first_graph:
             ax.legend(loc="center left", bbox_to_anchor=(-0.9, 0.5))
@@ -2152,6 +2165,9 @@ class ProcessIndependentAnalyzer():
         df_train_eff=Estimator.read_create_estimates_csv('experiments_intuition/results/CriteriaComparison/data/deg_mag/criteria_best_train_eff.csv',iter_max,start_iter)
         df_test_eff=Estimator.read_create_estimates_csv('experiments_intuition/results/CriteriaComparison/data/deg_mag/criteria_best_test_eff.csv',iter_max,start_iter)
         
+        df_test_cost=Estimator.read_create_estimates_csv('experiments_intuition/results/CriteriaComparison/data/deg_mag/criteria_best_test_cost.csv',iter_max,start_iter)
+        df_test_ep_len=Estimator.read_create_estimates_csv('experiments_intuition/results/CriteriaComparison/data/deg_mag/criteria_best_test_ep_len.csv',iter_max,start_iter)
+
         df_test_start_end=Converter.generate_df('experiments_intuition/results/CriteriaComparison/data/test_start_end_perc_time.csv',
                                                 ['process_id','test_conf','start_test','end_test','perc_good','invest_time','last_good','last_time'])
         df_criteria_start_end=Converter.generate_df('experiments_intuition/results/CriteriaComparison/data/criteria_start_end_good_time.csv',
@@ -2168,6 +2184,7 @@ class ProcessIndependentAnalyzer():
             algo,env,seed=Converter.process_id_splitter(process_id)
             
             # Generar las estimaciones necesarios para las graficas con las configuraciones indicadas
+            
             if len(grid_train_n_ep)+len(grid_test_n_ep)==0:
                 Estimator.compute_estimates(algo,env,seed,'16cpu1gpu_mejorado',None,None)
             for n_ep in tqdm(grid_train_n_ep):
@@ -2179,9 +2196,15 @@ class ProcessIndependentAnalyzer():
             x_times=generator.df_train['time_seconds'].tolist()[start_iter:iter_max]  
             min_time=generator.df_train.loc[start_iter,'time_seconds']
             
+            # Tamaños de episodios
+            if process_id not in list(df_test_ep_len.columns):  
+                df_test_ep_len[process_id]=[np.mean(Converter.compress_decompress_list(i,compress=False)) for i in generator.df_test.loc[start_iter:iter_max,'ep_lens']]
+            
+            
             # Si los datos del proceso no estan ya almacenados calcularlos y almacenarlos (configuraciones optimas en cada proceso)
+            
             if  process_id not in list(df_degradation.columns):
-                    
+                
                 # Calcular y guardar las evolucion de nivel de degradacion
                 df_degradation[process_id+'_'+global_deg_metric+'_'+local_deg_metric]=generator.degradation_evolution(x_times,global_deg_metric,local_deg_metric)
                 # Configuracion optima de los criterios train y test 
@@ -2196,6 +2219,8 @@ class ProcessIndependentAnalyzer():
                 df_last_eff[process_id]=generator.effectiveness_evolution(x_times,criteria='last',normalized=True)
                 df_train_eff[process_id]=generator.effectiveness_evolution(x_times,n_ep=train_n_ep,criteria='best_train',normalized=True)
                 df_test_eff[process_id]=generator.effectiveness_evolution(x_times,n_ep=test_n_ep,freq=x_times_with_freq,criteria='best_val',normalized=True)[0]
+                
+            
             print('if de avanzado listo')
             
             # Almacenar datos adicionales para posibles combinaciones de configuraciones optimas (para el analisis de sensibilidad)
@@ -2228,18 +2253,20 @@ class ProcessIndependentAnalyzer():
                         df_train_mag[process_id+'_'+str(n_ep)]=generator.magnitude_evolution(x_times,n_ep=n_ep,criteria='best_train',normalized=True)
                     if process_id+'_'+str(n_ep) not in list(df_train_eff.columns):
                         df_train_eff[process_id+'_'+str(n_ep)]=generator.effectiveness_evolution(x_times,n_ep=n_ep,criteria='best_train',normalized=True)
+                        
+            
             print('if de intuicion train listo')  
             if grid_test_n_ep!=None:
                 for n_ep in grid_test_n_ep:
-
+                    
                     # Sin contar el extra de tiempo de validacion con freq=1
+                    x_times_with_freq=Estimator.time_discretizer(algo,env,seed,'16cpu1gpu_mejorado',1,iter_max,min_time)
                     if process_id+'_'+str(n_ep)+'_without_extra' not in list(df_test_mag.columns):
-                        x_times_with_freq=Estimator.time_discretizer(algo,env,seed,'16cpu1gpu_mejorado',1,iter_max,min_time)
                         df_test_mag[process_id+'_'+str(n_ep)+'_without_extra']=generator.magnitude_evolution(x_times,n_ep=n_ep,freq=x_times_with_freq,criteria='best_val',normalized=True)[0]
                     if process_id+'_'+str(n_ep)+'_without_extra' not in list(df_test_eff.columns):  
-                        x_times_with_freq=Estimator.time_discretizer(algo,env,seed,'16cpu1gpu_mejorado',1,iter_max,min_time)
                         df_test_eff[process_id+'_'+str(n_ep)+'_without_extra']=generator.effectiveness_evolution(x_times,n_ep=n_ep,freq=x_times_with_freq,criteria='best_val',normalized=True,for_analyzer=True)[0]
-
+                    if process_id+'_'+str(n_ep) not in list(df_test_cost.columns):  
+                        df_test_cost[process_id+'_'+str(n_ep)]=np.array(generator.effectiveness_evolution(x_times,n_ep=n_ep,freq=x_times_with_freq,criteria='best_val',normalized=True)[1])/np.array(x_times)
                     
                     # Contando el extra de tiempo de validacion para diferentes frecuencias
                     for freq in grid_test_freq:
@@ -2250,7 +2277,7 @@ class ProcessIndependentAnalyzer():
                             x_times_with_freq=Estimator.time_discretizer(algo,env,seed,'16cpu1gpu_mejorado',freq,iter_max,min_time)    
                             df_test_mag[process_id+'_'+str(n_ep)+'_'+str(freq)]=generator.effectiveness_evolution(x_times,n_ep=n_ep,freq=x_times_with_freq,criteria='best_val',normalized=True)[0]
                     
-        
+            
             print('if de intuicion test listo')  
             
             # Guardar cambios en bases de datos
@@ -2266,6 +2293,10 @@ class ProcessIndependentAnalyzer():
 
             df_test_start_end.to_csv('experiments_intuition/results/CriteriaComparison/data/test_start_end_perc_time.csv', index=False)
             df_criteria_start_end.to_csv('experiments_intuition/results/CriteriaComparison/data/criteria_start_end_good_time.csv',index=False)
+
+            df_test_cost.to_csv('experiments_intuition/results/CriteriaComparison/data/deg_mag/criteria_best_test_cost.csv',index=False)
+            df_test_ep_len.to_csv('experiments_intuition/results/CriteriaComparison/data/deg_mag/criteria_best_test_ep_len.csv',index=False)
+            
         '''
         self.df_degradation=df_degradation
         self.df_last_mag=df_last_mag
@@ -2279,6 +2310,8 @@ class ProcessIndependentAnalyzer():
         self.df_criteria_start_end=df_criteria_start_end
         self.df_test_affordable_conf=df_test_affordable_conf
         self.df_conf=df_conf
+        self.df_test_cost=df_test_cost
+        self.df_test_ep_len=df_test_ep_len
 
     #===============================================================================================
     # Analisis comparativos de criterios en multiples procesos al mismo tiempo
@@ -3281,7 +3314,6 @@ class ProcessIndependentAnalyzer():
             axes[1].axis('off')
             axes[2].axis('off')
 
-
         #--------- Grafica compuesta de aplicacion criterios solos
         def subgraph_single_criterion(inner,last_period,ascendant_periods,perc_goods,perc_val_learn_times):
             '''
@@ -3311,14 +3343,27 @@ class ProcessIndependentAnalyzer():
             axes[0].set_ylabel("Appliying single criterion")
 
             # Grafica de porcentajes de calidad y tiempo en validacion
+            axes[1].barh(
+                    np.arange(len(perc_goods)),
+                    [-np.median(x) for x in perc_goods],
+                    xerr=[[uq - m for m, uq in zip([np.median(x) for x in perc_goods], [np.percentile(x, 90) for x in perc_goods])],
+                          [m - lq for m, lq in zip([np.median(x) for x in perc_goods], [np.percentile(x, 10) for x in perc_goods])]],
+                    height=1,color='black', alpha=0.5,capsize=3,ecolor=(0, 0, 0, 0.8)
+                )
 
-            axes[1].barh(np.arange(len(perc_goods)), [-val for val in perc_goods], color='black',height=1,alpha=0.5) 
             axes[1].set_xlim(-1, 0)
             axes[1].set_xticklabels([])
             axes[1].invert_yaxis()
             axes[1].set_title("How good is the\nselected policy?")
 
-            axes[2].barh(np.arange(len(perc_val_learn_times)), perc_val_learn_times, color='red',height=1,alpha=0.5)
+            axes[2].barh(
+                    np.arange(len(perc_val_learn_times)),
+                    [np.median(x) for x in perc_val_learn_times],
+                    xerr=[[m - lq for m, lq in zip([np.median(x) for x in perc_val_learn_times], [np.percentile(x, 10) for x in perc_val_learn_times])],
+                          [uq - m for m, uq in zip([np.median(x) for x in perc_val_learn_times], [np.percentile(x, 90) for x in perc_val_learn_times])]],
+                    height=1, color='red', alpha=0.5, capsize=3,ecolor=(1, 0, 0, 0.8)
+                )
+            
             axes[2].set_xticklabels([])
             axes[2].invert_yaxis()
             axes[2].set_title("How much time\nis required?")
@@ -3349,12 +3394,25 @@ class ProcessIndependentAnalyzer():
             axes[0].set_xlabel("Percentage of learning time")
 
             # Grafica de porcentajes de calidad y tiempo en validacion
-            axes[1].barh(np.arange(len(perc_goods)), [-val for val in perc_goods], color='black',height=1,alpha=0.5) 
+            axes[1].barh(
+                    np.arange(len(perc_goods)),
+                    [-np.median(x) for x in perc_goods],
+                    xerr=[[uq - m for m, uq in zip([np.median(x) for x in perc_goods], [np.percentile(x, 90) for x in perc_goods])],
+                        [m - lq for m, lq in zip([np.median(x) for x in perc_goods], [np.percentile(x, 10) for x in perc_goods])]],
+                    height=1,color='black', alpha=0.5, capsize=3,ecolor=(0, 0, 0, 0.8)
+                )
             axes[1].set_xlim(-1, 0)
             axes[1].xaxis.set_major_formatter(FuncFormatter(lambda x, pos: f"{abs(x):.1f}"))
             axes[1].set_xlabel("Reward percentage of\nselected policy\nrelative to the best")
 
-            axes[2].barh(np.arange(len(perc_val_learn_times)), perc_val_learn_times, color='red',height=1,alpha=0.5)
+            axes[2].barh(
+                    np.arange(len(perc_val_learn_times)),
+                    [np.median(x) for x in perc_val_learn_times],
+                    xerr=[[m - lq for m, lq in zip([np.median(x) for x in perc_val_learn_times], [np.percentile(x, 10) for x in perc_val_learn_times])],
+                          [uq - m for m, uq in zip([np.median(x) for x in perc_val_learn_times], [np.percentile(x, 90) for x in perc_val_learn_times])]],
+                    height=1,color='red',alpha=0.5, capsize=3,ecolor=(1, 0, 0, 0.8)
+                )
+
             axes[2].set_xlabel("Percentage of invest\ntime in validation")
 
         #--------- Subdatos
@@ -3399,7 +3457,8 @@ class ProcessIndependentAnalyzer():
 
 
 
-            return min(df.loc[rows,'perc_good']),max(df.loc[rows,'perc_time_val_learn']), max(df.loc[rows,'invest_time'])
+            #return min(df.loc[rows,'perc_good']),max(df.loc[rows,'perc_time_val_learn']), max(df.loc[rows,'invest_time'])
+            return df.loc[rows,'perc_good'],df.loc[rows,'perc_time_val_learn'], df.loc[rows,'invest_time']
             
         def get_deg_list_in_period(end_period):
             interest_policies=range(end_period[0],end_period[1],1)
@@ -3475,7 +3534,7 @@ class ProcessIndependentAnalyzer():
         plt.show()
         
     # Analisis 2 (peticion Aritz): estimaciones truth vs train vs test en todos los procesos que tenemos generados
-    def graph_truth_train_test_estimates_together(self,algo,envs,seeds,perc_val_cost,opt_conf_per_env=False):
+    def graph_truth_train_test_estimates_together(self,algo,envs,seeds,perc_val_cost,opt_conf_per_env=False,estimates_conv='estimates'):
 
         '''
         perc_val_cost: ahora mismo solo puede ser [25,20,10,05]
@@ -3492,6 +3551,7 @@ class ProcessIndependentAnalyzer():
         
         # Ir rellenando la cuadricula de graficas con los correspondientes envs-seeds
         for i,(algo,env) in enumerate(zip([algo]*len(envs),envs)):
+            print(env)
             if opt_conf_per_env:
                 name='conf_per_env'
                 train_n_ep=self.df_conf[self.df_conf['process_id'].str.contains(algo + '_' + env + '_seed')]['train_n_ep'].mode()[0]
@@ -3509,9 +3569,158 @@ class ProcessIndependentAnalyzer():
                     last_row=True
 
                 analyze=EstimationAnalyzer(algo,env,seeds[j],'16cpu1gpu_mejorado',[train_n_ep],[test_n_ep],306)
-                analyze.graph_truth_train_test_estimates_together(perc_val_cost,axs[j,i],env,train_n_ep,test_n_ep,first_graph,first_row,first_column,last_row)
+                analyze.graph_truth_train_test_estimates_together(perc_val_cost,axs[j,i],env,train_n_ep,test_n_ep,estimates_conv,first_graph,first_row,first_column,last_row)
+        if estimates_conv=='estimates':
+            plt.savefig('experiments_intuition/results/CriteriaComparison/figures/estimates_together/estimates_truth_train_test_'+name+'.pdf')
+        if estimates_conv=='conv':
+            plt.savefig('experiments_intuition/results/CriteriaComparison/figures/estimates_together/estimates_truth_train_test_'+name+'_conv.pdf')
+        
+        plt.show()
 
-        plt.savefig('experiments_intuition/results/CriteriaComparison/figures/estimates_together/estimates_truth_train_test_'+name+'.pdf')
+    # Analisis 3: resumen de analisis completo inicial por entorno (todas las semillas juntas)
+    def graph_getstarting_by_env(self,algo,env):
+
+        # Estructurar los datos disponibles de manera apropiada para la grafica
+        df=pd.DataFrame(columns=(['n_policy','level_deg']+
+                                 ['prec_train_'+str(n_ep) for n_ep in [500,250,100,50,25,5]]+
+                                 ['prec_test_'+str(n_ep) for n_ep in [500,250,100,50,25,5]]+
+                                 ['cost_test_'+str(n_ep) for n_ep in [500,250,100,50,25,5]]+
+                                 ['ep_len_test']
+                                 )
+                        )
+        
+        for seed in range(1,11):
+
+            deg_column=algo+'_'+env+'_seed'+str(seed)+'_'+global_deg_metric+'_'+local_deg_metric
+            estimates_column=algo+'_'+env+'_seed'+str(seed)
+
+            df_new = pd.concat([
+                    self.df_degradation['n_policy'],
+                    self.df_degradation[[deg_column]],
+                    self.df_train_eff[[estimates_column+'_'+str(n_ep) for n_ep in [500,250,100,50,25,5]]],
+                    self.df_test_eff[[estimates_column+'_'+str(n_ep)+'_without_extra' for n_ep in [500,250,100,50,25,5]]],
+                    self.df_test_cost[[estimates_column+'_'+str(n_ep) for n_ep in [500,250,100,50,25,5]]],
+                    self.df_test_ep_len[estimates_column],
+                ], axis=1)
+
+            df_new.columns=df.columns
+
+            df = pd.concat([df, df_new], axis=0, ignore_index=True)
+
+
+        # Dibujar fila de graficas
+        def graph_conv_range(inner,conv_range,first_row=False,last_row=False,axes3_xlim=None):
+
+            # Seleccionar filas de interes
+            n_policies=list(range(int(conv_range[0]*(self.iter_max-self.start_iter)),int(conv_range[1]*(self.iter_max-self.start_iter))))
+            df_current=df[df['n_policy'].isin(n_policies)]
+
+            # Dibujar fila de graficas
+            axes = inner.subplots(sharey=False)
+
+            #------- Distribucion de degradacion
+            data = df_current['level_deg']
+            kde = gaussian_kde(data)
+            x = np.linspace(0, 1, 200)
+
+            axes[0].plot(x, kde(x), color='gray')
+            axes[0].fill_between(x, 0, kde(x), color='gray', alpha=0.3)
+            axes[0].axvline(np.median(data), color='gray')
+            axes[0].set_xlim(-0.1,1.1)
+            axes[0].set_title("")
+            axes[0].set_ylabel(str(int(100*conv_range[0]))+'%-'+str(int(100*conv_range[1]))+'%\nof conv. time')
+            axes[1].axis('off')
+
+            #------- Precision de train
+            columns=['prec_train_'+str(n_ep) for n_ep in [500,250,100,50,25,5]]
+            data = [df_current[c].tolist() for c in columns]
+            axes[2].barh(
+                    np.arange(len(data)),
+                    [-np.median(x) for x in data],
+                    xerr=[[uq - m for m, uq in zip([np.median(x) for x in data], [np.percentile(x, 90) for x in data])],
+                          [m - lq for m, lq in zip([np.median(x) for x in data], [np.percentile(x, 10) for x in data])]],
+                    height=1,color='black', alpha=0.5,capsize=3,ecolor=(0, 0, 0, 0.8)
+                )
+
+            axes[2].xaxis.set_major_formatter(FuncFormatter(lambda x, pos: f"{abs(x):.1f}"))
+            axes[2].invert_yaxis()
+            axes[2].set_yticks(np.arange(len(data)))
+            axes[2].set_yticklabels(['500','250','100','50','25','5'])
+            axes[2].set_xlim(-1.1,0.1)
+            
+            #------- Precision de test
+            columns=['prec_test_'+str(n_ep) for n_ep in [500,250,100,50,25,5]]
+            data = [df_current[c].tolist() for c in columns]
+            axes[3].barh(
+                    np.arange(len(data)),
+                    [-np.median(x) for x in data],
+                    xerr=[[uq - m for m, uq in zip([np.median(x) for x in data], [np.percentile(x, 90) for x in data])],
+                          [m - lq for m, lq in zip([np.median(x) for x in data], [np.percentile(x, 10) for x in data])]],
+                    height=1,color='black', alpha=0.5,capsize=3,ecolor=(0, 0, 0, 0.8)
+                )
+
+            axes[3].xaxis.set_major_formatter(FuncFormatter(lambda x, pos: f"{abs(x):.1f}"))
+            axes[3].invert_yaxis()
+            axes[3].set_yticks([])
+            axes[3].set_xlim(-1.1,0.1)
+            
+            #------- Coste de test
+            columns=['cost_test_'+str(n_ep) for n_ep in [500,250,100,50,25,5]]
+            data = [df_current[c].tolist() for c in columns]
+            axes[4].barh(
+                    np.arange(len(data)),
+                    [np.median(x) for x in data],
+                    xerr=[[m - lq for m, lq in zip([np.median(x) for x in data], [np.percentile(x, 10) for x in data])],
+                          [uq - m for m, uq in zip([np.median(x) for x in data], [np.percentile(x, 90) for x in data])]],
+                    height=1, color='red', alpha=0.5, capsize=3,ecolor=(1, 0, 0, 0.8)
+                )
+
+            axes[4].set_yticks([])
+            axes[4].invert_yaxis()
+
+            if last_row:
+                axes3_xlim=max([np.percentile(x, 90) for x in data])
+            
+            #------- Tamaños de episodios test
+            columns=['ep_len_test_'+str(n_ep) for n_ep in [500,250,100,50,25,10,5]]
+            data = df_current['ep_len_test'].tolist()
+            axes[5].axvline(np.median(data))
+            axes[5].axvspan(np.percentile(data,10),np.percentile(data,90),alpha=0.5)
+            axes[5].set_yticks([])
+            axes[5].set_xlim(-15,1015)
+            
+            if last_row:
+                axes[0].set_xlabel("Degradation")
+                axes[2].set_xlabel("prec_train")
+                axes[3].set_xlabel("prec_test")
+                axes[4].set_xlabel("cost_test")
+                axes[5].set_xlabel("ep_len_test")
+
+                return axes3_xlim
+
+            else:
+                axes[4].set_xlim(0,axes3_xlim)
+                axes[0].set_xticks([])
+                axes[2].set_xticks([])
+                axes[3].set_xticks([])
+                axes[4].set_xticks([])
+                axes[5].set_xticks([])
+
+            if first_row:
+                pass
+
+
+        # Grafica principal
+        fig = plt.figure(figsize=(10,7))
+        plt.subplots_adjust(left=0.08,bottom=0.15,right=0.97,top=0.92,wspace=0.2,hspace=0.07)
+        outer = fig.add_gridspec(4,1)
+
+        axes3_xlim=graph_conv_range(outer[3].subgridspec(1, 6,width_ratios=[1, 0.15, 1, 1, 1, 1],wspace=0.1),[0.75,1],last_row=True)
+        graph_conv_range(outer[0].subgridspec(1, 6,width_ratios=[1, 0.15, 1, 1, 1, 1],wspace=0.1),[0,0.25],first_row=True,axes3_xlim=axes3_xlim)
+        graph_conv_range(outer[1].subgridspec(1, 6,width_ratios=[1, 0.15, 1, 1, 1, 1],wspace=0.1),[0.25,0.5],axes3_xlim=axes3_xlim)
+        graph_conv_range(outer[2].subgridspec(1, 6,width_ratios=[1, 0.15, 1, 1, 1, 1],wspace=0.1),[0.5,0.75],axes3_xlim=axes3_xlim)
+        
+        plt.savefig('experiments_intuition/results/CriteriaComparison/figures/getstarting_by_env/'+env+'_'+global_deg_metric+'_'+local_deg_metric+'.pdf')
         plt.show()
 
 # Estas dos clases estan pensadas para reproducir los esperimentos hechos usando las clases anteriores
@@ -3534,7 +3743,7 @@ class SingleProcessAnalisys():
         list_freq=[100,50,25,10,5,1]
         
         # Representacion del proceso (considerando diferentes definiciones de metrica global y local de degradacion)
-        #grapher=EvolutionGrapher(algo,env,seed,resources,max_iter)
+        grapher=EvolutionGrapher(algo,env,seed,resources,max_iter)
         #grapher.learning_curve()
         # grapher.graph_degradation_evolution('mean_update_deg','greater_prob')
         # grapher.graph_degradation_evolution('weighted_mean_best_later_deg','greater_prob')
@@ -3542,11 +3751,14 @@ class SingleProcessAnalisys():
         # grapher.graph_degradation_evolution('best_last_deg','greater_prob')
         # grapher.graph_degradation_evolution('best_last_deg','paired_diff_median')
         # grapher.graph_degradation_evolution('best_last_deg','paired_diff_probpos')
-        #grapher.graph_degradation_evolution('relative_worsening_to_improvement','relative_reward_diff')
+        grapher.graph_degradation_evolution('relative_worsening_to_improvement','relative_reward_diff')
+        grapher.graph_degradation_evolution('worsening_to_improvement','relative_reward_diff')
+        grapher.graph_degradation_evolution('best_last_deg','paired_diff_probpos')
+        grapher.graph_degradation_evolution('relative_best_last_deg','paired_diff_probpos')
     
         # Analisis de estimaciones (coste y precision de seleccion)
-        analyzer=EstimationAnalyzer(algo,env,seed,resources,list_n_ep,list_n_ep,max_iter)
-        analyzer.graph_cost_analysis()
+        # analyzer=EstimationAnalyzer(algo,env,seed,resources,list_n_ep,list_n_ep,max_iter)
+        # analyzer.graph_cost_analysis()
         # analyzer.graph_accuracy_analysis('test')
         # analyzer.graph_accuracy_analysis('train')
         # analyzer.graph_train_vs_test_estimates()
@@ -3740,9 +3952,21 @@ if MAEB_ISG_experiments:
 experiment_more_env=False
 experiments_when_which=False
 experiment_estimates_together=False
+experiment_getstarting=False
 #--------------------------------------------------------------------------------------------------
 # Replicar experimentos SingleProcess mas importantes para nuevos entornos
 #--------------------------------------------------------------------------------------------------
+
+train_n_ep=[500]# n_ep mas comun entre todos los procesos de todos los entornos despues del tuning (criteria_conf_by_process.csv)
+test_n_ep=[32]# n_ep minimo del maximo que no supera el 25% de tiempo en validar entre todos los procesos de todos los entornos (test_affordable_n_ep_by_process.csv)
+test_freq=[1]# freq mas comun entre todos los procesos de todos los entornos despues del tuning (criteria_conf_by_process.csv)
+
+halfcheetah_process_ids=['PPO_HalfCheetah_seed'+str(seed) for seed in range(1,11)]
+walker2d_process_ids=['PPO_Walker2d_seed'+str(seed) for seed in range(1,11)]
+ant_process_ids=['PPO_Ant_seed'+str(seed) for seed in range(1,11)]
+humanoid_process_ids=['PPO_Humanoid_seed'+str(seed) for seed in range(1,11)]
+humanidstandup_process_ids=['PPO_HumanoidStandup_seed'+str(seed) for seed in range(1,11)]
+
 if experiment_more_env:
     #------------- Mas environments
     for i in range(1,11):
@@ -3777,19 +4001,8 @@ if experiment_more_env:
     global_deg_metric='best_last_deg'
     local_deg_metric='paired_diff_probpos'
 
-    train_n_ep=[500]# n_ep mas comun entre todos los procesos de todos los entornos despues del tuning (criteria_conf_by_process.csv)
-    test_n_ep=[32]# n_ep minimo del maximo que no supera el 25% de tiempo en validar entre todos los procesos de todos los entornos (test_affordable_n_ep_by_process.csv)
-    test_freq=[1]# freq mas comun entre todos los procesos de todos los entornos despues del tuning (criteria_conf_by_process.csv)
-
-
     analyzer=ProcessIndependentAnalyzer(306,grid_test_freq=test_freq,grid_test_n_ep=test_n_ep,grid_train_n_ep=train_n_ep,
                                         global_deg_metric=global_deg_metric,local_deg_metric=local_deg_metric,relative_deg_metric=relative_deg_metric)
-
-    halfcheetah_process_ids=['PPO_HalfCheetah_seed'+str(seed) for seed in range(1,11)]
-    walker2d_process_ids=['PPO_Walker2d_seed'+str(seed) for seed in range(1,11)]
-    ant_process_ids=['PPO_Ant_seed'+str(seed) for seed in range(1,11)]
-    humanoid_process_ids=['PPO_Humanoid_seed'+str(seed) for seed in range(1,11)]
-    humanidstandup_process_ids=['PPO_HumanoidStandup_seed'+str(seed) for seed in range(1,11)]
 
     analyzer.MAEB_graph_best_criteria_by_time('HalfCheetah',halfcheetah_process_ids,train_n_ep,test_n_ep,test_freq,global_deg_metric,local_deg_metric)
     analyzer.MAEB_graph_best_criteria_by_time('Walker2d',walker2d_process_ids,train_n_ep,test_n_ep,test_freq,global_deg_metric,local_deg_metric)
@@ -3828,21 +4041,25 @@ if experiment_estimates_together:
     seeds=list(range(1,11))
 
     analyzer=ProcessIndependentAnalyzer(306)
-    analyzer.graph_truth_train_test_estimates_together('PPO',envs,seeds,10)
-    analyzer.graph_truth_train_test_estimates_together('PPO',envs,seeds,10,opt_conf_per_env=True)
+    #analyzer.graph_truth_train_test_estimates_together('PPO',envs,seeds,10)
+    analyzer.graph_truth_train_test_estimates_together('PPO',envs,seeds,10,estimates_conv='conv')
+    #analyzer.graph_truth_train_test_estimates_together('PPO',envs,seeds,10,opt_conf_per_env=True)
+
+#--------------------------------------------------------------------------------------------------
+# Getstarting analisis por environment
+#--------------------------------------------------------------------------------------------------
+if experiment_getstarting:
+    global_deg_metric='best_last_deg'
+    local_deg_metric='paired_diff_probpos'
+    analyzer=ProcessIndependentAnalyzer(306,grid_train_n_ep=[500,250,100,50,25,5],global_deg_metric=global_deg_metric,local_deg_metric=local_deg_metric)
+    analyzer.graph_getstarting_by_env('PPO','HalfCheetah')
+    analyzer.graph_getstarting_by_env('PPO','Walker2d')
+    analyzer.graph_getstarting_by_env('PPO','Humanoid')
+    analyzer.graph_getstarting_by_env('PPO','HumanoidStandup')
 
 
 '''
 TODO:
-X bajar del cluster los datos de Walker2d, y reproducir los mismos experimentos con el
-(para tener calculadas las estimaciones, configuraciones optimas, degradaciones asociadas,...)
-
-X fijar configuracion optima de train y test global para todos los entornos. Añadir al analisis 
-actual (solo max magnitudes) el porcentage de tiempo de validacion con respecto a aprender. La 
-configuracion optima de test puede ser el maximo n_ep que no supera el 25%.
-
-X hacer analisis comparativos individuales por entornos (la metrica de magnitud y degradacion
-pueden no ser comparables entre entornos).
 
 - en comparaciones pares entre criterios, contar los empates como 0.5 para cada uno en ved de 1.
 NOTE: ahora estan comentadas esas lineas, hasta ahora no tengo en cuenta los empates
@@ -3851,13 +4068,12 @@ NOTE: ahora estan comentadas esas lineas, hasta ahora no tengo en cuenta los emp
 NOTE: con el experimento de Aritz, veo que los steps totales que estaba considerando no son
 suficientes para la convergencia de los entornos mas complejos
 
-X en el analisis que concluye las consecuencias de aplicar cada criterio last-test, en lugar de
-la aplicacion simetrica de test, considerar la diagonal inversa a la hecha, empezar en iter. x y
-validar el reto de iteraciones hasta el final.
-
 - entender porque es mas costosa la validacion en entornos mas simples (puede que sea la 
 longitud de los episodios) y train no es tan malo en entornos simples (puede ser por lo 
 tolerante que es el entorno a politicas diferentes)
+NOTE: la validacion en HalfCheetah y HumanoidStandup es mas costosa, porque tanto politicas
+buenas como malas tienen el mismo conste de validacion por durar todos los episodios lo mismo,
+el termination no tiene parametro unhealth, es never end.
 
 - modificaciones en definicion de degradacion para mas adelante. Definirla en funcion de f 
 es mas simple y concuerda con la definicion del problema, pero causa problemas en comparar
@@ -3870,10 +4086,28 @@ pero no es apropiado para una medida global. Con una medida relativa podemos obt
 en las graficas poco intuitivas como: test es el mejor en degradaciones bajas (y eso es porque aunque
 en un tramo ultimo relativo no haya convergencia, ese tramo puede estar muy por debajo del maximo)
 
+- Usar misma metrica, P(X_i,j>0), que no depende de la magnitud como f para definir todas las 
+formalizaciones: degradacion, precision de seleccion, goodness de politica seleccionada.
+
+- Encontrar el numero de iteraciones por entorno que definene el tiempo suficiente y mas
+para converger.
+NOTE: en el futuro posiblemente deba modificar el codigo actual para ajustarlo al uso de 
+diferentes numero de iteraciones por entorno, ya que esto se sustituira por x% completado
+para alcanzar la convergencia.
+
+- Mantener entornos sin/con unhealthy en termination. Esto da mas versatilidad al conjunto de 
+entornos usados para el entrenamiento.
 
 FIXME: 
 - Si recalculo los truth de la misma manera (los guardados para Ant, Humanoid, HumanoidSatndup),
   no salen igual que la vez pasada (puede ser por la version de la libreria que descomprime).
+
+- En el analisis graph_getstarting_by_env salen relaciones sospechosas de precisiones de estimacion
+y costes de estimacion. Comprobar si hay algun error de uso/calculo de datos.
+
+- Estaria bien dejar las clases principales y sus funciones en un fichero main.py, y los experimentos
+individuales que he ido haciendo (intuicion, MAEB, posteriores) que sean un script.py individual que usa
+las clases del main.py.
 '''
 
 
