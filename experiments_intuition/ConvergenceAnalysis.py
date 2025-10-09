@@ -9,17 +9,14 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import numpy as np
 
-def graph_conv(env):
-
-    # Leer base de datos que tiene las metricas calculadas durante train (metricas de convergencia)
-    df_train=pd.read_csv('_bender/project_SB3/data/PPO_'+env+'_seed1_CONV/df_traj.csv')
+def graph_conv(envs,seeds):
 
     # Funciones para estimar de manera automatica el punto de convergencia
     # (percentil de diferencia de metrica en ventana menor que una tolerancia/umbral)
     def descendant(list_y):
         descen=[]
         for i in range(len(y)-1):
-            descen.append([abs(list_y[i]-list_y[i+1]) ][0])
+            descen.append([list_y[i]-list_y[i+1] if list_y[i]-list_y[i+1]>0 else 0][0])
 
         return descen
     
@@ -28,7 +25,7 @@ def graph_conv(env):
         desc=descendant(list_y)
         w_perc=[]
         for i in range(w_size,len(list_y)):
-            w_perc.append(np.percentile(desc[i-w_size:i],75))
+            w_perc.append(np.percentile(desc[i-w_size:i],90))
         
         cuantos=0
         conv=None
@@ -37,27 +34,39 @@ def graph_conv(env):
                 cuantos+=1
             if cuantos==w_size:
                 conv=i+w_size
-
         return conv
 
     # Evolucion de metrica
-    plt.figure(figsize=(8, 5))
+    fig,axes=plt.subplots(len(seeds),len(envs),figsize=(len(envs)*4, len(seeds)*3))
+    plt.subplots_adjust(left=0.08,bottom=0.15,right=0.97,top=0.92,wspace=0.2,hspace=0.07)
 
-    y=df_train['entropy_loss'].tolist()# tenemos estos datos almacenados: entropy_loss,policy_gradient_loss,KL_div,explained_variance,log_std
-    conv=var_window(y)
-    plt.plot(range(len(y)),y, label="entropy_loss")
-    if conv is not None:
-        plt.axvline(x=conv,color='red')
+    for i in range(len(envs)):
+        for j in range(len(seeds)):
 
-    plt.ylabel("Convergence metric")
-    plt.xlabel("Learning iteration")
-    plt.title("")
-    plt.legend()
-    plt.grid(True)
-    plt.savefig('experiments_intuition/results/ConvergenceAnalysis/conv_'+env+'.pdf')
+            # Leer base de datos que tiene las metricas calculadas durante train (metricas de convergencia)
+            df_train=pd.read_csv('_bender/project_SB3/data/PPO_'+envs[i]+'_seed'+str(seeds[j])+'_CONV/df_traj.csv')
+
+            y=df_train['entropy_loss'].tolist()# tenemos estos datos almacenados: policy_loss,value_loss,entropy_loss,policy_gradient_loss,KL_div,explained_variance,log_std
+
+            conv=var_window(y)
+            axes[i+len(envs)*j].plot(range(len(y)),y)
+            if conv is not None:
+                axes[i+len(envs)*j].axvline(x=conv,color='red')
+
+            if j==0:
+                axes[i+len(envs)*j].set_title(envs[i])
+            if i==0:
+                axes[i+len(envs)*j].set_ylabel("entropy_loss")
+            if j==len(seeds)-1:
+                axes[i+len(envs)*j].set_xlabel("Learning iteration")
+
+            axes[i+len(envs)*j].grid(True)
+
+    plt.savefig('experiments_intuition/results/ConvergenceAnalysis/conv.pdf')
+    plt.show()
 
 
 # Main
 envs=['HalfCheetah','Walker2d','Ant','Humanoid','HumanoidStandup']
-for env in envs:
-    graph_conv(env)
+seeds=[1]
+graph_conv(envs,seeds)

@@ -49,3 +49,4 @@ PPO_Walker2d_seed10,39,32,13,6
 PPO_Ant_seed10,54,39,17,8
 PPO_Humanoid_seed10,267,229,100,55
 PPO_HumanoidStandup_seed10,25,25,5,5
+PPO_Ant_seed1,73,56,25,11
