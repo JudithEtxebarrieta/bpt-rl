@@ -140,10 +140,10 @@ if experiments_when_which:
     analyzer=ProcessIndependentAnalyzer(306,grid_test_freq=test_freq,grid_test_n_ep=test_n_ep,grid_train_n_ep=train_n_ep,
                                         global_deg_metric=global_deg_metric,local_deg_metric=local_deg_metric)
 
-    analyzer.graph_when_which_criteria(halfcheetah_process_ids,500,20,1,global_deg_metric,local_deg_metric,'HalfCheetah')
-    analyzer.graph_when_which_criteria(ant_process_ids,500,20,1,global_deg_metric,local_deg_metric,'Ant')
-    analyzer.graph_when_which_criteria(walker2d_process_ids,500,20,1,global_deg_metric,local_deg_metric,'Walker2d')
-    analyzer.graph_when_which_criteria(humanoid_process_ids,500,20,1,global_deg_metric,local_deg_metric,'Humanoid')
-    analyzer.graph_when_which_criteria(humanidstandup_process_ids,500,20,1,global_deg_metric,local_deg_metric,'HumanoidStandup')
+    analyzer.graph_when_which_criteria(halfcheetah_process_ids,500,32,1,global_deg_metric,local_deg_metric,'HalfCheetah')
+    analyzer.graph_when_which_criteria(ant_process_ids,500,32,1,global_deg_metric,local_deg_metric,'Ant')
+    analyzer.graph_when_which_criteria(walker2d_process_ids,500,32,1,global_deg_metric,local_deg_metric,'Walker2d')
+    analyzer.graph_when_which_criteria(humanoid_process_ids,500,32,1,global_deg_metric,local_deg_metric,'Humanoid')
+    analyzer.graph_when_which_criteria(humanidstandup_process_ids,500,32,1,global_deg_metric,local_deg_metric,'HumanoidStandup')
 
 

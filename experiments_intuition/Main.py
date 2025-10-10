@@ -69,6 +69,7 @@ from sklearn.neighbors import KernelDensity
 from scipy.stats import gaussian_kde
 import seaborn as sns
 from matplotlib.ticker import FuncFormatter, FormatStrFormatter, MultipleLocator
+from matplotlib.colors import ListedColormap
 
 
 
@@ -2212,8 +2213,11 @@ class ProcessIndependentAnalyzer():
         df_test_ep_rew=Estimator.read_create_estimates_csv('experiments_intuition/results/CriteriaComparison/data/deg_mag/criteria_best_test_ep_rew.csv',iter_max,start_iter)
 
 
-        df_test_start_end=Converter.generate_df('experiments_intuition/results/CriteriaComparison/data/test_start_end_perc_time.csv',
+        df_criteria_start_end=Converter.generate_df('experiments_intuition/results/CriteriaComparison/data/test_start_end_perc_time.csv',
                                                 ['process_id','test_conf','start_test','end_test','perc_good','invest_time','last_good','last_time'])
+        df_test_when_train_change=Converter.generate_df('experiments_intuition/results/CriteriaComparison/data/test_when_train_change.csv',
+                                                ['process_id','test_n_ep','train_n_ep','test_applied','perc_good','invest_time'])
+        
 
         # Leer base de datos donde se almacenan las mejores configuraciones de los criterios por proceso (criteria_conf_by_process.csv)
         df_conf=pd.read_csv('experiments_intuition/results/SingleProcessAnalysis/data/criteria_conf_by_process.csv')
@@ -2345,13 +2349,17 @@ class ProcessIndependentAnalyzer():
             df_train_eff.to_csv('experiments_intuition/results/CriteriaComparison/data/deg_mag/criteria_best_train_eff.csv', index=False)
             df_test_eff.to_csv('experiments_intuition/results/CriteriaComparison/data/deg_mag/criteria_best_test_eff.csv', index=False)
 
-            df_test_start_end.to_csv('experiments_intuition/results/CriteriaComparison/data/test_start_end_perc_time.csv', index=False)
+            
 
             df_test_cost.to_csv('experiments_intuition/results/CriteriaComparison/data/deg_mag/criteria_best_test_cost.csv',index=False)
             df_test_ep_len.to_csv('experiments_intuition/results/CriteriaComparison/data/deg_mag/criteria_best_test_ep_len.csv',index=False)
             df_test_ep_rew.to_csv('experiments_intuition/results/CriteriaComparison/data/deg_mag/criteria_best_test_ep_rew.csv',index=False)
         
         '''
+
+        df_criteria_start_end.to_csv('experiments_intuition/results/CriteriaComparison/data/test_start_end_perc_time.csv', index=False)
+        df_test_when_train_change.to_csv('experiments_intuition/results/CriteriaComparison/data/test_when_train_change.csv',index=False)
+
         self.df_degradation=df_degradation
 
         self.df_last_mag=df_last_mag
@@ -2369,7 +2377,8 @@ class ProcessIndependentAnalyzer():
         
         self.iter_max=iter_max
 
-        self.df_test_start_end=df_test_start_end
+        self.df_criteria_start_end=df_criteria_start_end
+        self.df_test_when_train_change=df_test_when_train_change
         self.df_test_affordable_conf=df_test_affordable_conf
         self.df_conf=df_conf
 
@@ -3457,11 +3466,67 @@ class ProcessIndependentAnalyzer():
 
         self.df_criteria_start_end.to_csv('experiments_intuition/results/CriteriaComparison/data/criteria_start_end_good_time.csv', index=False)
  
+    def generate_df_test_when_train_change(self,process_ids,train_n_ep,test_n_ep):
+
+
+        df_add=[]
+
+        for process_id in process_ids:
+
+            algo,env,seed=Converter.process_id_splitter(process_id)
+            process_id=algo+'_'+env+'_seed'+str(seed)
+            generator=EvolutionGenerator(algo,env,seed,'16cpu1gpu_mejorado',perc_time_start=0.1)
+
+            # Mirar si no se ha llamado antes a esta funcion de la misma manera
+            already_registered=(self.df_test_when_train_change['process_id']==process_id) & (self.df_test_when_train_change['test_n_ep']==test_n_ep) & (self.df_test_when_train_change['train_n_ep']==train_n_ep)
+
+            if not np.array(already_registered).any():
+
+                # Listas con las estimaciones train y test de las configuraciones de interes
+                train_esti=generator.df_train_estimates.loc[self.start_iter:self.iter_max,str(train_n_ep)+'_traj_ep'].tolist()
+                test_esti=[ Converter.compress_decompress_list(i,compress=False)
+                            for i in generator.df_test_estimates.loc[self.start_iter:self.iter_max,str(test_n_ep)+'_val_ep'].tolist()]
+                
+
+                # Cuando el maximo segun train cambie, validar con test
+                test_applied,val_costs,val_policy_ids,val_policy_esti=[],[],[],[]
+                max_train=-math.inf
+
+                for i in range(len(train_esti)):
+                    
+                    if train_esti[i]>max_train:
+                        test_applied.append(True)
+                        val_costs.append(test_esti[i][1])
+                        val_policy_esti.append(test_esti[i][0])
+                        val_policy_ids.append(self.start_iter+i-1)# Los indices de las politicas en las df empiezan desde 0 y las iter se cuentan desde 1
+
+                        max_train=train_esti[i]
+
+                    else:
+                        test_applied.append(False)
+
+                # Precision de seleccion
+                all_time_seq=generator.df_train.loc[self.start_iter:self.iter_max,'time_seconds'].tolist()
+                policy_id=val_policy_ids[val_policy_esti.index(max(val_policy_esti))]
+                best_policy_id=generator.truth_best_policy(all_time_seq[-1])
+                prec_selec=generator.df_test_estimates.loc[policy_id,'truth']/generator.df_test_estimates.loc[best_policy_id,'truth']
+
+                # Coste de validacion
+                cost_val=sum(val_costs)/all_time_seq[-1]
+                df_add.append([process_id,test_n_ep,train_n_ep,Converter.compress_decompress_list(test_applied),prec_selec,cost_val])
+
+        # Añadir nuevas filas a la base de datos existente
+        df_add = pd.DataFrame(df_add, columns=self.df_test_when_train_change.columns)
+        self.df_test_when_train_change = pd.concat([self.df_test_when_train_change, df_add],ignore_index=True)
+        self.df_test_when_train_change.to_csv('experiments_intuition/results/CriteriaComparison/data/test_when_train_change.csv', index=False)
+
     def graph_when_which_criteria(self,process_ids,train_n_ep,test_n_ep,test_freq,global_deg_metric,local_deg_metric,title):
         
         # Generar datos necesarios
         # for process_id in tqdm(process_ids):
         #     self.generate_df_criteria_strat_end( process_id,train_n_ep,test_n_ep,test_freq)
+
+        # self.generate_df_test_when_train_change(process_ids,train_n_ep,test_n_ep)
         
         # Funciones auxiliare
         #--------- Grafica de degradaciones
@@ -3529,7 +3594,7 @@ class ProcessIndependentAnalyzer():
             axes[0].set_xlim(0, 1)
             axes[0].set_xticklabels([])
             axes[0].set_yticklabels([])
-            axes[0].set_ylabel("Appliying single criterion")
+            axes[0].set_ylabel("Single criterion")
 
             # Grafica de porcentajes de calidad y tiempo en validacion
             axes[1].barh(
@@ -3576,11 +3641,9 @@ class ProcessIndependentAnalyzer():
                 axes[0].barh(i+len(ascendant_periods)-2, 1 - v2, height=1,left=v2, color='green')
 
             axes[0].set_xlim(0, 1)
-            axes[0].set_xticks([0,.25,.50,.75,1])
-            axes[0].set_xticklabels(['0', '25', '50', '75', '100'])
+            axes[0].set_xticklabels([])
             axes[0].set_yticklabels([])
-            axes[0].set_ylabel("Applying combined criteria")
-            axes[0].set_xlabel("Percentage of learning time")
+            axes[0].set_ylabel("Combined criteria")
 
             # Grafica de porcentajes de calidad y tiempo en validacion
             axes[1].barh(
@@ -3591,8 +3654,7 @@ class ProcessIndependentAnalyzer():
                     height=1,color='black', alpha=0.5, capsize=3,ecolor=(0, 0, 0, 0.8)
                 )
             axes[1].set_xlim(-1, 0)
-            axes[1].xaxis.set_major_formatter(FuncFormatter(lambda x, pos: f"{abs(x):.1f}"))
-            axes[1].set_xlabel("Reward percentage of\nselected policy\nrelative to the best")
+            axes[1].set_xticklabels([])
 
             axes[2].barh(
                     np.arange(len(perc_val_learn_times)),
@@ -3602,6 +3664,49 @@ class ProcessIndependentAnalyzer():
                     height=1,color='red',alpha=0.5, capsize=3,ecolor=(1, 0, 0, 0.8)
                 )
 
+            axes[2].set_xticklabels([])
+
+        #--------- Grafica compuesta de aplicacion criterios mixtos (train y a la vez test, propuesta Etor)
+        def subgraph_mixed_criteria(inner):
+            axes = inner.subplots(sharey=True)
+
+            # Datos necesarios para dibujar la grafica
+            matrix_test_applied,perc_goods,cost_vals=get_df_graph_data_mixed()
+
+            # Dibujar graficas
+
+            #----------- Cuando se aplica cada criterio
+            arr = np.vstack([[2]*len(matrix_test_applied[0]), np.array(matrix_test_applied, dtype=int)]) 
+            cmap = ListedColormap(["white", "green", "orange"]) # 0 → blanco, 1 → verde, 2 → naranja
+
+            axes[0].imshow(arr, cmap=cmap, aspect='auto', interpolation='nearest')
+            axes[0].set_xlim(0, len(matrix_test_applied[0]))
+            axes[0].set_xticks(np.linspace(0, len(matrix_test_applied[0]), 5))
+            axes[0].set_xticklabels(['0', '25', '50', '75', '100'])
+            axes[0].set_yticklabels([])
+            axes[0].set_ylabel("Mixed criteria")
+            axes[0].set_xlabel("Percentage of learning time")
+
+            #----------- Precisiones de seleccion
+            axes[1].barh(np.arange(len(perc_goods)+1),[-x for x in [0]+perc_goods],
+                    height=1,color='black', alpha=0.5
+                )
+            axes[1].axvline(x=-np.median(perc_goods), color='black', linestyle='--', linewidth=1.5,alpha=0.8)
+            axes[1].axvline(x=-np.percentile(perc_goods,90), color='black', linestyle='-', linewidth=1.5,alpha=0.8)
+            axes[1].axvline(x=-np.percentile(perc_goods,10), color='black', linestyle='-', linewidth=1.5,alpha=0.8)
+            axes[1].set_xlim(-1, 0)
+            axes[1].invert_yaxis()
+            axes[1].xaxis.set_major_formatter(FuncFormatter(lambda x, pos: f"{abs(x):.1f}"))
+            axes[1].set_xlabel("Reward percentage of\nselected policy\nrelative to the best")
+
+            #----------- Costes de validacion
+            axes[2].barh(np.arange(len(cost_vals)+1),[x for x in [0]+cost_vals],
+                      height=1,color='red',alpha=0.5
+                    )
+            axes[2].axvline(x=np.median(cost_vals), color='red', linestyle='--', linewidth=1.5,alpha=0.8)
+            axes[2].axvline(x=np.percentile(cost_vals,90), color='red', linestyle='-', linewidth=1.5,alpha=0.8)
+            axes[2].axvline(x=np.percentile(cost_vals,10), color='red', linestyle='-', linewidth=1.5,alpha=0.8)
+            axes[2].invert_yaxis()
             axes[2].set_xlabel("Percentage of invest\ntime in validation")
 
         #--------- Subdatos
@@ -3645,8 +3750,6 @@ class ProcessIndependentAnalyzer():
                 )
 
 
-
-            #return min(df.loc[rows,'perc_good']),max(df.loc[rows,'perc_time_val_learn']), max(df.loc[rows,'invest_time'])
             return df.loc[rows,'perc_good'],df.loc[rows,'perc_time_val_learn'], df.loc[rows,'invest_time']
             
         def get_deg_list_in_period(end_period):
@@ -3659,13 +3762,26 @@ class ProcessIndependentAnalyzer():
 
             return df_interest_deg.values.flatten().tolist()
 
-        
+        def get_df_graph_data_mixed():
+
+            df=self.df_test_when_train_change
+
+            rows=(df['process_id'].isin(process_ids) & 
+                    (df['train_n_ep']==train_n_ep) & (df['test_n_ep']==test_n_ep)
+                  )
+            
+            matrix_test_applied=[Converter.compress_decompress_list(i,compress=False) for i in df.loc[rows,'test_applied'].tolist()]
+            list_perc_good=df.loc[rows,'perc_good'].tolist()
+            list_cost_val=df.loc[rows,'invest_time'].tolist()
+
+            return matrix_test_applied,list_perc_good,list_cost_val
+
         # Preparar datos para la grafica y dibujarlas
         fig = plt.figure(figsize=(8,7))
         plt.subplots_adjust(left=0.08,bottom=0.15,right=0.97,top=0.92,wspace=0.2,hspace=0.07)
 
         
-        outer = fig.add_gridspec(3,1,height_ratios=[1,2,4])
+        outer = fig.add_gridspec(4,1,height_ratios=[1,2,4,2])
 
         #--------- Degradaciones por tiempos
         inner=outer[0].subgridspec(1, 3, wspace=0.1, hspace=0.3,width_ratios=[2,1,1])
@@ -3717,8 +3833,15 @@ class ProcessIndependentAnalyzer():
             all_perc_good.append(test_perc_goods)
             all_perc_val.append(test_perc_val)
 
-
         subgraph_combined_criteria(inner,intervals,all_perc_good,all_perc_val)
+
+        #--------- Aplicacion de criterios mixtos
+        inner=outer[3].subgridspec(1, 3, wspace=0.1, hspace=0.3,width_ratios=[2,1,1])
+
+        subgraph_mixed_criteria(inner)
+
+
+        
         plt.savefig('experiments_intuition/results/CriteriaComparison/figures/conclusion_criteria_application/'+title+'_'+global_deg_metric+'_'+local_deg_metric+'.pdf')
         plt.show()
         
@@ -3947,13 +4070,6 @@ class ProcessIndependentAnalyzer():
 '''
 TODO:
 
-- en comparaciones pares entre criterios, contar los empates como 0.5 para cada uno en ved de 1.
-NOTE: ahora estan comentadas esas lineas, hasta ahora no tengo en cuenta los empates
-
-- dejar mismo tiempo fijo para diferentes entornos (no meternos en convergencia)
-NOTE: con el experimento de Aritz, veo que los steps totales que estaba considerando no son
-suficientes para la convergencia de los entornos mas complejos
-
 - entender porque es mas costosa la validacion en entornos mas simples (puede que sea la 
 longitud de los episodios) y train no es tan malo en entornos simples (puede ser por lo 
 tolerante que es el entorno a politicas diferentes)
@@ -3974,6 +4090,10 @@ en un tramo ultimo relativo no haya convergencia, ese tramo puede estar muy por 
 
 - Usar misma metrica, P(X_i,j>0), que no depende de la magnitud como f para definir todas las 
 formalizaciones: degradacion, precision de seleccion, goodness de politica seleccionada.
+NOTE: P(X_i,j>0) no es comparable, por lo que no podemos usarla para decir que criterio es mejor.
+Si que podriamos usarla para decir como de buena es la seleccion, pero su significado es mas enrevesado:
+'probabilidad de que la politica seleccionada genere mejores episodiso que la mejor'-> 1 mejor 0 peor (1-P(X_i,j>0))
+'probabilidad que la politica seleccionada genere peores episodios que la mejor'-> 1 peor = mejor
 
 - Encontrar el numero de iteraciones por entorno que definene el tiempo suficiente y mas
 para converger.
@@ -3983,17 +4103,13 @@ para alcanzar la convergencia.
 
 - Mantener entornos sin/con unhealthy en termination. Esto da mas versatilidad al conjunto de 
 entornos usados para el entrenamiento.
+NOTE: yo intentaria probar tambien diferentes "resources" (numeros de CPU)
 
 FIXME: 
 - Si recalculo los truth de la misma manera (los guardados para Ant, Humanoid, HumanoidSatndup),
   no salen igual que la vez pasada (puede ser por la version de la libreria que descomprime).
 
-- En el analisis graph_getstarting_by_env salen relaciones sospechosas de precisiones de estimacion
-y costes de estimacion. Comprobar si hay algun error de uso/calculo de datos.
 
-- Estaria bien dejar las clases principales y sus funciones en un fichero main.py, y los experimentos
-individuales que he ido haciendo (intuicion, MAEB, posteriores) que sean un script.py individual que usa
-las clases del main.py.
 '''
 
 
