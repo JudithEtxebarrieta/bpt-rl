@@ -1,0 +1,16 @@
+process_id,T_10
+PPO_HalfCheetah_seed1,3052
+PPO_HalfCheetah_seed2,3969
+PPO_HalfCheetah_seed3,2741
+PPO_Walker2d_seed1,2381
+PPO_Walker2d_seed2,2460
+PPO_Walker2d_seed3,2958
+PPO_Ant_seed1,2546
+PPO_Ant_seed2,3520
+PPO_Ant_seed3,2218
+PPO_Humanoid_seed1,3052
+PPO_Humanoid_seed2,3414
+PPO_HumanoidStandup_seed1,3052
+PPO_HumanoidStandup_seed3,6104
+PPO_Humanoid_seed3,5058
+PPO_HumanoidStandup_seed2,6104

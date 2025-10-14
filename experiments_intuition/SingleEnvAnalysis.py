@@ -11,7 +11,8 @@ experiment_estimates_together=False
 if experiment_getstarting:
     global_deg_metric='best_last_deg'
     local_deg_metric='paired_diff_probpos'
-    analyzer=ProcessIndependentAnalyzer(306,grid_test_n_ep=[500,250,100,50,25,5],global_deg_metric=global_deg_metric,local_deg_metric=local_deg_metric)
+    analyzer=ProcessIndependentAnalyzer(306,grid_train_n_ep=[500,250,100,50,25,5],grid_test_n_ep=[500,250,100,50,25,5],global_deg_metric=global_deg_metric,local_deg_metric=local_deg_metric)
+                             
     analyzer.graph_getstarting_by_env('PPO','HalfCheetah')
     analyzer.graph_getstarting_by_env('PPO','Walker2d')
     analyzer.graph_getstarting_by_env('PPO','Ant')
@@ -23,6 +24,13 @@ if experiment_getstarting:
     analyzer.graph_getstarting_by_env('PPO','Ant',prec_with='paired_diff_probpos')
     analyzer.graph_getstarting_by_env('PPO','Humanoid',prec_with='paired_diff_probpos')
     analyzer.graph_getstarting_by_env('PPO','HumanoidStandup',prec_with='paired_diff_probpos')
+
+    analyzer.graph_getstarting_by_env('PPO','HalfCheetah',conv_range_type='limit')
+    analyzer.graph_getstarting_by_env('PPO','Walker2d',conv_range_type='limit')
+    analyzer.graph_getstarting_by_env('PPO','Ant',conv_range_type='limit')
+    analyzer.graph_getstarting_by_env('PPO','Humanoid',conv_range_type='limit')
+    analyzer.graph_getstarting_by_env('PPO','HumanoidStandup',conv_range_type='limit')
+
 
 #--------------------------------------------------------------------------------------------------
 # Estimaciones truth vs train vs test (peticion de Aritz)
@@ -36,3 +44,5 @@ if experiment_estimates_together:
     analyzer.graph_truth_train_test_together('PPO',envs,seeds,10,opt_conf_per_env=True)
     analyzer.graph_truth_train_test_together('PPO',envs,seeds,10,together_what='truth')
     analyzer.graph_truth_train_test_together('PPO',envs,seeds,10,together_what='truth',opt_conf_per_env=True)
+
+

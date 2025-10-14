@@ -19,7 +19,7 @@ humanidstandup_process_ids=['PPO_HumanoidStandup_seed'+str(seed) for seed in ran
 
 #==================================================================================================
 # Experimentos realizados para ganar intuicion 
-# (esta experimentación esta resumida cronologicamente en experiments_intuition/README/main.pdf )
+# (esta experimentación esta resumida cronologicamente en experiments_intuition/README_intuition/main.pdf )
 #==================================================================================================
 
 class ProcessIndependentAnalysis():
@@ -106,11 +106,11 @@ if experiments_intuition:
 #--------------------------------------------------------------------------------------------------
 if new_experiments:
     #---------------- Comparacion de criterios por entorno
-    global_deg_metric='relative_worsening_to_improvement'
-    local_deg_metric='relative_reward_diff'
+    # global_deg_metric='relative_worsening_to_improvement'
+    # local_deg_metric='relative_reward_diff'
 
-    global_deg_metric='worsening_to_improvement'
-    local_deg_metric='relative_reward_diff'
+    # global_deg_metric='worsening_to_improvement'
+    # local_deg_metric='relative_reward_diff'
 
     global_deg_metric='best_last_deg'
     local_deg_metric='paired_diff_probpos'
@@ -130,6 +130,12 @@ if new_experiments:
     analyzer.graph_best_criteria_by_time_related_deg('Humanoid',humanoid_process_ids,train_n_ep,test_n_ep,test_freq,global_deg_metric,local_deg_metric)
     analyzer.graph_best_criteria_by_time_related_deg('HumanoidStandup',humanidstandup_process_ids,train_n_ep,test_n_ep,test_freq,global_deg_metric,local_deg_metric)
 
+    analyzer.graph_best_criteria_by_time_related_deg('HalfCheetah',halfcheetah_process_ids,train_n_ep,test_n_ep,test_freq,global_deg_metric,local_deg_metric,time_range_type='limit')
+    analyzer.graph_best_criteria_by_time_related_deg('Walker2d',walker2d_process_ids,train_n_ep,test_n_ep,test_freq,global_deg_metric,local_deg_metric,time_range_type='limit')
+    analyzer.graph_best_criteria_by_time_related_deg('Ant',ant_process_ids,train_n_ep,test_n_ep,test_freq,global_deg_metric,local_deg_metric,time_range_type='limit')
+    analyzer.graph_best_criteria_by_time_related_deg('Humanoid',humanoid_process_ids,train_n_ep,test_n_ep,test_freq,global_deg_metric,local_deg_metric,time_range_type='limit')
+    analyzer.graph_best_criteria_by_time_related_deg('HumanoidStandup',humanidstandup_process_ids,train_n_ep,test_n_ep,test_freq,global_deg_metric,local_deg_metric,time_range_type='limit')
+
 #--------------------------------------------------------------------------------------------------
 # Graficas para conclusion final: cuando usar que criterio en funcion del tiempo disponible
 #--------------------------------------------------------------------------------------------------
@@ -145,5 +151,4 @@ if experiments_when_which:
     analyzer.graph_when_which_criteria(walker2d_process_ids,500,32,1,global_deg_metric,local_deg_metric,'Walker2d')
     analyzer.graph_when_which_criteria(humanoid_process_ids,500,32,1,global_deg_metric,local_deg_metric,'Humanoid')
     analyzer.graph_when_which_criteria(humanidstandup_process_ids,500,32,1,global_deg_metric,local_deg_metric,'HumanoidStandup')
-
 
