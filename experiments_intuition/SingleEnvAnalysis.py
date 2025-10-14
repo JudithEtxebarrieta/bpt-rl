@@ -32,6 +32,7 @@ if experiment_estimates_together:
     seeds=list(range(1,11))
 
     analyzer=ProcessIndependentAnalyzer(306)
-    #analyzer.graph_truth_train_test_estimates_together('PPO',envs,seeds,10)
-    analyzer.graph_truth_train_test_estimates_together('PPO',envs,seeds,10,estimates_conv='conv')
-    #analyzer.graph_truth_train_test_estimates_together('PPO',envs,seeds,10,opt_conf_per_env=True)
+    analyzer.graph_truth_train_test_together('PPO',envs,seeds,10)
+    analyzer.graph_truth_train_test_together('PPO',envs,seeds,10,opt_conf_per_env=True)
+    analyzer.graph_truth_train_test_together('PPO',envs,seeds,10,together_what='truth')
+    analyzer.graph_truth_train_test_together('PPO',envs,seeds,10,together_what='truth',opt_conf_per_env=True)
