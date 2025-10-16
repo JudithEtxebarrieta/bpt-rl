@@ -677,7 +677,10 @@ class EvolutionGenerator:
         EER_real_best=max(EER_list)
         EER_criteria_best=EER_list[n_policy-self.start_iter+1]
 
-        return EER_criteria_best/EER_real_best
+        if EER_criteria_best==0 and EER_real_best==0:
+            return 1
+        else:
+            return EER_criteria_best/EER_real_best
         
     #----------------------------------------------------------------------------------------------
     # Criterios de seleccion
@@ -696,6 +699,7 @@ class EvolutionGenerator:
         return last_policy
 
     def best_policy_training(self,elapsed_time,n_traj_ep):
+
         # Lista de EER estimados con datos de train de la secunencia de politicas visitada hasta el momento
         estimated_EER_seq=self.df_train_estimates[(self.df_train['time_seconds']<=elapsed_time) & (self.df_train['time_seconds']>=self.start_time)][str(n_traj_ep)+'_traj_ep'].tolist()
 
@@ -833,7 +837,26 @@ class EvolutionGenerator:
         else:
             return y_eff
         
+    def truth_evolution(self,x_times,n_ep=None,freq=None,criteria='last'):
 
+        y_truth=[]
+
+        for time in x_times:
+            if criteria=='truth_best':
+                policy_id=self.truth_best_policy(time)
+            if criteria=='worst':
+                policy_id=self.worst_policy(time)
+            if criteria=='last':
+                policy_id=self.last_policy(time)
+            if criteria=='best_train':
+                policy_id=self.best_policy_training(time,n_ep)
+            if criteria=='best_val':
+                policy_id,_=self.best_policy_validation(time,n_ep,freq)
+            
+            y_truth.append(self.df_test_estimates[self.df_test_estimates['n_policy']==policy_id]['truth'].values[0])
+        
+        return y_truth
+        
 class EvolutionGrapher():
     '''
     Las funciones de esta clase permiten representar graficamente la evolucion de diferentes metricas.
@@ -1696,7 +1719,7 @@ class EstimationAnalyzer():
         plt.savefig('experiments_intuition/results/MAEB/'+self.algo+'_'+self.env+'_seed'+str(self.seed)+'_estimation_cost_analysis.pdf')
         plt.close()
    
-    def plot_truth_train_test_estimates_together(self,perc_val,ax,title,train_n_ep,test_n_ep,estimates_conv,
+    def plot_truth_train_test_estimates_together(self,perc_val,ax,title,train_n_ep,test_n_ep,
                                                first_graph=False,first_row=False,first_column=False,last_row=False):
         '''
         Esta funcion esta pensada para ser llamada por graph_truth_train_test_estimates_together de la clase 
@@ -1718,43 +1741,135 @@ class EstimationAnalyzer():
         colors=list(mcolors.TABLEAU_COLORS.keys())
         x=range(self.iter_max)
         
-        if estimates_conv=='estimates':
-            # Evolucion de estimaciones truth
-            y_last=self.generator.df_test_estimates['truth'][:self.iter_max].tolist()
-            x_dots,y_dots=best_dots(x,y_last)
-            ax.plot(x, y_last, label="Truth",color=colors[0])
+        # Evolucion de estimaciones truth
+        y_last=self.generator.df_test_estimates['truth'][:self.iter_max].tolist()
+        x_dots,y_dots=best_dots(x,y_last)
+        ax.plot(x, y_last, label="Truth",color=colors[0])
 
-            # Evolucion de estimaciones train
-            y_train=self.generator.df_train_estimates[str(train_n_ep)+'_traj_ep'][:self.iter_max].tolist()
-            x_dots,y_dots=best_dots(x,y_train)
-            ax.plot(x, y_train, label="Train",color=colors[1])
-            ax.scatter(x_dots,y_dots, color=colors[1], s=25, zorder=5, label="max Train")
-            
-            # Evolucion de estimaciones test (que suponen un coste maximo de perc_val frente a aprender)
-            y_test=[Converter.compress_decompress_list(i,compress=False)[0] for i in self.generator.df_test_estimates[str(test_n_ep)+'_val_ep']]
-            x_dots,y_dots=best_dots(x,y_test)
-            ax.plot(x, y_test, label="Test ("+str(perc_val)+'% cost)',color=colors[2],alpha=0.5)
-            ax.scatter(x_dots,y_dots, color=colors[2], s=25, zorder=5, label="max "+"Test ("+str(perc_val)+'% cost)')
+        # Limites a (donde empieza a aprender) y b (donde se termina de aprender)
+        a,b=None,None
 
-        ############# Evolucion de metricas de convergencia
-        if estimates_conv=='conv':
-                            
-            if title in ['HalfCheetah','Walker2d']:
-                y_ent=self.generator.df_train['entropy_loss'][:self.iter_max].tolist()
-                ax.plot(x, y_ent, label="Entropy",color=colors[3])
+        for i in range(len(y_last)):
+            if y_last[i]-y_last[0]<=np.std(y_last[:i+1]):
+                if a==None or i-a<int(len(y_last)*0.1):
+                    a=i
 
-                y_ent=self.generator.df_train['KL_div'][:self.iter_max].tolist()
-                ax.plot(x, y_ent, label="KL_div",color=colors[4])
+            if y_last[-1]-y_last[-1-i]<=np.std(y_last[-i-1:]):
+                if b==None or b-len(y_last)+i<int(len(y_last)*0.1):
+                    b=len(y_last)-i
+
+        ax.axvline(x=a, color='red', linestyle='-', linewidth=2,label='start learning')
+        ax.axvline(x=b, color='black', linestyle='-', linewidth=2,label='end learning')
+        
+
+        # Evolucion de estimaciones train
+        y_train=self.generator.df_train_estimates[str(train_n_ep)+'_traj_ep'][:self.iter_max].tolist()
+        x_dots,y_dots=best_dots(x,y_train)
+        ax.plot(x, y_train, label="Train",color=colors[1])
+        ax.scatter(x_dots,y_dots, color=colors[1], s=25, zorder=5, label="max Train")
+        
+        # Evolucion de estimaciones test (que suponen un coste maximo de perc_val frente a aprender)
+        y_test=[Converter.compress_decompress_list(i,compress=False)[0] for i in self.generator.df_test_estimates[str(test_n_ep)+'_val_ep']]
+        x_dots,y_dots=best_dots(x,y_test)
+        ax.plot(x, y_test, label="Test ("+str(perc_val)+'% cost)',color=colors[2],alpha=0.5)
+        ax.scatter(x_dots,y_dots, color=colors[2], s=25, zorder=5, label="max "+"Test ("+str(perc_val)+'% cost)')
             
         if last_row:
             ax.set_xlabel("Learning iteration")
-        if first_column and estimates_conv=='estimates':
+        if first_column:
             ax.set_ylabel("Estimated reward")
         if first_graph:
             ax.legend(loc="center left", bbox_to_anchor=(-0.9, 0.5))
         if first_row:
-            ax.set_title(title+'(train_n_ep='+str(train_n_ep)+'; test_n_ep='+str(test_n_ep)+')')
+            ax.set_title(title+'\n(train_n_ep='+str(train_n_ep)+'; test_n_ep='+str(test_n_ep)+')')
         ax.grid(True)
+
+    def plot_truth_evolution_of_selection(self,ax1,ax2,train_n_ep,test_n_ep,env,seed,
+                                          first_graph=False,first_row=False,last_row=False,first_column=False):
+        
+        df_train=Estimator.read_create_estimates_csv('experiments_intuition/results/SingleEnvAnalysis/data/df_train_truth.csv',self.iter_max)
+        df_test=Estimator.read_create_estimates_csv('experiments_intuition/results/SingleEnvAnalysis/data/df_test_truth.csv',self.iter_max)
+
+        colors=list(mcolors.TABLEAU_COLORS.keys())
+        x=range(self.iter_max)
+        x_times=self.generator.df_train['time_seconds'].tolist()
+        self.generator.start_time=x_times[0]
+        self.generator.start_iter=1
+
+
+        truth_last=self.generator.df_test_estimates['truth'].tolist()
+        
+        if env+str(seed)+'_'+str(train_n_ep) in df_train.columns:
+            truth_train=df_train[env+str(seed)+'_'+str(train_n_ep)].tolist()
+        else:
+            truth_train=self.generator.truth_evolution(x_times,n_ep=train_n_ep,criteria='best_train')
+            df_train[env+str(seed)+'_'+str(train_n_ep)]=truth_train
+
+        if env+str(seed)+'_'+str(test_n_ep) in df_test.columns:
+            truth_test=df_test[env+str(seed)+'_'+str(test_n_ep)].tolist()
+        else:
+            truth_test=self.generator.truth_evolution(x_times,n_ep=test_n_ep,freq=x_times,criteria='best_val')
+            df_test[env+str(seed)+'_'+str(test_n_ep)]=truth_test
+
+        
+        df_train.to_csv('experiments_intuition/results/SingleEnvAnalysis/data/df_train_truth.csv',index=False)
+        df_test.to_csv('experiments_intuition/results/SingleEnvAnalysis/data/df_test_truth.csv',index=False)
+
+        # Limites a (donde empieza a aprender) y b (donde se termina de aprender)
+        df_time_regions=Converter.generate_df('experiments_intuition/results/SingleEnvAnalysis/data/df_time_regions.csv',
+                                       ['process_id','init','start_learn','start_conv','conv'])
+
+        a,b=None,None
+        for i in range(len(truth_last)):
+            if truth_last[i]-truth_last[0]<=np.std(truth_last[:i+1]) :
+                if a==None or i-a<int(len(truth_last)*0.1):
+                    a=i
+            if truth_last[-1]-truth_last[-1-i]<=np.std(truth_last[-i-1:]) :
+                if b==None or b-len(truth_last)+i<int(len(truth_last)*0.1):
+                    b=len(truth_last)-i
+ 
+
+        ax1.axvline(x=a, color='red', linestyle='-', linewidth=2,label='start learning')
+        ax1.axvline(x=b, color='black', linestyle='-', linewidth=2,label='end learning')
+
+        if 'PPO_'+env+'_seed'+str(seed) not in df_time_regions['process_id'].values:
+            df_time_regions.loc[len(df_time_regions)] = ['PPO_'+env+'_seed'+str(seed),0,a,b,self.iter_max]
+            df_time_regions.to_csv('experiments_intuition/results/SingleEnvAnalysis/data/df_time_regions.csv', index=False)
+
+        # Para dibujar curvas
+        ax1.plot(x, truth_last, label="Last",color=colors[0])
+        ax1.plot(x, truth_train, label="Train",color=colors[1])
+        ax1.plot(x, truth_test, label="Test",color=colors[2])
+
+        ax1.set_xlim(-5,self.iter_max+5)
+
+        if last_row:
+            ax2.set_xlabel("Learning iteration")
+        if first_column:
+            ax1.set_ylabel("Truth reward of selected policy ")
+        if first_graph:
+            ax1.legend(loc="center left", bbox_to_anchor=(-0.9, 0.5))
+        if first_row:
+            ax1.set_title(env+'\n(train_n_ep='+str(train_n_ep)+'; test_n_ep='+str(test_n_ep)+')')
+        ax1.grid(True)
+
+        # Para dibujar ranking coloreado
+        colors_labels=['blue', 'orange', 'green']
+
+        data = np.vstack([truth_last, truth_train, truth_test]) 
+        ranking = np.argsort(data, axis=0)[::-1, :] # Matriz de indices de ranking
+        matrix_colors = np.empty((3, data.shape[1]), dtype=object) # matriz de colores segun el ranking
+        for row in range(3):
+            for col in range(data.shape[1]):
+                matrix_colors[row, col] = colors_labels[ranking[row, col]]
+
+        ax2.imshow(
+                [[{'blue':0, 'orange':1, 'green':2}[c] for c in row] for row in matrix_colors],
+                cmap=plt.matplotlib.colors.ListedColormap(colors_labels),aspect='auto', interpolation='nearest'
+            )
+        ax2.set_aspect(5)
+        ax2.set_xticks([])
+        ax2.set_yticks([])
 
     def graph_invest_time_evolution(self,list_test_n_ep):
 
@@ -2193,10 +2308,22 @@ class ProcessIndependentAnalyzer():
                  all_possible_conf=False, # Para generar datos relacionados con el analisis de sensibilidad
                  grid_train_n_ep=None,grid_test_n_ep=None,grid_test_freq=None # Para almacenar datos relacionados con el analisis para ganar intuicion
                  ):
+        
+        #TODO: este __init__ me esta dando mucha lata por contener muchos calculos de deg,mag,eff asociados a condifuraciones que considerabamos
+        #para el analisis intuitivo. Creo que se podria simplificar al if ultimo (que genera estos calculos solo para las configuraciones indicadas).
+
+        #TODO: hay secciones que ponen ##NEW, y es porque he vuelto a recarcular los deg,mag,eff partiendo desde la iteracion 0, sin considerar el 
+        #start_iter (que antes era el 10%, para quitarnos la primera parte aleatoria de aprendizaje).
+
+
 
         start_iter=int(iter_max*perc_time_start)-1
         self.iter_max=iter_max
         self.start_iter=start_iter
+
+        ########NEW
+        start_iter=0
+        ################
         
         # Mirar si ya se ha llamado a esta funcion previamente (si existen las bases de datos necesrias, si no inicializarlas)
         df_degradation=Estimator.read_create_estimates_csv('experiments_intuition/results/CriteriaComparison/data/deg_mag/level_degradation.csv',iter_max,start_iter)
@@ -2213,8 +2340,8 @@ class ProcessIndependentAnalyzer():
         df_test_ep_rew=Estimator.read_create_estimates_csv('experiments_intuition/results/CriteriaComparison/data/deg_mag/criteria_best_test_ep_rew.csv',iter_max,start_iter)
 
 
-        df_criteria_start_end=Converter.generate_df('experiments_intuition/results/CriteriaComparison/data/test_start_end_perc_time.csv',
-                                                ['process_id','test_conf','start_test','end_test','perc_good','invest_time','last_good','last_time'])
+        df_criteria_start_end=Converter.generate_df('experiments_intuition/results/CriteriaComparison/data/criteria_start_end_good_time.csv',
+                                                    ['process_id','train_conf','test_conf','end_last','start_train','end_train','start_test','end_test','perc_good','perc_time_val_learn','invest_time'] )
         df_test_when_train_change=Converter.generate_df('experiments_intuition/results/CriteriaComparison/data/test_when_train_change.csv',
                                                 ['process_id','test_n_ep','train_n_ep','test_applied','perc_good','invest_time'])
         
@@ -2222,6 +2349,8 @@ class ProcessIndependentAnalyzer():
         # Leer base de datos donde se almacenan las mejores configuraciones de los criterios por proceso (criteria_conf_by_process.csv)
         df_conf=pd.read_csv('experiments_intuition/results/SingleProcessAnalysis/data/criteria_conf_by_process.csv')
         df_test_affordable_conf=pd.read_csv('experiments_intuition/results/SingleProcessAnalysis/data/test_affordable_n_ep_by_process.csv')
+
+        
         '''
         # Calcular y guardar por proceso: evolucion de nivel de degradacion y evolucion de magnitudes por criterio (si no estan ya guardados)
         for row in tqdm(range(df_conf.shape[0])):# Aqui estan guardados todos los procesos que consideraremos
@@ -2241,21 +2370,33 @@ class ProcessIndependentAnalyzer():
             generator=EvolutionGenerator(algo,env,seed,'16cpu1gpu_mejorado',perc_time_start)
             x_times=generator.df_train['time_seconds'].tolist()[start_iter:iter_max]  
             min_time=generator.df_train.loc[start_iter,'time_seconds']
+
+            #############3NEW
+            generator.start_iter=1
+            generator.start_time=generator.df_train['time_seconds'].tolist()[0]
+            ###########
             
             df_last_eff[process_id+'_'+local_deg_metric]=generator.effectiveness_evolution(x_times,criteria='last',normalized=True,local_deg_metric=local_deg_metric)
+            
             # Tamaños de episodios
             if process_id not in list(df_test_ep_len.columns):  
                 df_test_ep_len[process_id]=[np.mean(Converter.compress_decompress_list(i,compress=False)[500:]) for i in generator.df_test.loc[start_iter:iter_max,'ep_lens']]
             if process_id not in list(df_test_ep_rew.columns):  
                 df_test_ep_rew[process_id]=[np.mean(Converter.compress_decompress_list(i,compress=False)[500:]) for i in generator.df_test.loc[start_iter:iter_max,'ep_rewards']]
             
+            #NEW
+            df_last_mag[process_id]=generator.magnitude_evolution(x_times,criteria='last',normalized=True)
+            df_last_eff[process_id]=generator.effectiveness_evolution(x_times,criteria='last',normalized=True)
             
+
+           
             # Si los datos del proceso no estan ya almacenados calcularlos y almacenarlos (configuraciones optimas en cada proceso)
             
             if  process_id not in list(df_degradation.columns):
                 
                 # Calcular y guardar las evolucion de nivel de degradacion
                 df_degradation[process_id+'_'+global_deg_metric+'_'+local_deg_metric]=generator.degradation_evolution(x_times,global_deg_metric,local_deg_metric)
+                
                 # Configuracion optima de los criterios train y test 
                 train_n_ep,test_n_ep,test_freq=df_conf.loc[row,['train_n_ep','test_n_ep','test_freq']]
 
@@ -2334,7 +2475,7 @@ class ProcessIndependentAnalyzer():
                             df_test_eff[process_id+'_'+str(n_ep)+'_'+local_deg_metric]=generator.effectiveness_evolution(x_times,n_ep=n_ep,freq=x_times,criteria='best_val',normalized=True,
                                                                                                                                                             local_deg_metric=local_deg_metric)[0]
                     
-                    
+                 
             
             print('if de intuicion test listo')  
             
@@ -2356,10 +2497,10 @@ class ProcessIndependentAnalyzer():
             df_test_ep_rew.to_csv('experiments_intuition/results/CriteriaComparison/data/deg_mag/criteria_best_test_ep_rew.csv',index=False)
         
         '''
-
-        df_criteria_start_end.to_csv('experiments_intuition/results/CriteriaComparison/data/test_start_end_perc_time.csv', index=False)
+        
+        df_criteria_start_end.to_csv('experiments_intuition/results/CriteriaComparison/data/criteria_start_end_good_time.csv', index=False)
         df_test_when_train_change.to_csv('experiments_intuition/results/CriteriaComparison/data/test_when_train_change.csv',index=False)
-
+        
         self.df_degradation=df_degradation
 
         self.df_last_mag=df_last_mag
@@ -2381,8 +2522,6 @@ class ProcessIndependentAnalyzer():
         self.df_test_when_train_change=df_test_when_train_change
         self.df_test_affordable_conf=df_test_affordable_conf
         self.df_conf=df_conf
-
-
 
     #===============================================================================================
     # Analisis comparativos de criterios en multiples procesos al mismo tiempo
@@ -2758,12 +2897,12 @@ class ProcessIndependentAnalyzer():
 
             idx_best_last=df_seq_size.iloc[:, 3]<df_seq_size.iloc[:, 4]
             matrix_diff_last_train[0]+=Converter.from_lists_best_worst_to_relative_diff(df_seq_size.loc[idx_best_last,column_name[3]],df_seq_size.loc[idx_best_last,column_name[4]])
-            matrix_eff_last_train[0]+=list(df_seq_size.loc[idx_best_last,column_name[6]])
-            matrix_eff_last_train_inv[0]+=list(df_seq_size.loc[idx_best_last,column_name[7]])
+            matrix_eff_last_train[0].append(list(df_seq_size.loc[idx_best_last,column_name[6]]))
+            matrix_eff_last_train_inv[0].append(list(df_seq_size.loc[idx_best_last,column_name[7]]))
             idx_best_train=df_seq_size.iloc[:, 3]>df_seq_size.iloc[:, 4]
             matrix_diff_last_train[1]+=Converter.from_lists_best_worst_to_relative_diff(df_seq_size.loc[idx_best_train,column_name[4]],df_seq_size.loc[idx_best_train,column_name[3]])
-            matrix_eff_last_train[1]+=list(df_seq_size.loc[idx_best_train,column_name[7]])
-            matrix_eff_last_train_inv[1]+=list(df_seq_size.loc[idx_best_train,column_name[6]])
+            matrix_eff_last_train[1].append(list(df_seq_size.loc[idx_best_train,column_name[7]]))
+            matrix_eff_last_train_inv[1].append(list(df_seq_size.loc[idx_best_train,column_name[6]]))
 
 
             # Last vs test
@@ -2774,12 +2913,12 @@ class ProcessIndependentAnalyzer():
 
             idx_best_last=df_seq_size.iloc[:, 3]<df_seq_size.iloc[:, 5]
             matrix_diff_last_test[0]+=Converter.from_lists_best_worst_to_relative_diff(df_seq_size.loc[idx_best_last,column_name[3]],df_seq_size.loc[idx_best_last,column_name[5]])
-            matrix_eff_last_test[0]+=list(df_seq_size.loc[idx_best_last,column_name[6]])
-            matrix_eff_last_test_inv[0]+=list(df_seq_size.loc[idx_best_last,column_name[8]])
+            matrix_eff_last_test[0].append(list(df_seq_size.loc[idx_best_last,column_name[6]]))
+            matrix_eff_last_test_inv[0].append(list(df_seq_size.loc[idx_best_last,column_name[8]]))
             idx_best_test=df_seq_size.iloc[:, 3]>df_seq_size.iloc[:, 5]
             matrix_diff_last_test[1]+=Converter.from_lists_best_worst_to_relative_diff(df_seq_size.loc[idx_best_test,column_name[5]],df_seq_size.loc[idx_best_test,column_name[3]])
-            matrix_eff_last_test[1]+=list(df_seq_size.loc[idx_best_test,column_name[8]])
-            matrix_eff_last_test_inv[1]+=list(df_seq_size.loc[idx_best_test,column_name[6]])
+            matrix_eff_last_test[1].append(list(df_seq_size.loc[idx_best_test,column_name[8]]))
+            matrix_eff_last_test_inv[1].append(list(df_seq_size.loc[idx_best_test,column_name[6]]))
 
             # train vs test
             #train_perc=((df_seq_size.iloc[:, 4]<df_seq_size.iloc[:, 5]).sum()+(df_seq_size.iloc[:, 4]==df_seq_size.iloc[:, 5]).sum()/2)/df_seq_size.shape[0]
@@ -2789,12 +2928,101 @@ class ProcessIndependentAnalyzer():
 
             idx_best_train=df_seq_size.iloc[:, 4]<df_seq_size.iloc[:, 5]
             matrix_diff_train_test[0]+=Converter.from_lists_best_worst_to_relative_diff(df_seq_size.loc[idx_best_train,column_name[4]],df_seq_size.loc[idx_best_train,column_name[5]])
-            matrix_eff_train_test[0]+=list(df_seq_size.loc[idx_best_train,column_name[7]])
-            matrix_eff_train_test_inv[0]+=list(df_seq_size.loc[idx_best_train,column_name[8]])
+            matrix_eff_train_test[0].append(list(df_seq_size.loc[idx_best_train,column_name[7]]))
+            matrix_eff_train_test_inv[0].append(list(df_seq_size.loc[idx_best_train,column_name[8]]))
             idx_best_test=df_seq_size.iloc[:, 4]>df_seq_size.iloc[:, 5]
             matrix_diff_train_test[1]+=Converter.from_lists_best_worst_to_relative_diff(df_seq_size.loc[idx_best_test,column_name[5]],df_seq_size.loc[idx_best_test,column_name[4]])
-            matrix_eff_train_test[1]+=list(df_seq_size.loc[idx_best_test,column_name[8]])
-            matrix_eff_train_test_inv[1]+=list(df_seq_size.loc[idx_best_test,column_name[7]])
+            matrix_eff_train_test[1].append(list(df_seq_size.loc[idx_best_test,column_name[8]]))
+            matrix_eff_train_test_inv[1].append(list(df_seq_size.loc[idx_best_test,column_name[7]]))
+
+            matrix_deg_intervals.append([ sum((deg_intervals[i] <= deg <= deg_intervals[i-1] if i == 1 else deg_intervals[i] <= deg < deg_intervals[i-1]) for deg in df_seq_size['degradation_level'] )  for i in range(1,len(deg_intervals))])
+    
+        return np.array(matrix_perc_last_train),np.array(matrix_perc_last_test),np.array(matrix_perc_train_test),matrix_diff_last_train,matrix_diff_last_test,matrix_diff_train_test,matrix_eff_last_train,matrix_eff_last_test,matrix_eff_train_test,matrix_eff_last_train_inv,matrix_eff_last_test_inv,matrix_eff_train_test_inv,np.array(matrix_deg_intervals), ['['+str(round(deg_intervals[i],1))+','+str(round(deg_intervals[i-1],1))+')' for i in range(1,len(deg_intervals))], df
+ 
+    def matrix_best_criteria_by_time_limit(self,process_ids,train_grid_n_ep,test_grid_n_ep,test_grid_freq,global_deg_metric,local_deg_metric):
+        df=self.MAEB2_generate_criteria_rank_by_time_data(process_ids,train_grid_n_ep,test_grid_n_ep,test_grid_freq,global_deg_metric,local_deg_metric)
+
+        seq_limit_intervals=['init','start_learn','start_conv','conv']
+
+        # Aqui se almacenaran los datos para las barras apiladas
+        matrix_perc_last_train,matrix_diff_last_train,matrix_eff_last_train,matrix_eff_last_train_inv=[],[[],[]],[[],[]],[[],[]]
+        matrix_perc_last_test,matrix_diff_last_test,matrix_eff_last_test,matrix_eff_last_test_inv=[],[[],[]],[[],[]],[[],[]]
+        matrix_perc_train_test,matrix_diff_train_test,matrix_eff_train_test,matrix_eff_train_test_inv=[],[[],[]],[[],[]],[[],[]]
+
+        deg_intervals=list(np.arange(0,1+1/3,1/3))[::-1]
+        matrix_deg_intervals=[] # Aqui se almacenaran "las distribuciones" de los niveles de degradacion por intervalo de tamaños de secuencia
+
+
+        column_name=df.columns.tolist()
+        for i in range(1,len(seq_limit_intervals)):
+
+            # Seleccionar el subconjunto de secuencias dentro del rango de tiempo de aprendizaje actual
+            def get_interest_rows(conv_range):
+                df_time_regions=pd.read_csv('experiments_intuition/results/SingleEnvAnalysis/data/df_time_regions.csv')
+
+                df_current=pd.DataFrame(columns=df.columns)
+
+                for process_id in process_ids:
+
+                    low_limit=df_time_regions[df_time_regions['process_id']==process_id][conv_range[0]].values[0]
+                    up_limit=df_time_regions[df_time_regions['process_id']==process_id][conv_range[1]].values[0]
+
+                    n_policies=list(range(low_limit,up_limit+1))
+                    df_new=df[(df['process_id']==process_id) & df['seq_size'].isin(n_policies)]
+
+                    df_current = pd.concat([df_current, df_new], axis=0, ignore_index=True)
+
+                return df_current
+                
+            df_seq_size=get_interest_rows([seq_limit_intervals[i-1],seq_limit_intervals[i]])
+
+            #['process_id','seq_size','degradation_level','mag_last']+['mag_'+i for i in train_suffix+test_suffix]+['eff_last']+['eff_'+i for i in train_suffix+test_suffix]
+
+            # Last vs train
+            #last_perc=((df_seq_size.iloc[:, 3]<df_seq_size.iloc[:, 4]).sum()+(df_seq_size.iloc[:, 3]==df_seq_size.iloc[:, 4]).sum()/2)/df_seq_size.shape[0] # Los empates suman 0.5
+            last_perc=(df_seq_size.iloc[:, 3]<df_seq_size.iloc[:, 4]).sum()/df_seq_size.shape[0]
+            draw_perc=(df_seq_size.iloc[:, 3]==df_seq_size.iloc[:, 4]).sum()/df_seq_size.shape[0]
+            matrix_perc_last_train.append([last_perc,draw_perc,1-last_perc-draw_perc])
+
+            idx_best_last=df_seq_size.iloc[:, 3]<df_seq_size.iloc[:, 4]
+            matrix_diff_last_train[0]+=Converter.from_lists_best_worst_to_relative_diff(df_seq_size.loc[idx_best_last,column_name[3]],df_seq_size.loc[idx_best_last,column_name[4]])
+            matrix_eff_last_train[0].append(list(df_seq_size.loc[idx_best_last,column_name[6]]))
+            matrix_eff_last_train_inv[0].append(list(df_seq_size.loc[idx_best_last,column_name[7]]))
+            idx_best_train=df_seq_size.iloc[:, 3]>df_seq_size.iloc[:, 4]
+            matrix_diff_last_train[1]+=Converter.from_lists_best_worst_to_relative_diff(df_seq_size.loc[idx_best_train,column_name[4]],df_seq_size.loc[idx_best_train,column_name[3]])
+            matrix_eff_last_train[1].append(list(df_seq_size.loc[idx_best_train,column_name[7]]))
+            matrix_eff_last_train_inv[1].append(list(df_seq_size.loc[idx_best_train,column_name[6]]))
+
+
+            # Last vs test
+            #last_perc=((df_seq_size.iloc[:, 3]<df_seq_size.iloc[:, 5]).sum()+(df_seq_size.iloc[:, 3]==df_seq_size.iloc[:, 5]).sum()/2)/df_seq_size.shape[0]
+            last_perc=(df_seq_size.iloc[:, 3]<df_seq_size.iloc[:, 5]).sum()/df_seq_size.shape[0]
+            draw_perc=(df_seq_size.iloc[:, 3]==df_seq_size.iloc[:, 5]).sum()/df_seq_size.shape[0]
+            matrix_perc_last_test.append([last_perc,draw_perc,1-last_perc-draw_perc])
+
+            idx_best_last=df_seq_size.iloc[:, 3]<df_seq_size.iloc[:, 5]
+            matrix_diff_last_test[0]+=Converter.from_lists_best_worst_to_relative_diff(df_seq_size.loc[idx_best_last,column_name[3]],df_seq_size.loc[idx_best_last,column_name[5]])
+            matrix_eff_last_test[0].append(list(df_seq_size.loc[idx_best_last,column_name[6]]))
+            matrix_eff_last_test_inv[0].append(list(df_seq_size.loc[idx_best_last,column_name[8]]))
+            idx_best_test=df_seq_size.iloc[:, 3]>df_seq_size.iloc[:, 5]
+            matrix_diff_last_test[1]+=Converter.from_lists_best_worst_to_relative_diff(df_seq_size.loc[idx_best_test,column_name[5]],df_seq_size.loc[idx_best_test,column_name[3]])
+            matrix_eff_last_test[1].append(list(df_seq_size.loc[idx_best_test,column_name[8]]))
+            matrix_eff_last_test_inv[1].append(list(df_seq_size.loc[idx_best_test,column_name[6]]))
+
+            # train vs test
+            #train_perc=((df_seq_size.iloc[:, 4]<df_seq_size.iloc[:, 5]).sum()+(df_seq_size.iloc[:, 4]==df_seq_size.iloc[:, 5]).sum()/2)/df_seq_size.shape[0]
+            train_perc=(df_seq_size.iloc[:, 4]<df_seq_size.iloc[:, 5]).sum()/df_seq_size.shape[0]
+            draw_perc=(df_seq_size.iloc[:, 4]==df_seq_size.iloc[:, 5]).sum()/df_seq_size.shape[0]
+            matrix_perc_train_test.append([train_perc,draw_perc,1-train_perc-draw_perc])
+
+            idx_best_train=df_seq_size.iloc[:, 4]<df_seq_size.iloc[:, 5]
+            matrix_diff_train_test[0]+=Converter.from_lists_best_worst_to_relative_diff(df_seq_size.loc[idx_best_train,column_name[4]],df_seq_size.loc[idx_best_train,column_name[5]])
+            matrix_eff_train_test[0].append(list(df_seq_size.loc[idx_best_train,column_name[7]]))
+            matrix_eff_train_test_inv[0].append(list(df_seq_size.loc[idx_best_train,column_name[8]]))
+            idx_best_test=df_seq_size.iloc[:, 4]>df_seq_size.iloc[:, 5]
+            matrix_diff_train_test[1]+=Converter.from_lists_best_worst_to_relative_diff(df_seq_size.loc[idx_best_test,column_name[5]],df_seq_size.loc[idx_best_test,column_name[4]])
+            matrix_eff_train_test[1].append(list(df_seq_size.loc[idx_best_test,column_name[8]]))
+            matrix_eff_train_test_inv[1].append(list(df_seq_size.loc[idx_best_test,column_name[7]]))
 
             matrix_deg_intervals.append([ sum((deg_intervals[i] <= deg <= deg_intervals[i-1] if i == 1 else deg_intervals[i] <= deg < deg_intervals[i-1]) for deg in df_seq_size['degradation_level'] )  for i in range(1,len(deg_intervals))])
     
@@ -3262,6 +3490,10 @@ class ProcessIndependentAnalyzer():
             ax.set_xticklabels(labels)
             ax.set_ylim(-0.1,1.1)
 
+        matrix_eff_last_train=[np.array(matrix_eff_last_train[0]).flatten(),np.array(matrix_eff_last_train[1]).flatten()]
+        matrix_eff_last_test=[np.array(matrix_eff_last_test[0]).flatten(),np.array(matrix_eff_last_test[1]).flatten()]
+        matrix_eff_train_test=[np.array(matrix_eff_train_test[0]).flatten(),np.array(matrix_eff_train_test[1]).flatten()]
+
         violinplot_2criteria(fig.add_subplot(gs[2:4, 2]),matrix_diff_last_train,[colors[0],colors[1]],[criteria_labels[0],criteria_labels[1]])
         violinplot_2criteria(fig.add_subplot(gs[4:6, 2]),matrix_diff_last_test,[colors[0],colors[2]],[criteria_labels[0],criteria_labels[2]])
         violinplot_2criteria(fig.add_subplot(gs[6:8, 2]),matrix_diff_train_test,[colors[1],colors[2]],[criteria_labels[1],criteria_labels[2]])
@@ -3272,15 +3504,24 @@ class ProcessIndependentAnalyzer():
 
         plt.savefig('experiments_intuition/results/MAEB/vs2_'+global_deg_metric+'_'+local_deg_metric+'_'+title+'.pdf')
 
-    def graph_best_criteria_by_time_related_deg(self,title,process_ids,train_grid_n_ep,test_grid_n_ep,test_grid_freq,global_deg_metric='best_last_deg',local_deg_metric='paired_diff_probpos'):
+    def graph_best_criteria_by_time_related_deg(self,title,process_ids,train_grid_n_ep,test_grid_n_ep,test_grid_freq,
+                                                global_deg_metric='best_last_deg',local_deg_metric='paired_diff_probpos',
+                                                time_range_type='perc'):
         
         # Generar matriz numerica para la grafica
-        matrix_last_train,matrix_last_test,matrix_train_test,_,_,_,matrix_eff_last_train,matrix_eff_last_test,matrix_eff_train_test,matrix_eff_last_train_inv,matrix_eff_last_test_inv,matrix_eff_train_test_inv,matrix_deg,deg_labels,df=self.MAEB2_matrix_best_criteria_by_time(process_ids,train_grid_n_ep,test_grid_n_ep,test_grid_freq,global_deg_metric,local_deg_metric)
-
-        fig = plt.figure(figsize=(6,6))
-        plt.subplots_adjust(left=0.1,bottom=0.05,right=0.97,top=0.92,wspace=0.39,hspace=0.15)
-        gs = gridspec.GridSpec(10, 3, figure=fig, height_ratios=[2,1,3,3,0.5,3,3,0.5,3,3],width_ratios=[3,3,3])
-
+        if time_range_type=='perc':
+            matrix_last_train,matrix_last_test,matrix_train_test,_,_,_,matrix_eff_last_train,matrix_eff_last_test,matrix_eff_train_test,matrix_eff_last_train_inv,matrix_eff_last_test_inv,matrix_eff_train_test_inv,matrix_deg,deg_labels,df=self.MAEB2_matrix_best_criteria_by_time(process_ids,train_grid_n_ep,test_grid_n_ep,test_grid_freq,global_deg_metric,local_deg_metric)
+            fig = plt.figure(figsize=(7,6))
+            plt.subplots_adjust(left=0.1,bottom=0.05,right=0.97,top=0.92,wspace=0.39,hspace=0.15)
+            gs = gridspec.GridSpec(10, 3, figure=fig, height_ratios=[2,1,3,3,0.5,3,3,0.5,3,3],width_ratios=[3,3,3])
+        if time_range_type=='limit':
+            matrix_last_train,matrix_last_test,matrix_train_test,_,_,_,matrix_eff_last_train,matrix_eff_last_test,matrix_eff_train_test,matrix_eff_last_train_inv,matrix_eff_last_test_inv,matrix_eff_train_test_inv,matrix_deg,deg_labels,df=self.matrix_best_criteria_by_time_limit(process_ids,train_grid_n_ep,test_grid_n_ep,test_grid_freq,global_deg_metric,local_deg_metric)
+            fig = plt.figure(figsize=(6,6))
+            plt.subplots_adjust(left=0.1,bottom=0.05,right=0.97,top=0.92,wspace=0.39,hspace=0.15)
+            gs = gridspec.GridSpec(10, 3, figure=fig, height_ratios=[2,1,3,3,0.5,3,3,0.5,3,3],width_ratios=[3,3,3])
+            
+        
+        fig.add_subplot(gs[0, 1]).set_title(title,fontsize=11)
         fig.add_subplot(gs[0, 0]).set_title('Degradation distribution\nper time interval',fontsize=9)
         fig.add_subplot(gs[2, 0]).set_title('How many times is each\ncriterion the best',fontsize=9)
         fig.add_subplot(gs[9, 0]).set_xlabel("Percentage of total elapsed\nlearning iterations",fontsize=9)
@@ -3320,7 +3561,11 @@ class ProcessIndependentAnalyzer():
                 bottoms += matrix[:, i] 
             ax.set_xticks(np.arange(len(matrix)+1)-.5)  # Poner los ticks en el inicio de cada barra
             ax.set_xlim([-.5,max(np.arange(len(matrix)+1)-.5)])
-            ax.set_xticklabels([str(int(i*100)) for i in list(np.arange(0,1.25,0.25))], rotation=0) 
+
+            if time_range_type=='perc':
+                ax.set_xticklabels([str(int(i*100)) for i in list(np.arange(0,1.25,0.25))], rotation=0) 
+            if time_range_type=='limit':
+                ax.set_xticklabels(['0','a','b','T'], rotation=0) 
             ax.set_ylim(0,1)
 
         barplots_2criteria(fig.add_subplot(gs[2:4, 0]) ,matrix_last_train,[colors[0],colors[3],colors[1]],[criteria_labels[0],'Draw',criteria_labels[1]])
@@ -3360,7 +3605,7 @@ class ProcessIndependentAnalyzer():
         violinplot_deg_2criteria(fig.add_subplot(gs[8:10, 1]),[4,5],[colors[1],colors[3],colors[2]],[criteria_labels[1],'Draw',criteria_labels[2]])  
 
         # Grafica de diferencias
-        def violinplot_2criteria(ax,data,colors,labels):
+        def violinplot_2criteria(ax,data,colors,labels,ylabel):
 
             # Crear violin plots
             vp = ax.violinplot(data, showmeans=False, showmedians=False, showextrema=False)
@@ -3368,19 +3613,61 @@ class ProcessIndependentAnalyzer():
                 body.set_facecolor(colors[i])
                 body.set_edgecolor(colors[i])
                 body.set_alpha(1)
+            ax.set_ylabel(ylabel,fontsize=8)
             ax.set_xticks(range(1, len(labels) + 1))
             ax.set_xticklabels(labels)
             ax.set_ylim(-0.1,1.1)
 
-        violinplot_2criteria(fig.add_subplot(gs[2, 2]),matrix_eff_last_train,[colors[0],colors[1]],['',''])
-        violinplot_2criteria(fig.add_subplot(gs[5, 2]),matrix_eff_last_test,[colors[0],colors[2]],['',''])
-        violinplot_2criteria(fig.add_subplot(gs[8, 2]),matrix_eff_train_test,[colors[1],colors[2]],['',''])
 
-        violinplot_2criteria(fig.add_subplot(gs[3, 2]),matrix_eff_last_train_inv,[colors[1],colors[0]],[criteria_labels[0],criteria_labels[1]])
-        violinplot_2criteria(fig.add_subplot(gs[6, 2]),matrix_eff_last_test_inv,[colors[2],colors[0]],[criteria_labels[0],criteria_labels[2]])
-        violinplot_2criteria(fig.add_subplot(gs[9, 2]),matrix_eff_train_test_inv,[colors[2],colors[1]],[criteria_labels[1],criteria_labels[2]])
 
-        plt.savefig('experiments_intuition/results/CriteriaComparison/figures/best_criteria_by_time_related_deg/vs2_'+global_deg_metric+'_'+local_deg_metric+'_'+title+'.pdf')
+        def from_doble_matrix_to_single(matrix):
+            single_matrix=[]
+            for i in range(len(matrix[0])):
+                if len(matrix[0][i])>0 and len(matrix[1][i])>0 :
+                    single_matrix.append(matrix[0][i])
+                    single_matrix.append(matrix[1][i])
+
+
+                if len(matrix[0][i])>0 and len(matrix[1][i])==0:
+                    single_matrix.append(matrix[0][i])
+                    single_matrix.append([np.nan,1])
+
+                if len(matrix[0][i])==0 and len(matrix[1][i])>0:
+                    single_matrix.append([np.nan,1])
+                    single_matrix.append(matrix[1][i])
+                    
+            return single_matrix
+        
+        def n_intervals_labels():
+            if time_range_type=='perc':
+                limits=[str(int(i*100)) for i in list(np.arange(0,1.25,0.25))]
+            if time_range_type=='limit':
+                limits=['0','a','b','T']
+            interval_labels=[]
+            n_intervals=0
+            for i in range(len(matrix_deg)):
+                if sum(matrix_deg[i])!=0:
+                    interval_labels+=[limits[i],limits[i+1]]
+                    n_intervals+=1
+
+            return interval_labels,n_intervals
+
+        interval_labels,n_intervals=n_intervals_labels()
+
+        violinplot_2criteria(fig.add_subplot(gs[2, 2]),from_doble_matrix_to_single(matrix_eff_last_train),[colors[0],colors[1]]*n_intervals,['','']*n_intervals,'Best')
+        violinplot_2criteria(fig.add_subplot(gs[5, 2]),from_doble_matrix_to_single(matrix_eff_last_test),[colors[0],colors[2]]*n_intervals,['','']*n_intervals,'Best')
+        violinplot_2criteria(fig.add_subplot(gs[8, 2]),from_doble_matrix_to_single(matrix_eff_train_test),[colors[1],colors[2]]*n_intervals,['','']*n_intervals,'Best')
+
+        violinplot_2criteria(fig.add_subplot(gs[3, 2]),from_doble_matrix_to_single(matrix_eff_last_train_inv),[colors[1],colors[0]]*n_intervals,interval_labels,'Worst')
+        violinplot_2criteria(fig.add_subplot(gs[6, 2]),from_doble_matrix_to_single(matrix_eff_last_test_inv),[colors[2],colors[0]]*n_intervals,interval_labels,'Worst')
+        violinplot_2criteria(fig.add_subplot(gs[9, 2]),from_doble_matrix_to_single(matrix_eff_train_test_inv),[colors[2],colors[1]]*n_intervals,interval_labels,'Worst')
+
+        
+        if time_range_type=='perc':
+            plt.savefig('experiments_intuition/results/CriteriaComparison/figures/best_criteria_by_time_related_deg/vs2_'+global_deg_metric+'_'+local_deg_metric+'_'+title+'.pdf')
+        if time_range_type=='limit':
+            plt.savefig('experiments_intuition/results/CriteriaComparison/figures/best_criteria_by_time_related_deg/vs2_limit_'+global_deg_metric+'_'+local_deg_metric+'_'+title+'.pdf')
+
 
     #===============================================================================================
     # NUEVOS ANALISIS
@@ -3462,10 +3749,8 @@ class ProcessIndependentAnalyzer():
             # Añadir nuevas filas a la base de datos existente
             df_add = pd.DataFrame(df_add, columns=self.df_criteria_start_end.columns)
             self.df_criteria_start_end = pd.concat([self.df_criteria_start_end, df_add],ignore_index=True)
-            self.df_criteria_start_end.to_csv('experiments_intuition/results/CriteriaComparison/data/test_start_end_perc_time.csv', index=False)
+            self.df_criteria_start_end.to_csv('experiments_intuition/results/CriteriaComparison/data/criteria_start_end_good_time.csv', index=False)
 
-        self.df_criteria_start_end.to_csv('experiments_intuition/results/CriteriaComparison/data/criteria_start_end_good_time.csv', index=False)
- 
     def generate_df_test_when_train_change(self,process_ids,train_n_ep,test_n_ep):
 
 
@@ -3565,6 +3850,7 @@ class ProcessIndependentAnalyzer():
             axes[0].set_ylabel("Proportion")
             axes[0].set_title("Global degradation distribution per interval")
 
+            axes[1].set_title(title+'\n',fontsize=13)
             axes[1].axis('off')
             axes[2].axis('off')
 
@@ -3617,13 +3903,16 @@ class ProcessIndependentAnalyzer():
                           [uq - m for m, uq in zip([np.median(x) for x in perc_val_learn_times], [np.percentile(x, 90) for x in perc_val_learn_times])]],
                     height=1, color='red', alpha=0.5, capsize=3,ecolor=(1, 0, 0, 0.8)
                 )
-            
+            axes2_xlim=max([np.percentile(x, 90) for x in perc_val_learn_times])
             axes[2].set_xticklabels([])
             axes[2].invert_yaxis()
+            axes[2].set_xlim(0,axes2_xlim)
             axes[2].set_title("How much time\nis required?")
+        
+            return 
 
         #--------- Grafica compuesta de aplicacion criterios combinados (train-test)
-        def subgraph_combined_criteria(inner,ascendant_periods,perc_goods,perc_val_learn_times):
+        def subgraph_combined_criteria(inner,ascendant_periods,perc_goods,perc_val_learn_times,axes2_xlim):
             axes = inner.subplots(sharey=True)
 
             # Grafica de cuando se aplica cada criterio
@@ -3663,11 +3952,11 @@ class ProcessIndependentAnalyzer():
                           [uq - m for m, uq in zip([np.median(x) for x in perc_val_learn_times], [np.percentile(x, 90) for x in perc_val_learn_times])]],
                     height=1,color='red',alpha=0.5, capsize=3,ecolor=(1, 0, 0, 0.8)
                 )
-
+            axes[2].set_xlim(0,axes2_xlim)
             axes[2].set_xticklabels([])
 
         #--------- Grafica compuesta de aplicacion criterios mixtos (train y a la vez test, propuesta Etor)
-        def subgraph_mixed_criteria(inner):
+        def subgraph_mixed_criteria(inner,axes2_xlim):
             axes = inner.subplots(sharey=True)
 
             # Datos necesarios para dibujar la grafica
@@ -3707,6 +3996,7 @@ class ProcessIndependentAnalyzer():
             axes[2].axvline(x=np.percentile(cost_vals,90), color='red', linestyle='-', linewidth=1.5,alpha=0.8)
             axes[2].axvline(x=np.percentile(cost_vals,10), color='red', linestyle='-', linewidth=1.5,alpha=0.8)
             axes[2].invert_yaxis()
+            axes[2].set_xlim(0,axes2_xlim)
             axes[2].set_xlabel("Percentage of invest\ntime in validation")
 
         #--------- Subdatos
@@ -3776,6 +4066,7 @@ class ProcessIndependentAnalyzer():
 
             return matrix_test_applied,list_perc_good,list_cost_val
 
+        
         # Preparar datos para la grafica y dibujarlas
         fig = plt.figure(figsize=(8,7))
         plt.subplots_adjust(left=0.08,bottom=0.15,right=0.97,top=0.92,wspace=0.2,hspace=0.07)
@@ -3814,7 +4105,7 @@ class ProcessIndependentAnalyzer():
             all_perc_val.append(test_perc_val)
 
 
-        subgraph_single_criterion(inner,last_interval,intervals,all_perc_good,all_perc_val)
+        axes2_xlim=subgraph_single_criterion(inner,last_interval,intervals,all_perc_good,all_perc_val)
 
         #--------- Aplicacion de cirterios combinados
         inner=outer[2].subgridspec(1, 3, wspace=0.1, hspace=0.3,width_ratios=[2,1,1])
@@ -3833,27 +4124,32 @@ class ProcessIndependentAnalyzer():
             all_perc_good.append(test_perc_goods)
             all_perc_val.append(test_perc_val)
 
-        subgraph_combined_criteria(inner,intervals,all_perc_good,all_perc_val)
+        subgraph_combined_criteria(inner,intervals,all_perc_good,all_perc_val,axes2_xlim)
 
         #--------- Aplicacion de criterios mixtos
         inner=outer[3].subgridspec(1, 3, wspace=0.1, hspace=0.3,width_ratios=[2,1,1])
 
-        subgraph_mixed_criteria(inner)
-
-
+        subgraph_mixed_criteria(inner,axes2_xlim)
         
         plt.savefig('experiments_intuition/results/CriteriaComparison/figures/conclusion_criteria_application/'+title+'_'+global_deg_metric+'_'+local_deg_metric+'.pdf')
         plt.show()
-        
+    
     # Analisis 2 (peticion Aritz): estimaciones truth vs train vs test en todos los procesos que tenemos generados
-    def graph_truth_train_test_estimates_together(self,algo,envs,seeds,perc_val_cost,opt_conf_per_env=False,estimates_conv='estimates'):
+    def graph_truth_train_test_together(self,algo,envs,seeds,perc_val_cost,opt_conf_per_env=False,
+                                        together_what='estimates'):
 
         '''
         perc_val_cost: ahora mismo solo puede ser [25,20,10,05]
         opt_conf_per_env: es True o False, si se consideran los n_ep optimos de train y test en general para todos los entornos, o de cada env en particular
         '''
 
-        fig, axs = plt.subplots(len(seeds),len(envs), figsize=(5*8,10*5))
+        if together_what=='estimates':
+            fig, axs = plt.subplots(len(seeds),len(envs), figsize=(len(envs)*8,len(seeds)*5))
+
+        if together_what=='truth':
+            fig, axs = plt.subplots(len(seeds)*2,len(envs), figsize=(len(envs)*8,len(seeds)*6),height_ratios=[1,0.25,1,0.25,1,0.25,1,0.25,1,0.25,1,0.25,1,0.25,1,0.25,1,0.25,1,0.25])
+            #plt.subplots_adjust(left=0.08,bottom=0.15,right=0.97,top=0.92,wspace=0.2,hspace=0.07)
+
 
         #Configuraciones generales
         if not opt_conf_per_env:
@@ -3862,7 +4158,7 @@ class ProcessIndependentAnalyzer():
             test_n_ep=self.df_test_affordable_conf['n_ep_0.'+str(perc_val_cost)].mean().astype(int)
         
         # Ir rellenando la cuadricula de graficas con los correspondientes envs-seeds
-        for i,(algo,env) in enumerate(zip([algo]*len(envs),envs)):
+        for i,(algo,env) in tqdm(enumerate(zip([algo]*len(envs),envs))):
             print(env)
             if opt_conf_per_env:
                 name='conf_per_env'
@@ -3880,26 +4176,33 @@ class ProcessIndependentAnalyzer():
                 if j==len(seeds)-1:
                     last_row=True
 
-                analyze=EstimationAnalyzer(algo,env,seeds[j],'16cpu1gpu_mejorado',[train_n_ep],[test_n_ep],306)
-                analyze.plot_truth_train_test_estimates_together(perc_val_cost,axs[j,i],env,train_n_ep,test_n_ep,estimates_conv,first_graph,first_row,first_column,last_row)
-        if estimates_conv=='estimates':
-            plt.savefig('experiments_intuition/results/CriteriaComparison/figures/estimates_together/estimates_truth_train_test_'+name+'.pdf')
-        if estimates_conv=='conv':
-            plt.savefig('experiments_intuition/results/CriteriaComparison/figures/estimates_together/estimates_truth_train_test_'+name+'_conv.pdf')
+                analyzer=EstimationAnalyzer(algo,env,seeds[j],'16cpu1gpu_mejorado',[train_n_ep],[test_n_ep],306)
+                if together_what=='estimates':
+                    analyzer.plot_truth_train_test_estimates_together(perc_val_cost,axs[j,i],env,train_n_ep,test_n_ep,first_graph,first_row,first_column,last_row)
+                    
+                if together_what=='truth':
+                    analyzer.plot_truth_evolution_of_selection(axs[j*2,i],axs[j*2+1,i],train_n_ep,test_n_ep,env,seeds[j],first_graph,first_row,last_row,first_column)
         
-        plt.show()
+        if together_what=='estimates':
+            plt.savefig('experiments_intuition/results/SingleEnvAnalysis/figures/estimates_together/estimates_truth_train_test_'+name+'.pdf')
+        if together_what=='truth':
+            plt.savefig('experiments_intuition/results/SingleEnvAnalysis/figures/estimates_together/truth_last_train_test_colores_rankig_'+name+'.pdf')
 
     # Analisis 3: resumen de analisis completo inicial por entorno (todas las semillas juntas)
-    def graph_getstarting_by_env(self,algo,env,prec_with='perc_f'):
+    def graph_getstarting_by_env(self,algo,env,prec_with='perc_f',global_deg_metric='best_last_deg',local_deg_metric='paired_diff_probpos',
+                                 conv_range_type='perc'):
 
         '''
         prec_with: puede ser o 'perc_f' o 'paired_diff_probpos', si se quiere representar como de buenas son las politicas seleccionadas
         por los criterios como el porcentage de reward con respecto a la mejor o como la degradacion medida como la probabilidad positiva 
         de la diferencia pareada.
+
+        conv_range_type: puede ser 'perc' o 'limit', si se divide el tiempo de ejecucion en porcentage hasta convergencia o en los limites calculados
+        por proceso.
         '''
 
         # Estructurar los datos disponibles de manera apropiada para la grafica
-        df=pd.DataFrame(columns=(['n_policy','level_deg']+
+        df=pd.DataFrame(columns=(['n_policy','seed','level_deg','prec_last']+
                                  ['prec_train_'+str(n_ep) for n_ep in [500,250,100,50,25,5]]+
                                  ['prec_test_'+str(n_ep) for n_ep in [500,250,100,50,25,5]]+
                                  ['cost_test_'+str(n_ep) for n_ep in [500,250,100,50,25,5]]+
@@ -3914,8 +4217,9 @@ class ProcessIndependentAnalyzer():
 
             if prec_with=='perc_f':
                 df_new = pd.concat([
-                        self.df_degradation['n_policy'],
-                        self.df_degradation[[deg_column]],
+                        self.df_degradation['n_policy'],pd.DataFrame([seed]*self.iter_max),
+                        self.df_degradation[deg_column],
+                        self.df_last_eff[estimates_column],
                         self.df_train_eff[[estimates_column+'_'+str(n_ep) for n_ep in [500,250,100,50,25,5]]],
                         self.df_test_eff[[estimates_column+'_'+str(n_ep)+'_without_extra' for n_ep in [500,250,100,50,25,5]]],
                         self.df_test_cost[[estimates_column+'_'+str(n_ep) for n_ep in [500,250,100,50,25,5]]],
@@ -3923,8 +4227,9 @@ class ProcessIndependentAnalyzer():
                     ], axis=1)
             if prec_with=='paired_diff_probpos':
                 df_new = pd.concat([
-                        self.df_degradation['n_policy'],
-                        self.df_degradation[[deg_column]],
+                        self.df_degradation['n_policy'],pd.DataFrame([seed]*self.iter_max),
+                        self.df_degradation[deg_column],
+                        self.df_last_eff[estimates_column+'_paired_diff_probpos'],
                         self.df_train_eff[[estimates_column+'_'+str(n_ep)+'_paired_diff_probpos' for n_ep in [500,250,100,50,25,5]]],
                         self.df_test_eff[[estimates_column+'_'+str(n_ep)+'_without_extra_paired_diff_probpos' for n_ep in [500,250,100,50,25,5]]],
                         self.df_test_cost[[estimates_column+'_'+str(n_ep) for n_ep in [500,250,100,50,25,5]]],
@@ -3935,132 +4240,209 @@ class ProcessIndependentAnalyzer():
 
             df = pd.concat([df, df_new], axis=0, ignore_index=True)
 
+        # Seleccionar datos necesarios
+        def get_interest_rows(conv_range,conv_range_type):
+
+            df_time_regions=pd.read_csv('experiments_intuition/results/SingleEnvAnalysis/data/df_time_regions.csv')
+
+            if conv_range_type=='perc':
+                #n_policies=list(range(int(conv_range[0]*(self.iter_max-self.start_iter)),int(conv_range[1]*(self.iter_max-self.start_iter))))
+                n_policies=list(range(int(conv_range[0]*(self.iter_max)),int(conv_range[1]*(self.iter_max))))
+                df_current=df[df['n_policy'].isin(n_policies)]
+            
+            if conv_range_type=='limit':
+                df_current=pd.DataFrame(columns=df.columns)
+
+                for seed in range(1,11):
+                    process_id=algo+'_'+env+'_seed'+str(seed)
+
+                    low_limit=df_time_regions[df_time_regions['process_id']==process_id][conv_range[0]].values[0]
+                    up_limit=df_time_regions[df_time_regions['process_id']==process_id][conv_range[1]].values[0]
+
+                    n_policies=list(range(low_limit,up_limit+1))
+                    df_new=df[(df['seed']==seed) & df['n_policy'].isin(n_policies)]
+
+                    df_current = pd.concat([df_current, df_new], axis=0, ignore_index=True)
+
+            return df_current
+
         # Dibujar fila de graficas
-        def graph_conv_range(inner,conv_range,first_row=False,last_row=False,axes3_xlim=None):
+        def graph_conv_range(inner,conv_range,conv_range_type='perc',first_row=False,last_row=False):
+
+            '''
+            conv_range_type: puede ser 'perc' o 'limit', si el rango corresponde a un porcentage del tiempo total o a los limites a y b calculados por proceso
+
+            conv_range: cuando el anterior es 'perc', sera un intervalo con dos numeros en [0,1], cuando el anterior es 'limit' sera alguna de las siguientes 
+            listas: ['init','start_learn'], ['start_learn','start_conv'] o ['start_conv','conv']
+            '''
 
             # Seleccionar filas de interes
-            n_policies=list(range(int(conv_range[0]*(self.iter_max-self.start_iter)),int(conv_range[1]*(self.iter_max-self.start_iter))))
-            df_current=df[df['n_policy'].isin(n_policies)]
+            df_current=get_interest_rows(conv_range,conv_range_type)
+
 
             # Dibujar fila de graficas
             axes = inner.subplots(sharey=False)
 
             #------- Distribucion de degradacion
-            data = df_current['level_deg']
-            kde = gaussian_kde(data)
+            data = np.array(df_current['level_deg'].tolist())
+            kde = KernelDensity(bandwidth=0.1, kernel='gaussian')
+            kde.fit(data[:, None])
             x = np.linspace(0, 1, 200)
+            y_prob = np.exp(kde.score_samples(x[:, None]))
 
-            axes[0].plot(x, kde(x), color='gray')
-            axes[0].fill_between(x, 0, kde(x), color='gray', alpha=0.3)
-            axes[0].axvline(np.median(data), color='gray')
+            axes[0].plot(x, y_prob, color='gray')
+            axes[0].fill_between(x, 0, y_prob, color='gray', alpha=0.3)
+            axes[0].axvline(np.median(data), color='black')
             axes[0].set_xlim(-0.1,1.1)
             axes[0].set_title("")
-            axes[0].set_ylabel(str(int(100*conv_range[0]))+'%-'+str(int(100*conv_range[1]))+'%\nof conv. time')
-            axes[1].axis('off')
+            if conv_range_type=='perc':
+                axes[0].set_ylabel(str(int(100*conv_range[0]))+'%-'+str(int(100*conv_range[1]))+'%\nof conv. time')
+            if conv_range_type=='limit':
+                axes[0].set_ylabel('From '+conv_range[0]+'\nto '+conv_range[1])
+            axes[0].legend(title=str(data.shape[0]), loc='upper left',frameon=False)
+            axes[2].axis('off')
+
+            #------- Precision de last
+            data = [df_current['prec_last'].tolist()]
+            axes[1].barh(
+                    np.arange(len(data)),
+                    [-np.median(x) for x in data],
+                    xerr=[[uq - m for m, uq in zip([np.median(x) for x in data], [np.percentile(x, 95) for x in data])],
+                          [m - lq for m, lq in zip([np.median(x) for x in data], [np.percentile(x, 5) for x in data])]],
+                    height=1,color='black', alpha=0.5,capsize=3,ecolor=(0, 0, 0, 0.8)
+                )
+
+            axes[1].set_yticks([])
+            axes[1].xaxis.set_major_formatter(FuncFormatter(lambda x, pos: f"{abs(x):.1f}"))
+            axes[1].set_xlim(-1.1,0.1)
 
             #------- Precision de train
             columns=['prec_train_'+str(n_ep) for n_ep in [500,250,100,50,25,5]]
             data = [df_current[c].tolist() for c in columns]
-            axes[2].barh(
-                    np.arange(len(data)),
-                    [-np.median(x) for x in data],
-                    xerr=[[uq - m for m, uq in zip([np.median(x) for x in data], [np.percentile(x, 90) for x in data])],
-                          [m - lq for m, lq in zip([np.median(x) for x in data], [np.percentile(x, 10) for x in data])]],
-                    height=1,color='black', alpha=0.5,capsize=3,ecolor=(0, 0, 0, 0.8)
-                )
-
-            axes[2].xaxis.set_major_formatter(FuncFormatter(lambda x, pos: f"{abs(x):.1f}"))
-            axes[2].invert_yaxis()
-            axes[2].set_yticks(np.arange(len(data)))
-            axes[2].set_yticklabels(['500','250','100','50','25','5'])
-            axes[2].set_xlim(-1.1,0.1)
-            
-            #------- Precision de test
-            columns=['prec_test_'+str(n_ep) for n_ep in [500,250,100,50,25,5]]
-            if prec_with=='porc_f':
-                data = [df_current[c].tolist() for c in columns]
-            if prec_with=='paired_diff_probpos':
-                data = [1-np.array(df_current[c].tolist()) for c in columns]
             axes[3].barh(
                     np.arange(len(data)),
                     [-np.median(x) for x in data],
-                    xerr=[[uq - m for m, uq in zip([np.median(x) for x in data], [np.percentile(x, 90) for x in data])],
-                          [m - lq for m, lq in zip([np.median(x) for x in data], [np.percentile(x, 10) for x in data])]],
+                    xerr=[[uq - m for m, uq in zip([np.median(x) for x in data], [np.percentile(x, 95) for x in data])],
+                          [m - lq for m, lq in zip([np.median(x) for x in data], [np.percentile(x, 5) for x in data])]],
                     height=1,color='black', alpha=0.5,capsize=3,ecolor=(0, 0, 0, 0.8)
                 )
 
             axes[3].xaxis.set_major_formatter(FuncFormatter(lambda x, pos: f"{abs(x):.1f}"))
             axes[3].invert_yaxis()
-            axes[3].set_yticks([])
+            axes[3].set_yticks(np.arange(len(data)))
+            axes[3].set_yticklabels(['500','250','100','50','25','5'])
             axes[3].set_xlim(-1.1,0.1)
+            
+            #------- Precision de test
+            columns=['prec_test_'+str(n_ep) for n_ep in [500,250,100,50,25,5]]
+            if prec_with=='perc_f':
+                data = [df_current[c].tolist() for c in columns]
+            if prec_with=='paired_diff_probpos':
+                data = [1-np.array(df_current[c].tolist()) for c in columns]
+            axes[4].barh(
+                    np.arange(len(data)),
+                    [-np.median(x) for x in data],
+                    xerr=[[uq - m for m, uq in zip([np.median(x) for x in data], [np.percentile(x, 95) for x in data])],
+                          [m - lq for m, lq in zip([np.median(x) for x in data], [np.percentile(x, 5) for x in data])]],
+                    height=1,color='black', alpha=0.5,capsize=3,ecolor=(0, 0, 0, 0.8)
+                )
+
+            axes[4].xaxis.set_major_formatter(FuncFormatter(lambda x, pos: f"{abs(x):.1f}"))
+            axes[4].invert_yaxis()
+            axes[4].set_yticks([])
+            axes[4].set_xlim(-1.1,0.1)
             
             #------- Coste de test
             columns=['cost_test_'+str(n_ep) for n_ep in [500,250,100,50,25,5]]
             data = [df_current[c].tolist() for c in columns]
-            axes[4].barh(
+            axes[5].barh(
                     np.arange(len(data)),
                     [np.median(x) for x in data],
-                    xerr=[[m - lq for m, lq in zip([np.median(x) for x in data], [np.percentile(x, 10) for x in data])],
-                          [uq - m for m, uq in zip([np.median(x) for x in data], [np.percentile(x, 90) for x in data])]],
+                    xerr=[[m - lq for m, lq in zip([np.median(x) for x in data], [np.percentile(x, 5) for x in data])],
+                          [uq - m for m, uq in zip([np.median(x) for x in data], [np.percentile(x, 95) for x in data])]],
                     height=1, color='red', alpha=0.5, capsize=3,ecolor=(1, 0, 0, 0.8)
                 )
 
-            axes[4].set_yticks([])
-            axes[4].invert_yaxis()
-
-            if last_row:
-                axes3_xlim=max([np.percentile(x, 90) for x in data])
+            axes[5].set_yticks([])
+            axes[5].invert_yaxis()
+            axes3_xlim=max([np.percentile(x, 90) for x in data])
             
             #------- Tamaños de episodios test
-            data = df_current['ep_len_test'].tolist()
-            axes[5].axvline(np.median(data))
-            axes[5].axvspan(np.percentile(data,10),np.percentile(data,90),alpha=0.5)
-            axes[5].set_yticks([])
-            axes[5].set_xlim(-15,1015)
+            data = [df_current['ep_len_test'].tolist()]
+            axes[6].barh(
+                    np.arange(len(data)),
+                    [np.median(x) for x in data],
+                    xerr=[[m - lq for m, lq in zip([np.median(x) for x in data], [np.percentile(x, 5) for x in data])],
+                          [uq - m for m, uq in zip([np.median(x) for x in data], [np.percentile(x, 95) for x in data])]],
+                    height=1, color='blue', alpha=0.5, capsize=3,ecolor=(0, 0, 1, 0.8)
+                )
 
-            #------- Tamaños de episodios test
-            data = df_current['ep_rew_test'].tolist()
-            axes[6].axvline(np.median(data))
-            axes[6].axvspan(np.percentile(data,10),np.percentile(data,90),alpha=0.5)
             axes[6].set_yticks([])
-            axes[6].set_xlim(min(df['ep_rew_test'].tolist()),max(df['ep_rew_test'].tolist()))
+            axes[6].set_xlim(-15,1015)
+
 
             
             if last_row:
                 axes[0].set_xlabel("Degradation")
-                axes[2].set_xlabel("prec_train")
-                axes[3].set_xlabel("prec_test")
-                axes[4].set_xlabel("cost_test")
-                axes[5].set_xlabel("ep_len_test")
-                axes[6].set_xlabel("ep_rew_test")
+                axes[1].set_xlabel("prec_last")
+                axes[3].set_xlabel("prec_train")
+                axes[4].set_xlabel("prec_test")
+                axes[5].set_xlabel("cost_test")
+                axes[6].set_xlabel("ep_len_test")
 
-                return axes3_xlim
 
             else:
-                axes[4].set_xlim(0,axes3_xlim)
                 axes[0].set_xticks([])
-                axes[2].set_xticks([])
+                axes[1].set_xticks([])
                 axes[3].set_xticks([])
                 axes[4].set_xticks([])
                 axes[5].set_xticks([])
                 axes[6].set_xticks([])
 
+
             if first_row:
-                pass
+                axes[0].set_title(env)
+            
+            return axes3_xlim,axes[5]
+
+        # Grafica principal 1: dividiendo el tiempo en rangos de porcentages equidistantes
+        if conv_range_type=='perc':
+            fig = plt.figure(figsize=(10,7))
+            plt.subplots_adjust(left=0.08,bottom=0.15,right=0.97,top=0.92,wspace=0.2,hspace=0.07)
+            outer = fig.add_gridspec(4,1)
+
+            axes3_xlim1,axes1=graph_conv_range(outer[0].subgridspec(1, 7,width_ratios=[1, 1, 0.15,1, 1, 1, 1],wspace=0.1),[0,0.25],first_row=True)
+            axes3_xlim2,axes2=graph_conv_range(outer[1].subgridspec(1, 7,width_ratios=[1, 1, 0.15,1, 1, 1, 1],wspace=0.1),[0.25,0.5])
+            axes3_xlim3,axes3=graph_conv_range(outer[2].subgridspec(1, 7,width_ratios=[1, 1, 0.15,1, 1, 1, 1],wspace=0.1),[0.5,0.75])
+            axes3_xlim4,axes4=graph_conv_range(outer[3].subgridspec(1, 7,width_ratios=[1, 1, 0.15,1, 1, 1, 1],wspace=0.1),[0.75,1],last_row=True)
+
+            axes3_xlim=max([axes3_xlim1,axes3_xlim2,axes3_xlim3,axes3_xlim4])
+            axes1.set_xlim(0,axes3_xlim)
+            axes2.set_xlim(0,axes3_xlim)
+            axes3.set_xlim(0,axes3_xlim)
+            axes4.set_xlim(0,axes3_xlim)
+
+            plt.savefig('experiments_intuition/results/SingleEnvAnalysis/figures/getstarting_by_env/'+env+'_'+global_deg_metric+'_'+local_deg_metric+'_prec_'+prec_with+'.pdf')
+            
+        # Grafica principal 2: delimiteando el tiempo con los limites a y b sugeridos por Aritz
+        if conv_range_type=='limit':
+            fig = plt.figure(figsize=(10,5))
+            plt.subplots_adjust(left=0.08,bottom=0.15,right=0.97,top=0.92,wspace=0.2,hspace=0.07)
+            outer = fig.add_gridspec(3,1)
+
+            axes3_xlim1,axes1=graph_conv_range(outer[0].subgridspec(1, 7,width_ratios=[1, 1, 0.15,1, 1, 1, 1],wspace=0.1),['init','start_learn'],conv_range_type='limit',first_row=True)
+            axes3_xlim2,axes2=graph_conv_range(outer[1].subgridspec(1, 7,width_ratios=[1, 1,0.15, 1, 1, 1, 1],wspace=0.1),['start_learn','start_conv'],conv_range_type='limit')
+            axes3_xlim3,axes3=graph_conv_range(outer[2].subgridspec(1, 7,width_ratios=[1, 1,0.15, 1, 1, 1, 1],wspace=0.1),['start_conv','conv'],conv_range_type='limit',last_row=True)
+
+            axes3_xlim=max([axes3_xlim1,axes3_xlim2,axes3_xlim3])
+            axes1.set_xlim(0,axes3_xlim)
+            axes2.set_xlim(0,axes3_xlim)
+            axes3.set_xlim(0,axes3_xlim)
 
 
-        # Grafica principal
-        fig = plt.figure(figsize=(10,7))
-        plt.subplots_adjust(left=0.08,bottom=0.15,right=0.97,top=0.92,wspace=0.2,hspace=0.07)
-        outer = fig.add_gridspec(4,1)
+            plt.savefig('experiments_intuition/results/SingleEnvAnalysis/figures/getstarting_by_env/limits_'+env+'_'+global_deg_metric+'_'+local_deg_metric+'_prec_'+prec_with+'.pdf')
 
-        axes3_xlim=graph_conv_range(outer[3].subgridspec(1, 7,width_ratios=[1, 0.15, 1, 1, 1, 0.5,0.5],wspace=0.1),[0.75,1],last_row=True)
-        graph_conv_range(outer[0].subgridspec(1, 7,width_ratios=[1, 0.15, 1, 1, 1, 0.5,0.5],wspace=0.1),[0,0.25],first_row=True,axes3_xlim=axes3_xlim)
-        graph_conv_range(outer[1].subgridspec(1, 7,width_ratios=[1, 0.15, 1, 1, 1, 0.5,0.5],wspace=0.1),[0.25,0.5],axes3_xlim=axes3_xlim)
-        graph_conv_range(outer[2].subgridspec(1, 7,width_ratios=[1, 0.15, 1, 1, 1, 0.5,0.5],wspace=0.1),[0.5,0.75],axes3_xlim=axes3_xlim)
-        
-        plt.savefig('experiments_intuition/results/CriteriaComparison/figures/getstarting_by_env/'+env+'_'+global_deg_metric+'_'+local_deg_metric+'_prec_'+prec_with+'.pdf')
-        plt.show()
+        #plt.show()
 
 
 #==================================================================================================
@@ -4109,6 +4491,7 @@ FIXME:
 - Si recalculo los truth de la misma manera (los guardados para Ant, Humanoid, HumanoidSatndup),
   no salen igual que la vez pasada (puede ser por la version de la libreria que descomprime).
 
+- mejorar el __init__ de ProcessIndependentAnalyzer (mirar los TODO)
 
 '''
 
