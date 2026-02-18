@@ -35,7 +35,7 @@ Las graficas para comparacion de criterios segun degradacion (independiente al p
 - Comparacion de criterios train y test para diferentes configuraciones (las registradas como optimas para procesos individuales) por nivel de degradacion. (analisis de sensibilidad)
 - Comparacion de criterios last, train y test por tiempos de ejecucion (cantidad de iteraciones de entrenamiento).
 
-Ahora se estan añadiendo nuevos metodos para analisis tanto incividuales como comparativos mejorados.
+Ahora se estan añadiendo nuevos metodos para analisis tanto individuales como comparativos mejorados.
 
 TODO: el codigo actual es muy probable que deba ser modificado para poderse adaptar a diferentes limites de aprendizaje en diferentes
 entornos, ya que cada uno converge en un tiempo diferente.
@@ -70,6 +70,7 @@ from scipy.stats import gaussian_kde
 import seaborn as sns
 from matplotlib.ticker import FuncFormatter, FormatStrFormatter, MultipleLocator
 from matplotlib.colors import ListedColormap
+import matplotlib.cm as cm
 
 
 
@@ -166,7 +167,7 @@ class Estimator:
     #----------------------------------------------------------------------------------------------
     def estimate_any_degradation(A,B,degradation_metric,also_dominance=False,additionals=None):
         '''
-        `degradation_metric`: 'greater_prob', 'paired_diff_probpos_meanpos', 'paired_diff_median', 'paired_diff_probpos', 'relative_reward_diff'
+        `degradation_metric`: 'greater_prob', 'paired_diff_probpos_meanpos', 'paired_diff_median', 'paired_diff_probpos', 'paired_diff_KDEprobpos' ,'relative_reward_diff', 'reward_diff'
         
         'greater_prob'
         Transformacion de la estimacion de la probabilidad de que las variables aleatorias de las que provienen las muestras A y B cumplan: X_A < X_B 
@@ -235,6 +236,20 @@ class Estimator:
 
             return degradation
         
+        if degradation_metric=='paired_diff_KDEprobpos':
+
+            # Variable de diferencias pareadas
+            paired_diffs=B-A
+            
+            # Aproximacion de probabilidad positiva con KDE 
+            if np.mean(paired_diffs==0)==1:
+                degradation=0
+            else:
+                kde = gaussian_kde(paired_diffs[np.newaxis, :])
+                degradation=kde.integrate_box_1d(0, np.inf)
+
+            return degradation
+        
         if degradation_metric=='relative_reward_diff':
             # NOTE: esta metrica es la unica entre todas que no usa la distribucion (muestra) de los rewards, unicamente usa la media.
             #Por ello, para que la degradacion local sea un valor en [0,1] y comparable con otras degradaciones locales de otro par
@@ -248,6 +263,10 @@ class Estimator:
             degradation=relative_diff*indicator
 
             return degradation
+        
+        if degradation_metric=='reward_diff':
+
+            return [0 if additionals[1]==additionals[0] else abs(np.mean(A)-np.mean(B))/(additionals[1]-additionals[0])][0]
    
     def estimate_update_degradations(algo,env,seed,resources, iter_max,degradation_metric='greater_prob',additionals=None):
         '''
@@ -297,7 +316,7 @@ class Estimator:
             df_estimates=pd.read_csv(path_csv)
 
         return df_estimates
-    
+        
     def compute_estimates(algo,env,seed,resources,n_ep,train_test_estimate):
         '''
         Antes de generar las graficas, se calculan las estimaciones de expected episodic reward (EER) con train y test.
@@ -325,7 +344,7 @@ class Estimator:
         if 'truth_norm' not in df_val_estimates.columns.tolist():
             df_val_estimates['truth_norm']=[ (i-min(df_val_estimates['truth']))/(max(df_val_estimates['truth'])-min(df_val_estimates['truth'])) for i in df_val_estimates['truth'] ]
             df_val_estimates.to_csv(current_path+'/df_val_estimates.csv', index=False)
-        
+        '''
         # Tambien estimaciones de degradacion para añadir a las learning-curve mas informativas (empezar a considerar la degradacion despues del 10% del tiempo)
         degradation_metrics=['greater_prob','paired_diff_probpos_meanpos','paired_diff_median','paired_diff_probpos','relative_reward_diff']
         for degradation_metric in degradation_metrics:
@@ -341,7 +360,7 @@ class Estimator:
 
                 df_val_estimates['update_deg_'+degradation_metric]=[0 for _ in range(int(df_test.shape[0]*.1))]+update_degradations[int(df_test.shape[0]*.1):]
                 df_val_estimates.to_csv(current_path+'/df_val_estimates.csv', index=False)
-
+        '''
         # Calcular estimaciones a partir de datos de train
         df_traj_estimates=Estimator.read_create_estimates_csv(current_path+'/df_traj_estimates.csv',df_train.shape[0])
         if train_test_estimate=='train':
@@ -373,7 +392,132 @@ class Estimator:
                 df_val_estimates[str(n_ep)+'_val_ep']=[Converter.compress_decompress_list(i) for i in zip(estimates,val_times)]
                 df_val_estimates.to_csv(current_path+'/df_val_estimates.csv', index=False)
         
- 
+    def compute_test_estimates_with_max_cost(algo,env,seed,resources,cost_perc=0.1):
+
+        '''
+        Estimaciones test que consumen un cost_perc de coste de validacion frente al tiempo consumido en aprendizaje
+        '''
+        test_estimates=[]
+
+        current_path=parent_dir+'/_bender/project_SB3/data/'+algo+'_'+env+'_seed'+str(seed)+'_'+resources
+        df_test=pd.read_csv(current_path+'/df_val.csv')
+        df_train=pd.read_csv(current_path+'/df_traj.csv')
+        df_val_estimates=Estimator.read_create_estimates_csv(current_path+'/df_val_estimates.csv',df_train.shape[0])
+
+        df_test_ep_rewards=[ Converter.compress_decompress_list(i,compress=False) for i in df_test['ep_rewards']]
+        df_test_elapsed_val_times=[ Converter.compress_decompress_list(i,compress=False) for i in df_test['elapsed_val_time']]
+        learning_times=df_train['time_seconds'].tolist()
+        validation_time=0
+
+        #n_ep_list=[]
+        for i,elapsed_time in enumerate(learning_times):
+            percentage=(np.array(df_test_elapsed_val_times[i])+validation_time)/elapsed_time
+            index_best=next((i for i, val in reversed(list(enumerate(percentage))) if val < cost_perc), 0)
+            test_estimates.append(np.mean(df_test_ep_rewards[i][:index_best+1]))
+            validation_time+=df_test_elapsed_val_times[i][index_best]
+
+            #n_ep_list.append(index_best+1)
+        #print(n_ep_list[:5])
+        df_val_estimates[str(cost_perc)+'cost_val_ep']=test_estimates
+        df_val_estimates.to_csv(current_path+'/df_val_estimates.csv', index=False)
+        
+class DataFrameUtils:
+    def add_truth_to_csv(path,pack,seed,conf=[None,None],criteria='truth_best',cost_perc=0.1):
+
+        '''
+        Añadir (si no existe) una columna con el truth de las politicas seleccionadas por los criterios
+
+        ´criteria´ puede ser 'truth_best', 'worst', 'last', 'best_train', 'best_val', 'best_val_with_cost'
+        '''
+        _,algo,env=pack.split('_')
+        n_ep,freq=conf
+        if n_ep==None:
+            conf=''
+        if n_ep!=None and freq==None:
+            conf='_'+str(n_ep)
+        if n_ep!=None and freq!=None:
+            conf='_'+str(n_ep)+'_'+str(freq)
+
+        if criteria=='best_val_with_cost':
+            conf='_'+str(cost_perc)+'cost'
+
+        generator=EvolutionGenerator('pack_'+algo,env,seed,'',0.1)
+        x_times=generator.df_train['time_seconds'].tolist()
+        generator.start_iter=1
+        generator.start_time=x_times[0]
+        
+        df=Estimator.read_create_estimates_csv(path,generator.df_train.shape[0])
+        #if pack+str(seed)+str(conf) not in df.columns:
+        truth_evol=generator.truth_evolution(x_times,n_ep=n_ep,freq=x_times[::freq],criteria=criteria,cost_perc=cost_perc)
+        df[pack+str(seed)+str(conf)]=truth_evol
+        df.to_csv(path,index=False)
+
+    def get_add_deg_to_csv(path,algo,env,seed,resources,global_deg_metric='norm_worsening_to_improvement',local_deg_metric='reward_diff'):
+
+
+        generator=EvolutionGenerator(algo,env,seed,resources,0.1)
+        x_times=generator.df_train['time_seconds'].tolist()
+        generator.start_iter=1
+        generator.start_time=x_times[0]
+
+        deg=generator.degradation_evolution(x_times,global_deg_metric,local_deg_metric)
+
+        df=Estimator.read_create_estimates_csv(path,generator.df_train.shape[0])
+        if algo+'_'+env+str(seed)+'_'+global_deg_metric+'_'+local_deg_metric not in df.columns:
+            df[algo+'_'+env+str(seed)+'_'+global_deg_metric+'_'+local_deg_metric]=deg
+            df.to_csv(path,index=False)
+
+        return deg
+
+    def get_add_learning_limits_to_csv(path,algo,env,seed,resources,limit_metric):
+
+        generator=EvolutionGenerator(algo,env,seed,resources,0.1)
+        a,b= generator.learning_region_limits(limit_metric)
+
+        df=Converter.generate_df(path,['pack_seed','limit_metric','a','b','T'])
+        if not ((df['pack_seed'] == algo+'_'+env+str(seed)) & (df['limit_metric'] == limit_metric)).any():
+            df.loc[len(df)]=[algo+'_'+env+str(seed),limit_metric,a,b,generator.df_test.shape[0]]
+            df.to_csv(path,index=False)
+
+        return a,b
+
+    def add_criteria_prec_cost_to_csv(path,pack,seed,conf=[None,None],criteria='train',metric='relative_perc_criteria_best'):
+        _,algo,env=pack.split('_')
+        n_ep,freq=conf
+        if n_ep==None:
+            conf=''
+        if n_ep!=None and freq==None:
+            conf='_'+str(n_ep)
+        if n_ep!=None and freq!=None:
+            conf='_'+str(n_ep)+'_'+str(freq)
+
+        generator=EvolutionGenerator('pack_'+algo,env,seed,'',0.1)
+        x_times=generator.df_train['time_seconds'].tolist()
+        generator.start_iter=1
+        generator.start_time=x_times[0]
+        
+        if criteria=='best_val':
+            path_prec,path_cost=path
+            df_prec=Estimator.read_create_estimates_csv(path_prec,generator.df_train.shape[0])
+            df_cost=Estimator.read_create_estimates_csv(path_cost,generator.df_train.shape[0])
+            if pack+str(seed)+str(conf)+'_'+metric not in df_prec.columns:
+                eff_evol,cost_evol=generator.effectiveness_evolution(x_times,n_ep=n_ep,freq=x_times[::freq],criteria=criteria,metric=metric,for_analyzer=True)
+                df_prec[pack+str(seed)+str(conf)+'_'+metric]=eff_evol
+                df_cost[pack+str(seed)+str(conf)+'_'+metric]=np.array(cost_evol) / np.array(x_times)
+                df_prec.to_csv(path_prec,index=False)
+                df_cost.to_csv(path_cost,index=False)
+
+        else:
+            df=Estimator.read_create_estimates_csv(path,generator.df_train.shape[0])
+            if pack+str(seed)+str(conf)+'_'+metric not in df.columns:
+                eff_evol=generator.effectiveness_evolution(x_times,n_ep=n_ep,freq=None,criteria=criteria,metric=metric,for_analyzer=True)
+                df[pack+str(seed)+str(conf)+'_'+metric]=eff_evol
+                df.to_csv(path,index=False)
+
+
+        
+
+
 class Converter:
     '''
     Las funciones de esta clase sirven para hacer conversiones, i.e. convertir el formato original de un input en otro formato output.
@@ -516,6 +660,24 @@ class Converter:
 
         return diff
 
+    def bootstrap_mean_and_confidence_interval(data,bootstrap_iterations=1000):
+        '''
+        The 95% confidence interval of a given data sample is calculated.
+
+        Parameters
+        ==========
+        data (list): Data on which the range between percentiles will be calculated.
+        bootstrap_iterations (int): Number of subsamples of data to be considered to calculate the percentiles of their means. 
+
+        Return
+        ======
+        The mean of the original data together with the percentiles of the means obtained from the subsampling of the data. 
+        '''
+        mean_list=[]
+        for i in range(bootstrap_iterations):
+            sample = np.random.choice(data, len(data), replace=True) 
+            mean_list.append(np.mean(sample))
+        return np.mean(data),np.quantile(mean_list, 0.05),np.quantile(mean_list, 0.95)
 
 class EvolutionGenerator:
     '''
@@ -524,7 +686,7 @@ class EvolutionGenerator:
     '''
     def __init__(self,algo,env,seed,resources,perc_time_start):
         '''
-        `algo`: algortimo RL usado para genera el proceso (primer nombre separado por '_' de la carpeta en donde se almacenan los datos)
+        `algo`: algortimo RL usado para generar el proceso (primer nombre separado por '_' de la carpeta en donde se almacenan los datos)
         `env`: environmnet
         `seed`: semilla aleatoria
         `resources`: recursos computacionales para ejecucion en paralelo 
@@ -544,6 +706,38 @@ class EvolutionGenerator:
         self.df_test_estimates=df_test_estimates
         self.start_iter=int(df_train.shape[0]*perc_time_start)
         self.start_time=df_train.loc[self.start_iter-1,'time_seconds']
+
+    #NEW : calcular limites de regiones de aprendizaje
+    def learning_region_limits(self,limit_metric='from_first_last'):
+
+        truth_last=self.df_test_estimates['truth'].tolist()
+
+        a,b=None,None
+        for i in range(len(truth_last)):
+
+            if limit_metric=='from_mean':
+                if abs(truth_last[i]-np.mean(truth_last[:i+1]))<=np.std(truth_last[:i+1]):
+                    if a==None or i-a<int(len(truth_last)*0.1):
+                        a=i
+                if abs(np.mean(truth_last[-i-1:])-truth_last[-1-i])<=np.std(truth_last[-i-1:]) :
+                    if b==None or b-len(truth_last)+i<int(len(truth_last)*0.1):
+                        b=len(truth_last)-i
+
+            if limit_metric=='from_first_last':
+                if abs(truth_last[i]-truth_last[0])<=np.std(truth_last[:i+1]) :
+                    if a==None or i-a<int(len(truth_last)*0.1):
+                        a=i
+                if abs(truth_last[-1]-truth_last[-1-i])<=np.std(truth_last[-i-1:]) :
+                    if b==None or b-len(truth_last)+i<int(len(truth_last)*0.1):
+                        b=len(truth_last)-i
+
+        # Para que siempre haya un minimo de datos en los intervalos [0,a] y [b,T]
+        if a in list(range(int(0.1*len(truth_last)))):
+            a=int(0.1*len(truth_last))
+        if b in list(range(len(truth_last)-int(0.1*len(truth_last)),len(truth_last)+1)):
+            b=len(truth_last)-int(0.1*len(truth_last))
+
+        return a,b
 
     #----------------------------------------------------------------------------------------------
     # Metricas para medir la calidad de la politica seleccionada o nivel de degradacion de la secuencia
@@ -570,7 +764,10 @@ class EvolutionGenerator:
     
     def degradation_level(self,elapsed_time,global_metric,local_metric):
         '''
-        `global_metric`: 'mean_update_deg', 'weighted_mean_best_later_deg', 'best_last_deg', 'relative_worsening_to_improvement'
+        TODO: todas las metricas que no usan la variable aleatoria no tienen porque tener asignada una metrica local de degradacion,
+        creo que se puede simplificar el codigo asociado a esas metricas globales
+
+        `global_metric`: 'mean_update_deg', 'weighted_mean_best_later_deg', 'best_last_deg', 'relative_worsening_to_improvement', 'norm_worsening_to_improvement'
         `local_metric`: 'greater_prob', 'paired_diff_probpos_meanpos', 'paired_diff_median', 'paired_diff_probpos', 'relative_reward_diff'
         '''
 
@@ -647,7 +844,7 @@ class EvolutionGenerator:
             truth_best_idx=self.truth_best_policy(elapsed_time)
             last_idx=self.last_policy(elapsed_time)
 
-            # Identificar la peor y mejor politicas del proceso (para la normmalizacion y que la metrica local este en [0,1])
+            # Identificar la peor y mejor politicas del proceso (para la normalizacion y que la metrica local este en [0,1])
             process_worst_ep_truth=self.df_test_estimates['truth'].min()
             process_best_ep_truth=self.df_test_estimates['truth'].max()
 
@@ -662,25 +859,101 @@ class EvolutionGenerator:
 
             degradation_level=best_last_deg/max(best_init_deg,best_last_deg,indicator)
 
+        if global_metric=='norm_worsening_to_improvement':
+            # Indices de la ultima, mejor y peor politica en el tiempo transcurrido
+            truth_best_idx=self.truth_best_policy(elapsed_time)
+            worst_idx=self.worst_policy(elapsed_time)
+            last_idx=self.last_policy(elapsed_time)
+
+            # Degradacion local entre: mejor-ultima y mejor-peor actual
+            best_ep_truth=self.df_test_estimates.loc[truth_best_idx,'truth']
+            worst_ep_truth=self.df_test_estimates.loc[worst_idx,'truth']
+            last_ep_truth=self.df_test_estimates.loc[last_idx,'truth']
+
+
+            best_worst_deg=Estimator.estimate_any_degradation(worst_ep_truth,best_ep_truth,local_metric,additionals=[np.mean(worst_ep_truth),np.mean(best_ep_truth)])
+            best_last_deg=Estimator.estimate_any_degradation(last_ep_truth,best_ep_truth,local_metric,additionals=[np.mean(worst_ep_truth),np.mean(best_ep_truth)])
+            indicator=[0 if best_ep_truth!=worst_ep_truth else 1][0]
+
+            degradation_level=best_last_deg/max(best_worst_deg,indicator)
+
+        if global_metric=='norm_from_mean_worsening_to_improvement':
+            # Indices de la ultima, mejor y peor politica en el tiempo transcurrido
+            truth_best_idx=self.truth_best_policy(elapsed_time)
+            last_idx=self.last_policy(elapsed_time)
+
+            # Degradacion local entre: mejor-ultima y mejor-peor actual
+            best_truth=self.df_test_estimates.loc[truth_best_idx,'truth']
+            last_truth=self.df_test_estimates.loc[last_idx,'truth']
+            current_mean_truth=min(self.df_test_estimates.loc[:last_idx,'truth'].mean(),last_truth)
+
+            if best_truth!=last_truth:
+                degradation_level=(best_truth-last_truth)/(best_truth-current_mean_truth)
+            else:
+                degradation_level=0
+
         return degradation_level
     
-    def effectiveness(self,elapsed_time,n_policy,normalized):
+    def effectiveness(self,elapsed_time,n_policy,normalized,metric='perc_criteria_best'):
 
-        # TODO: cuidado con esta eficacia!!! si los rewards episodicos pueden ser negativos, esta definicion no tiene sentido.
+        '''
+        Diferentes opciones para medir la precision de seleccion: 'perc_criteria_best', 'relative_perc_criteria_best', 'paired_diff_KDEprob0'
 
-        last_policy=self.last_policy(elapsed_time)
-        if not normalized:
-            EER_list=self.df_test_estimates[(self.df_test['n_policy']<=last_policy) & (self.df_test['n_policy']>=self.start_iter-1)]['truth'].tolist()
-        if normalized:
-            EER_list=self.df_test_estimates[(self.df_test['n_policy']<=last_policy) & (self.df_test['n_policy']>=self.start_iter-1)]['truth_norm'].tolist()
+        Todas ellas estan definidas en [0,1], 1 es beuno y 0 malo.
+        '''
+        if metric=='perc_criteria_best':
+            # TODO: cuidado con esta eficacia!!! si los rewards episodicos pueden ser negativos, esta definicion no tiene sentido.
 
-        EER_real_best=max(EER_list)
-        EER_criteria_best=EER_list[n_policy-self.start_iter+1]
+            last_policy=self.last_policy(elapsed_time)
+            if not normalized:
+                EER_list=self.df_test_estimates[(self.df_test['n_policy']<=last_policy) & (self.df_test['n_policy']>=self.start_iter-1)]['truth'].tolist()
+            if normalized:
+                EER_list=self.df_test_estimates[(self.df_test['n_policy']<=last_policy) & (self.df_test['n_policy']>=self.start_iter-1)]['truth_norm'].tolist()
 
-        if EER_criteria_best==0 and EER_real_best==0:
-            return 1
-        else:
-            return EER_criteria_best/EER_real_best
+            EER_real_best=max(EER_list)
+            EER_criteria_best=EER_list[n_policy-self.start_iter+1]
+
+            if EER_criteria_best==0 and EER_real_best==0:
+                return 1
+            else:
+                return EER_criteria_best/EER_real_best
+            
+        if metric=='relative_perc_criteria_best':
+            # NEW: este es igual que el anterior pero normalizado con el minimo observado hasta ahora
+
+            last_policy=self.last_policy(elapsed_time)
+            if not normalized:
+                EER_list=self.df_test_estimates[(self.df_test['n_policy']<=last_policy) & (self.df_test['n_policy']>=self.start_iter-1)]['truth'].tolist()
+            if normalized:
+                EER_list=self.df_test_estimates[(self.df_test['n_policy']<=last_policy) & (self.df_test['n_policy']>=self.start_iter-1)]['truth_norm'].tolist()
+
+            EER_real_best=max(EER_list)
+            EER_criteria_best=EER_list[n_policy-self.start_iter+1]
+
+            if EER_criteria_best==min(EER_list):
+                return 1
+            else:
+                return (EER_criteria_best-min(EER_list))/(EER_real_best-min(EER_list))
+ 
+
+        if metric=='paired_diff_KDEprob0':
+
+            truth_best_idx=self.truth_best_policy(elapsed_time)
+
+            best_ep_rewards=np.array(Converter.compress_decompress_list(self.df_test.loc[truth_best_idx,'ep_rewards'],compress=False)[:500])
+            criteria_ep_rewards=np.array(Converter.compress_decompress_list(self.df_test.loc[n_policy,'ep_rewards'],compress=False)[:500])
+
+            paired_diff=np.array(best_ep_rewards)-np.array(criteria_ep_rewards)
+
+            if np.mean(paired_diff==0)==1:
+                prob0=1
+            else:
+                kde = gaussian_kde(paired_diff)
+                prob0=kde.integrate_box_1d(-0.01, 0.01) 
+
+            return prob0
+
+
         
     #----------------------------------------------------------------------------------------------
     # Criterios de seleccion
@@ -735,6 +1008,14 @@ class EvolutionGenerator:
 
         # Politica seleccionada y tiempo extra total invertido en su seleccion
         return current_val_policies[indx_subseq], sum(times_seq)
+    
+    def best_policy_validation_with_cost(self,elapsed_time,cost_perc=0.1):
+        # Lista de EER estimados con datos de test de la secunencia de politicas visitada hasta el momento
+        estimated_EER_seq=self.df_test_estimates[(self.df_train['time_seconds']<=elapsed_time) & (self.df_train['time_seconds']>=self.start_time)][str(cost_perc)+'cost_val_ep'].tolist()
+
+        # Indice de la politica con mayor mean ER en train
+        return estimated_EER_seq.index(max(estimated_EER_seq))+self.start_iter-1 # Debemos devolver el indice en la tabla y no en esta secuencia
+
     
     #----------------------------------------------------------------------------------------------
     # Generadores de la evolucion completa de las metricas
@@ -801,7 +1082,7 @@ class EvolutionGenerator:
         return [self.degradation_level(time,global_metric,local_metric) for time in x_times]
 
     def effectiveness_evolution(self,x_times,n_ep=None,freq=None,criteria='last',normalized=False,for_analyzer=False,
-                                local_deg_metric=None):
+                                local_deg_metric=None,metric='perc_criteria_best'):
 
         y_eff=[]
         x_extras=[]
@@ -822,13 +1103,15 @@ class EvolutionGenerator:
             if for_analyzer:
                 val_time=0
 
-            if local_deg_metric==None: # La eficacia se calcula como la relacion de los truth entre la seleccionada y la mejor
-                eff=self.effectiveness(time+val_time,policy_id,normalized=normalized)
-            else: # La eficacia se calcula como la degradacion entre la mejor politica y la seleccionada por el criterio
-                best_policy_id=self.truth_best_policy(time+val_time)
-                best_truth_variable=Converter.compress_decompress_list(self.df_test.loc[best_policy_id,'ep_rewards'],compress=False)[:500]
-                selected_truth_variable=Converter.compress_decompress_list(self.df_test.loc[policy_id,'ep_rewards'],compress=False)[:500]
-                eff=Estimator.estimate_any_degradation(np.array(selected_truth_variable),np.array(best_truth_variable),local_deg_metric)
+            #if local_deg_metric==None: # La eficacia se calcula como la relacion de los truth entre la seleccionada y la mejor
+            eff=self.effectiveness(time+val_time,policy_id,normalized=normalized,metric=metric)
+
+            #NEW: comentado por ahora (esto lo puse asi para construir los getstarting alternativos)    
+            # else: # La eficacia se calcula como la degradacion entre la mejor politica y la seleccionada por el criterio
+            #     best_policy_id=self.truth_best_policy(time+val_time)
+            #     best_truth_variable=Converter.compress_decompress_list(self.df_test.loc[best_policy_id,'ep_rewards'],compress=False)[:500]
+            #     selected_truth_variable=Converter.compress_decompress_list(self.df_test.loc[policy_id,'ep_rewards'],compress=False)[:500]
+            #     eff=Estimator.estimate_any_degradation(np.array(selected_truth_variable),np.array(best_truth_variable),local_deg_metric)
 
             y_eff.append(eff)
 
@@ -837,7 +1120,13 @@ class EvolutionGenerator:
         else:
             return y_eff
         
-    def truth_evolution(self,x_times,n_ep=None,freq=None,criteria='last'):
+    def truth_evolution(self,x_times,n_ep=None,freq=None,criteria='last',cost_perc=0.1):
+
+        '''
+        Evolucion del expected episodic reward real de las politicas seleccionadas por el criterio indicado
+        
+        :param criteria: puede ser 'truth_best', 'worst', 'last', 'best_train', 'best_val'
+        '''
 
         y_truth=[]
 
@@ -852,6 +1141,9 @@ class EvolutionGenerator:
                 policy_id=self.best_policy_training(time,n_ep)
             if criteria=='best_val':
                 policy_id,_=self.best_policy_validation(time,n_ep,freq)
+
+            if criteria=='best_val_with_cost':
+                policy_id=self.best_policy_validation_with_cost(time,cost_perc)
             
             y_truth.append(self.df_test_estimates[self.df_test_estimates['n_policy']==policy_id]['truth'].values[0])
         
@@ -864,15 +1156,17 @@ class EvolutionGrapher():
 
     def __init__(self,algo,env,seed,resources,iter_max,perc_time_start=0.1,
                  list_n_traj_ep=[],
-                 list_n_val_ep=[], list_n_val_freq=[]):
+                 list_n_val_ep=[], list_n_val_freq=[],
+                 cost_perc=0.1):
         
         # Primero generar los datos necesarios para las graficas
-        if len(list_n_traj_ep)+len(list_n_val_ep)==0:
-            Estimator.compute_estimates(algo,env,seed,resources,None,None)
-        for n_ep in tqdm(list_n_traj_ep):
-            Estimator.compute_estimates(algo,env,seed,resources,n_ep,'train')
-        for n_ep in tqdm(list_n_val_ep):
-            Estimator.compute_estimates(algo,env,seed,resources,n_ep,'test')
+        # if len(list_n_traj_ep)+len(list_n_val_ep)==0:
+        #     Estimator.compute_estimates(algo,env,seed,resources,None,None)
+        # for n_ep in tqdm(list_n_traj_ep):
+        #     Estimator.compute_estimates(algo,env,seed,resources,n_ep,'train')
+        # for n_ep in tqdm(list_n_val_ep):
+        #     Estimator.compute_estimates(algo,env,seed,resources,n_ep,'test')
+        Estimator.compute_test_estimates_with_max_cost(algo,env,seed,resources,cost_perc)
 
         # Guardar en una variable las 4 bases de datos
         self.generator=EvolutionGenerator(algo,env,seed,resources,perc_time_start)
@@ -1206,7 +1500,7 @@ class EvolutionGrapher():
         # KDE de iteracion actual y previa para comparar similitud entre metrica de degradacion y estimacion truth
         update_degradation=abs(np.array(self.generator.df_test_estimates['update_deg_'+local_metric][self.start_iter:])) # abs porque al hacer np.array los ceros salen -0.0
 
-        if local_metric not in ['relative_reward_diff']:
+        if local_metric not in ['relative_reward_diff','reward_diff']:
             if local_metric=='greater_prob':
                 dominances=np.array(self.generator.df_test_estimates['update_dominances'][self.start_iter:])
             else:
@@ -1276,6 +1570,60 @@ class EvolutionGrapher():
         #plt.show()
         plt.close()
 
+  
+    #----------------------------------------------------------------------------------------------
+    # NUEVO: experimento por packs
+    #---------------------------------------------------------------------------------------------- 
+    def plot_deg_truth_with_regions(self,ax1,ax2,title,
+                                    global_deg_metric,local_deg_metric,
+                                    limit_metric='from_first_last',
+                                    first_graph=False,first_row=False,first_column=False,last_row=False):
+        '''
+        Learning-curves de un pack-seed con las regiones de aprendizaje y evolucion de degradacion.
+        
+        Esta duncion esta pensada para llamar desde ProcessIndependentAnalyzer.graph_pack_all_truth_with_regions, 
+        he ir dibujando los datos asociados a cada seed en la cuadricula.
+        '''
+
+        colors=list(mcolors.TABLEAU_COLORS.keys())
+        x=range(self.iter_max)
+
+        # Evolucion de degradacion
+        x_times=self.generator.df_train['time_seconds'].tolist()
+        self.generator.start_time=x_times[0]
+        deg=DataFrameUtils.get_add_deg_to_csv('experiments_intuition/results/SingleEnvAnalysis/data/pack/deg_evolution.csv',
+                                                          self.algo,self.env,self.seed,self.resources,
+                                                          global_deg_metric=global_deg_metric,local_deg_metric=local_deg_metric)
+
+        ax1.imshow(np.array(deg)[np.newaxis, :], cmap='gray_r', vmin=0, vmax=1,aspect='auto', interpolation='nearest')
+        ax1.set_aspect(5)
+        ax1.set_xticks([])
+        ax1.set_yticks([])
+        
+        # Evolucion de estimaciones truth
+        truth_last=self.generator.df_test_estimates['truth'][:self.iter_max].tolist()
+        ax2.plot(x, truth_last, label="Truth",color=colors[0])
+
+        # Limites a (donde empieza a aprender) y b (donde se termina de aprender)
+        a,b=DataFrameUtils.get_add_learning_limits_to_csv('experiments_intuition/results/SingleEnvAnalysis/data/pack/learning_regions.csv',
+                                                          self.algo,self.env,self.seed,self.resources,limit_metric=limit_metric)
+
+        ax2.axvline(x=a, color='red', linestyle='-', linewidth=2,label='start learning')
+        ax2.axvline(x=b, color='black', linestyle='-', linewidth=2,label='end learning')
+        ax2.set_xlim(0,self.iter_max)
+
+        if last_row:
+            ax2.set_xlabel("Learning iteration")
+        if first_column:
+            ax2.set_ylabel("Truth reward")
+        if first_graph:
+            ax2.legend(loc="center left", bbox_to_anchor=(-0.9, 0.5))
+        if first_row:
+            ax1.set_title(title)
+        ax2.grid(True)
+
+        return deg,truth_last,a,b
+
 
 class EstimationAnalyzer():  
     '''
@@ -1290,15 +1638,15 @@ class EstimationAnalyzer():
                  iter_max,perc_time_start=0.1):
         
         # Primero generar los datos necesarios para las graficas
-        # for n_ep in tqdm(list_n_traj_ep):
-        #     Estimator.compute_estimates(algo,env,seed,resources,n_ep,'train')
-        # for n_ep in tqdm(list_n_val_ep):
-        #     Estimator.compute_estimates(algo,env,seed,resources,n_ep,'test')
+        for n_ep in tqdm(list_n_traj_ep):
+            Estimator.compute_estimates(algo,env,seed,resources,n_ep,'train')
+        for n_ep in tqdm(list_n_val_ep):
+            Estimator.compute_estimates(algo,env,seed,resources,n_ep,'test')
 
         # Guardar en una variable las 4 bases de datos
         self.generator=EvolutionGenerator(algo,env,seed,resources,perc_time_start)
 
-        # Leer o generar un csv en  donde se guaradara el valor mas grande para n_ep que consume menos o igual que l 25% del timepo disponible en validacion
+        # Leer o generar un csv en  donde se guaradara el valor mas grande para n_ep que consume menos o igual que el 25% del timepo disponible en validacion
         path_csv='experiments_intuition/results/SingleProcessAnalysis/data/test_affordable_n_ep_by_process.csv'
         if not os.path.exists(path_csv):
             df = pd.DataFrame(columns=['process_id','n_ep_0.25','n_ep_0.20','n_ep_0.10','n_ep_0.05'])
@@ -1748,7 +2096,6 @@ class EstimationAnalyzer():
 
         # Limites a (donde empieza a aprender) y b (donde se termina de aprender)
         a,b=None,None
-
         for i in range(len(y_last)):
             if y_last[i]-y_last[0]<=np.std(y_last[:i+1]):
                 if a==None or i-a<int(len(y_last)*0.1):
@@ -1784,7 +2131,7 @@ class EstimationAnalyzer():
             ax.set_title(title+'\n(train_n_ep='+str(train_n_ep)+'; test_n_ep='+str(test_n_ep)+')')
         ax.grid(True)
 
-    def plot_truth_evolution_of_selection(self,ax1,ax2,train_n_ep,test_n_ep,env,seed,
+    def plot_truth_evolution_of_selection(self,ax1,ax2,train_n_ep,test_n_ep,env,seed,limit_metric='from_first_last',
                                           first_graph=False,first_row=False,last_row=False,first_column=False):
         
         df_train=Estimator.read_create_estimates_csv('experiments_intuition/results/SingleEnvAnalysis/data/df_train_truth.csv',self.iter_max)
@@ -1821,12 +2168,22 @@ class EstimationAnalyzer():
 
         a,b=None,None
         for i in range(len(truth_last)):
-            if truth_last[i]-truth_last[0]<=np.std(truth_last[:i+1]) :
-                if a==None or i-a<int(len(truth_last)*0.1):
-                    a=i
-            if truth_last[-1]-truth_last[-1-i]<=np.std(truth_last[-i-1:]) :
-                if b==None or b-len(truth_last)+i<int(len(truth_last)*0.1):
-                    b=len(truth_last)-i
+
+            if limit_metric=='from_mean':
+                if truth_last[i]-np.mean(truth_last[:i+1])<=np.std(truth_last[:i+1]):
+                    if a==None or i-a<int(len(truth_last)*0.1):
+                        a=i
+                if np.mean(truth_last[-i-1:])-truth_last[-1-i]<=np.std(truth_last[-i-1:]) :
+                    if b==None or b-len(truth_last)+i<int(len(truth_last)*0.1):
+                        b=len(truth_last)-i
+
+            if limit_metric=='from_first_last':
+                if truth_last[i]-truth_last[0]<=np.std(truth_last[:i+1]) :
+                    if a==None or i-a<int(len(truth_last)*0.1):
+                        a=i
+                if truth_last[-1]-truth_last[-1-i]<=np.std(truth_last[-i-1:]) :
+                    if b==None or b-len(truth_last)+i<int(len(truth_last)*0.1):
+                        b=len(truth_last)-i
  
 
         ax1.axvline(x=a, color='red', linestyle='-', linewidth=2,label='start learning')
@@ -2312,7 +2669,7 @@ class ProcessIndependentAnalyzer():
         #TODO: este __init__ me esta dando mucha lata por contener muchos calculos de deg,mag,eff asociados a condifuraciones que considerabamos
         #para el analisis intuitivo. Creo que se podria simplificar al if ultimo (que genera estos calculos solo para las configuraciones indicadas).
 
-        #TODO: hay secciones que ponen ##NEW, y es porque he vuelto a recarcular los deg,mag,eff partiendo desde la iteracion 0, sin considerar el 
+        #TODO: hay secciones que ponen ##NEW, y es porque he vuelto a recalcular los deg,mag,eff partiendo desde la iteracion 0, sin considerar el 
         #start_iter (que antes era el 10%, para quitarnos la primera parte aleatoria de aprendizaje).
 
 
@@ -2525,7 +2882,7 @@ class ProcessIndependentAnalyzer():
 
     #===============================================================================================
     # Analisis comparativos de criterios en multiples procesos al mismo tiempo
-    # (independientemente de el algo,env,seed,tiempo con que se defina)
+    # (independientemente del algo,env,seed,tiempo con que se defina)
     #===============================================================================================
     # Funciones para generar datos
     def generate_criteria_rank_by_time_data(self,process_ids,train_grid_n_ep,test_grid_n_ep,test_grid_freq,global_deg_metric,local_deg_metric):
@@ -4136,7 +4493,7 @@ class ProcessIndependentAnalyzer():
     
     # Analisis 2 (peticion Aritz): estimaciones truth vs train vs test en todos los procesos que tenemos generados
     def graph_truth_train_test_together(self,algo,envs,seeds,perc_val_cost,opt_conf_per_env=False,
-                                        together_what='estimates'):
+                                        together_what='estimates',limit_metric='from_first_last'):
 
         '''
         perc_val_cost: ahora mismo solo puede ser [25,20,10,05]
@@ -4181,12 +4538,12 @@ class ProcessIndependentAnalyzer():
                     analyzer.plot_truth_train_test_estimates_together(perc_val_cost,axs[j,i],env,train_n_ep,test_n_ep,first_graph,first_row,first_column,last_row)
                     
                 if together_what=='truth':
-                    analyzer.plot_truth_evolution_of_selection(axs[j*2,i],axs[j*2+1,i],train_n_ep,test_n_ep,env,seeds[j],first_graph,first_row,last_row,first_column)
+                    analyzer.plot_truth_evolution_of_selection(axs[j*2,i],axs[j*2+1,i],train_n_ep,test_n_ep,env,seeds[j],limit_metric,first_graph,first_row,last_row,first_column)
         
         if together_what=='estimates':
-            plt.savefig('experiments_intuition/results/SingleEnvAnalysis/figures/estimates_together/estimates_truth_train_test_'+name+'.pdf')
+            plt.savefig('experiments_intuition/results/SingleEnvAnalysis/figures/estimates_together/estimates_truth_train_test_'+limit_metric+'_'+name+'.pdf')
         if together_what=='truth':
-            plt.savefig('experiments_intuition/results/SingleEnvAnalysis/figures/estimates_together/truth_last_train_test_colores_rankig_'+name+'.pdf')
+            plt.savefig('experiments_intuition/results/SingleEnvAnalysis/figures/estimates_together/truth_last_train_test_limit_'+limit_metric+'_'+name+'.pdf')
 
     # Analisis 3: resumen de analisis completo inicial por entorno (todas las semillas juntas)
     def graph_getstarting_by_env(self,algo,env,prec_with='perc_f',global_deg_metric='best_last_deg',local_deg_metric='paired_diff_probpos',
@@ -4443,6 +4800,259 @@ class ProcessIndependentAnalyzer():
             plt.savefig('experiments_intuition/results/SingleEnvAnalysis/figures/getstarting_by_env/limits_'+env+'_'+global_deg_metric+'_'+local_deg_metric+'_prec_'+prec_with+'.pdf')
 
         #plt.show()
+
+    ############NEW
+    # Analisis 4: estudio de magnitud de la degradacion junto a etapa de aprendizaje donde aparece
+    def graph_pack_all_truth_with_regions(self,pack,seeds,
+                                          global_deg_metric='norm_worsening_to_improvement',local_deg_metric='reward_diff',
+                                          limit_metric='from_first_last',cost_perc=0.1):
+        _,algo,env=pack.split("_")
+        all_truth,all_deg,all_a,all_b=[],[],[],[]
+        deg_init,deg_learning,deg_stabilization=[],[],[]
+
+        # Figura 1: procesos por individual (degradacion-truth-regiones)
+        fig, axs = plt.subplots(4*2,5, figsize=(5*8,4*5),height_ratios=[0.25,1]*4)
+        plt.subplots_adjust(top=0.95,bottom=0.08,left=0.1,right=0.95, hspace=0.1,wspace=0.2)
+
+        for i in range(len(seeds)):
+            first_graph,first_row,last_row,first_column=[False]*4
+
+            if i==0:
+                first_graph=True
+                first_row=True
+            if (i+1)%4==0:
+                last_row=True
+            if i//4==0:
+                first_column=True
+            
+            grapher=EvolutionGrapher('pack_'+algo,env,seeds[i],'',self.iter_max,list_n_traj_ep=[500,250,100,50,25,5],list_n_val_ep=[500,250,100,50,25,5],cost_perc=cost_perc)
+            deg,truth,a,b=grapher.plot_deg_truth_with_regions(axs[i*2-8*((i+1)//4),i//4],axs[i*2+1-8*((i+1)//4),i//4],pack,
+                                                              global_deg_metric,local_deg_metric,
+                                                              limit_metric=limit_metric,
+                                                              first_graph=first_graph,first_row=first_row,first_column=first_column,last_row=last_row)
+            
+            all_truth.append(truth)
+            all_deg.append(deg)
+            all_a.append(a)
+            all_b.append(b)
+
+            deg_init+=deg[:a]
+            deg_learning+=deg[a:b]
+            deg_stabilization+=deg[b:]
+
+        plt.savefig('experiments_intuition/results/SingleEnvAnalysis/figures/pack/'+pack+'_deg_truth_with_regions_'+global_deg_metric+'_'+local_deg_metric+'.pdf')
+
+        # Figura 2: 
+        fig,axs=plt.subplots(1,4, figsize=(8*4,5))
+
+        #------ Truth en conjunto
+        all_truth=np.array(all_truth)
+        axs[0].plot(np.arange(all_truth.shape[1]), np.median(all_truth, axis=0), color='blue')
+        axs[0].fill_between(np.arange(all_truth.shape[1]), np.percentile(all_truth, 5, axis=0), np.percentile(all_truth, 95, axis=0), color='blue', alpha=0.2)
+        axs[0].axvspan(np.percentile(all_a, 5), np.percentile(all_a, 95), color='red', alpha=0.15)
+        axs[0].axvline(np.median(all_a), color='red', linewidth=2)
+        axs[0].axvspan(np.percentile(all_b, 5), np.percentile(all_b, 95), color='black', alpha=0.1)
+        axs[0].axvline(np.median(all_b), color='black', linewidth=2)
+
+        axs[0].set_xlabel("Number of iterations")
+        axs[0].set_ylabel("Truth reward")
+        axs[0].set_title(pack)
+        axs[0].grid(alpha=0.3)
+
+        #------ Distribucion de degradacion por region
+        def desgradation_distribution(ax,title,deg_list):
+            data = np.array(deg_list)
+            kde = KernelDensity(bandwidth=0.1, kernel='gaussian')
+            kde.fit(data[:, None])
+            x = np.linspace(0, 1, 200)
+            y_prob = np.exp(kde.score_samples(x[:, None]))
+
+            ax.plot(x, y_prob, color='gray')
+            ax.fill_between(x, 0, y_prob, color='gray', alpha=0.3)
+            ax.axvline(np.median(data), color='black')
+            ax.set_xlim(-0.1,1.1)
+            ax.set_title(title)
+            ax.legend(title=str(len(data)), loc='upper left',frameon=False)
+
+        desgradation_distribution(axs[1],'Degradation: Initialization',deg_init)
+        desgradation_distribution(axs[2],'Degradation: Learning',deg_learning)
+        desgradation_distribution(axs[3],'Degradation: Stabilization',deg_stabilization)
+
+        plt.savefig('experiments_intuition/results/SingleEnvAnalysis/figures/pack/'+pack+'_all_truth_with_regions_'+global_deg_metric+'_'+local_deg_metric+'.pdf')
+
+        # Figura 3: Degradacion en conjunto
+        fig,axs=plt.subplots(1,4, figsize=(8*4,5))
+
+        #------ Truth en conjunto
+        all_deg=np.array(all_deg)
+        axs[0].plot(np.arange(all_deg.shape[1]), np.median(all_deg, axis=0), color='blue')
+        axs[0].fill_between(np.arange(all_deg.shape[1]), np.percentile(all_deg, 5, axis=0), np.percentile(all_deg, 95, axis=0), color='blue', alpha=0.2)
+        axs[0].axvspan(np.percentile(all_a, 5), np.percentile(all_a, 95), color='red', alpha=0.15)
+        axs[0].axvline(np.median(all_a), color='red', linewidth=2)
+        axs[0].axvspan(np.percentile(all_b, 5), np.percentile(all_b, 95), color='black', alpha=0.1)
+        axs[0].axvline(np.median(all_b), color='black', linewidth=2)
+
+        axs[0].set_xlabel("Number of iterations")
+        axs[0].set_ylabel("Degradation: relative worsening to improvement")
+        axs[0].set_title(pack)
+        axs[0].grid(alpha=0.3)
+
+        desgradation_distribution(axs[1],'Degradation: Initialization',deg_init)
+        desgradation_distribution(axs[2],'Degradation: Learning',deg_learning)
+        desgradation_distribution(axs[3],'Degradation: Stabilization',deg_stabilization)
+
+        plt.savefig('experiments_intuition/results/SingleEnvAnalysis/figures/pack/'+pack+'_all_deg_with_regions_'+global_deg_metric+'_'+local_deg_metric+'.pdf')
+
+    # Analisis 5: como se estan representando las curvas de aprendizaje?
+    def graph_pack_learning_curves_with_criteria(self,pack,seeds,
+                                                 list_n_ep=[500,250,100,50,25,5],list_n_freq=[50,25,10,5,2,1],
+                                                 default_conf=[None,None,None],cost_perc=0.1):
+
+        '''
+        :param default_conf: [default_train_n_ep,default_test_n_ep,default_test_freq]
+        '''
+        
+        path_train='experiments_intuition/results/SingleEnvAnalysis/data/pack/df_train_truth.csv'
+        path_test='experiments_intuition/results/SingleEnvAnalysis/data/pack/df_test_truth.csv'
+        path_last='experiments_intuition/results/SingleEnvAnalysis/data/pack/df_last_truth.csv'
+        path_truth='experiments_intuition/results/SingleEnvAnalysis/data/pack/df_best_truth.csv'
+
+        # Generar datos si no estan ya generados
+        # TODO: una vez ya generadas las bases de datos, esto sigue tardando muchisimo
+        for i in tqdm(range(len(seeds))):
+            #DataFrameUtils.add_truth_to_csv(path_last,pack,seeds[i],criteria='last')
+            #DataFrameUtils.add_truth_to_csv(path_truth,pack,seeds[i],criteria='truth_best')
+            DataFrameUtils.add_truth_to_csv(path_test,pack,seeds[i],criteria='best_val_with_cost',cost_perc=cost_perc)
+
+            # for n_ep in list_n_ep:
+            #     DataFrameUtils.add_truth_to_csv(path_train,pack,seeds[i],conf=[n_ep,None],criteria='best_train')
+
+            # for freq in list_n_freq:
+            #     for n_ep in list_n_ep:
+            #        DataFrameUtils.add_truth_to_csv(path_test,pack,seeds[i],conf=[n_ep,freq],criteria='best_val')
+
+        # Leer bases de datos ya generadas
+        df_train=pd.read_csv(path_train)
+        df_test=pd.read_csv(path_test)
+        df_last=pd.read_csv(path_last)
+        df_truth=pd.read_csv(path_truth)
+
+        def plot_mediana_ci(ax, df, color, label=None, alpha_fill=0.2):
+            ax.plot(df.index , df.median(axis=1), color=color, linewidth=2, label=label)
+            ax.fill_between(df.index, df.quantile(0.05, axis=1), df.quantile(0.95, axis=1), color=color, alpha=alpha_fill)
+            ax.legend()
+
+        fig, axs = plt.subplots(2,3, figsize=(15, 8))
+        plt.subplots_adjust(top=0.96,bottom=0.06,left=0.06,right=0.98, hspace=0.24,wspace=0.22)
+
+        # Reducir bases de datos al pack de interes
+        df_truth_pack=df_truth.filter(like=pack)
+        df_last_pack=df_last.filter(like=pack)
+        df_train_pack=df_train.filter(like=pack)
+        df_test_pack=df_test.filter(like=pack)
+
+        
+        # Truth vs last
+        plot_mediana_ci(axs[0,0], df_truth_pack, color='black', label='Truth best')
+        plot_mediana_ci(axs[0,0], df_last_pack, color='blue', label='Last')
+        axs[0,0].set_xlabel('Learning iteration')
+        axs[0,0].set_ylabel('Truth of selected as best')
+        axs[0,0].set_title('Truth vs Last')
+
+        # Truth vs default train
+        plot_mediana_ci(axs[0,1], df_truth_pack, color='black', label='Truth best')
+        df_train_pack_conf=df_train_pack.loc[:, df_train_pack.columns.str.endswith('_'+str(default_conf[0]))]
+        plot_mediana_ci(axs[0,1], df_train_pack_conf, color='orange', label='Train best')
+        
+        axs[0,1].set_xlabel('Learning iteration')
+        axs[0,1].set_title('Truth vs default Train')
+
+        # Truth vs default test
+        plot_mediana_ci(axs[0,2], df_truth_pack, color='black', label='Truth best')
+        df_test_pack_conf=df_test_pack.loc[:, df_test_pack.columns.str.endswith('_'+str(default_conf[1])+'_'+str(default_conf[2]))]
+        plot_mediana_ci(axs[0,2], df_test_pack_conf, color='green', label='Test best')
+
+        axs[0,2].set_xlabel('Learning iteration')
+        axs[0,2].set_title('Truth vs default Test')
+
+        # Truth vs train
+        plot_mediana_ci(axs[1,0], df_truth_pack, color='black', label='Truth best')
+
+        cmap = cm.get_cmap("Oranges")
+        levels = np.linspace(0.4, 0.9, 6)
+        all_n_ep=[500,250,100,50,25,5][::-1]
+        for i in range(len(all_n_ep)):
+            df_train_pack_conf=df_train_pack.loc[:, df_train_pack.columns.str.endswith('_'+str(all_n_ep[i]))]
+            plot_mediana_ci(axs[1,0], df_train_pack_conf, color=cmap(levels[i]), label=f'n_ep {all_n_ep[i]}')
+
+        axs[1,0].set_xlabel('Learning iteration')
+        axs[1,0].set_ylabel('Truth of selected as best')
+        axs[1,0].set_title('Truth vs Train')
+
+        # Truth vs test freq=1
+        plot_mediana_ci(axs[1,1], df_truth_pack, color='black', label='Truth best')
+
+        cmap = cm.get_cmap("Greens")
+        levels = np.linspace(0.4, 0.9, 6)
+        for i in range(len(all_n_ep)):
+            df_test_pack_conf=df_test_pack.loc[:, df_test_pack.columns.str.endswith('_'+str(all_n_ep[i])+'_1')]
+            plot_mediana_ci(axs[1,1], df_test_pack_conf, color=cmap(levels[i]), label=f'n_ep {all_n_ep[i]}')
+
+        axs[1,1].set_xlabel('Learning iteration')
+        axs[1,1].set_title('Truth vs Test with freq=1')
+
+        # Truth vs test n_ep=5
+        plot_mediana_ci(axs[1,2], df_truth_pack, color='black', label='Truth best')
+
+        cmap = cm.get_cmap("Greens")
+        levels = np.linspace(0.4, 0.9, 6)
+        all_freq=[50,25,10,5,2,1][::-1]
+        for i in range(len(all_freq)):
+            df_test_pack_conf=df_test_pack.loc[:, df_test_pack.columns.str.endswith('_5_'+str(all_freq[i]))]
+            plot_mediana_ci(axs[1,2], df_test_pack_conf, color=cmap(levels[i]), label=f'freq {all_freq[i]}')
+
+        axs[1,2].set_xlabel('Learning iteration')
+        axs[1,2].set_title('Truth vs Test with n_ep=5')
+    
+        plt.savefig('experiments_intuition/results/SingleEnvAnalysis/figures/pack/'+pack+'_learning_curves.pdf')
+
+        # Figura ultima: podemos recomendar un criterio que mejore la representacion?
+        fig, axs = plt.subplots(1, 1, figsize=(4, 4))
+        plot_mediana_ci(axs, df_truth_pack, color='black', label='Truth best')
+        df_test_pack_conf=df_test_pack.loc[:, df_test_pack.columns.str.endswith('_'+str(cost_perc)+'cost')]
+        plot_mediana_ci(axs, df_test_pack_conf, color='green', label='Test best')
+
+        axs.set_xlabel('Learning iteration')
+        axs.set_ylabel('Truth of selected as best')
+        axs.set_title('Truth vs Test (n_ep='+str(cost_perc)+'cost; freq=1)')
+
+        plt.savefig('experiments_intuition/results/SingleEnvAnalysis/figures/pack/'+pack+'_learning_curves_proposal'+str(cost_perc)+'.pdf')
+
+    # Analisis 6: 
+    def generate_data_pack_complete_analysis(self,pack,seeds,
+                                             prec_metric='relative_perc_criteria_best'):
+
+        # Antes de ejecutar esta funcion, se asume que ya se han ejecutado las funciones:
+        # graph_pack_all_truth_with_regions -> con la que se almacenan los datos de deg y regiones
+        # graph_pack_learning_curves_with_criteria -> con la que se almacenana datos de estimaciones truth
+
+        path_last='experiments_intuition/results/SingleEnvAnalysis/data/pack/last_prec.csv'
+        path_train='experiments_intuition/results/SingleEnvAnalysis/data/pack/train_prec.csv'
+        path_test_prec='experiments_intuition/results/SingleEnvAnalysis/data/pack/test_prec.csv'
+        path_test_cost='experiments_intuition/results/SingleEnvAnalysis/data/pack/test_cost.csv'
+
+        
+
+        # Generar los datos de precision y coste de seleccion
+        for i in tqdm(range(len(seeds))):
+            DataFrameUtils.add_criteria_prec_cost_to_csv(path_last,pack,seeds[i],criteria='last')
+
+            for n_ep in [500,250,100,50,25,5]:
+                DataFrameUtils.add_criteria_prec_cost_to_csv(path_train,pack,seeds[i],conf=[n_ep,None],criteria='best_train')
+
+            for freq in [50,25,10,5,2,1]:
+                for n_ep in [500,250,100,50,25,5]:
+                   DataFrameUtils.add_criteria_prec_cost_to_csv([path_test_prec,path_test_cost],pack,seeds[i],conf=[n_ep,freq],criteria='best_val')
 
 
 #==================================================================================================
