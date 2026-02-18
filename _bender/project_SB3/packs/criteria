@@ -1,0 +1,6 @@
+EvalCallback
+    n_eval_episodes: int = 5
+    eval_freq: int = 10000
+
+PPO
+    stats_window_size: int = 100

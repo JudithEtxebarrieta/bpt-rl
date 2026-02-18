@@ -593,6 +593,9 @@ class ModifiedFunctions_OnPolicy:
             writer.writerow([n_policy,self.num_timesteps,total_time_seconds.get_time(),compress_decompress_list(policy_traj_rewards),compress_decompress_list(policy_traj_ep_end),compress_decompress_list(policy_traj_ep_inits),
                              compress_decompress_list(rollout_buffer.advantages.tolist()),compress_decompress_list(rollout_buffer.values.tolist()),compress_decompress_list(rollout_buffer.returns.tolist()),None,None,None,None])
 
+            # writer.writerow([n_policy,self.num_timesteps,total_time_seconds.get_time(),None,None,None,
+            #         None,None,None,None,None,None,None])
+
         total_time_seconds.resume()
         ##########################
 
@@ -1165,12 +1168,18 @@ class Options:
         # Guardar el modelo output
         model.save(library_dir+'/'+experiment_name+'/policy_output.zip')
 
-    def OnPolicy_learn_process(method,env_name,seed,total_timesteps,experiment_name,library_dir, save_policies=True, # Parametros que determinan el proceso
+    def OnPolicy_learn_process(method,env_name, # Parametros que determinan en pack
+                      seed,total_timesteps,experiment_name,library_dir, save_policies=True, # Parametros que determinan el proceso
                       n_steps_per_env=2048,n_workers=1, # Parametros que determinan la interaccion (aqui siempre n_envs_per_worker=1)
                       n_epoch=10,batch_size=64, # Parametros que determinan la actualizacion de politica
                       device='auto', vec_env_type='sequential', # Parametros que determinan el tipo de ejecucion (cpu,gpu)
-                      callback=None, n_eval_ep=5, eval_freq=10000, n_eval_envs=1, deterministic_eval=False,stats_window_size=100, # tecnicas de rastreo
-                      ):# Añadidas como predefinidas las variables/parametros que especifican la interaccion y la actualizacion de politica
+                      policy='MlpPolicy',normalize_advantage=True,gae_lambda=0.95,gamma=0.99,ent_coef=0,learning_rate=0.0003,clip_range=0.2,max_grad_norm=0.5, vf_coef=0.5, # Parametros del aprendizaje
+                      callback=None, n_eval_ep=5, eval_freq=10000, n_eval_envs=1, deterministic_eval=False,stats_window_size=100 # Parametros para criterios de rastreo
+                      
+                                            
+                      ):# Añadidas como predefinidas las variables/parametros que especifican la interaccion y la actualizacion de politica.
+                        # Estos parametros son los especificados en el codigo por defecto de la libreria SB3, despues para cada pack (method,env_name)
+                        # ajustaremos solo aquellos que presenten una configuracion predefinida diferente segun SB3 Zoo.
         
         # Variables globales
         global df_traj, process_dir,make_policy_saving, all_initial_states, eval_env_name, make_eval_deterministic, make_vec_env_type
@@ -1215,6 +1224,7 @@ class Options:
             model = PPO(MlpPolicy,
                         env, seed=seed,
                         n_steps=n_steps_per_env,batch_size=batch_size,n_epochs=n_epoch,
+                        learning_rate=learning_rate,gamma=gamma,gae_lambda=gae_lambda,clip_range=clip_range,normalize_advantage=normalize_advantage,ent_coef=ent_coef,max_grad_norm=max_grad_norm,vf_coef=vf_coef,
                         stats_window_size=stats_window_size,
                         verbose=0,device=device)
 
@@ -1292,6 +1302,66 @@ class Options:
         #print('ep_mean: '+str(ep_mean)+';  ep_std: '+str(ep_std)) # TODO: esto se puede hacer mas sofisticado, con otras metricas, guardar en .csv.
         return eval_metrics
  
+class PackOptions:
+
+    def PPO_BipedalWalker(seed,experiment_name,library_dir):
+
+        ''' Configuracion tomada de: https://github.com/DLR-RM/rl-baselines3-zoo/tree/master/hyperparams
+        BipedalWalker-v3:
+            normalize: true
+            n_envs: 32
+            n_timesteps: !!float 5e6
+            policy: 'MlpPolicy'
+            n_steps: 2048
+            batch_size: 64
+            gae_lambda: 0.95
+            gamma: 0.999
+            n_epochs: 10
+            ent_coef: 0.0
+            learning_rate: !!float 3e-4
+            clip_range: 0.18
+
+        '''
+        Options.OnPolicy_learn_process(
+            'PPO','BipedalWalker-v3', # pack
+            seed,5e6+.5*5e6,experiment_name,library_dir,save_policies=False, # learning process
+            n_steps_per_env=2048,n_workers=32, # learning interaction
+            n_epoch=10,batch_size=64, # policy update
+            device='auto', vec_env_type='sequential', # execution type
+            policy='MlpPolicy',normalize_advantage=True,gae_lambda=0.95,gamma=0.999,ent_coef=0.0, learning_rate=3e-4, clip_range=0.18, # learning process parameters
+            callback=True, n_eval_ep=1000, eval_freq=2048, n_eval_envs=32, deterministic_eval=True # selection criteria
+            )
+
+    def PPO_Walker2d(seed,experiment_name,library_dir):
+
+        ''' Configuracion tomada de: https://github.com/DLR-RM/rl-baselines3-zoo/tree/master/hyperparams
+            Walker2d-v4:
+                normalize: true
+                n_envs: 1
+                policy: 'MlpPolicy'
+                n_timesteps: !!float 1e6
+                batch_size: 32
+                n_steps: 512
+                gamma: 0.99
+                learning_rate: 5.05041e-05
+                ent_coef: 0.000585045
+                clip_range: 0.1
+                n_epochs: 20
+                gae_lambda: 0.95
+                max_grad_norm: 1
+                vf_coef: 0.871923
+
+        '''
+        Options.OnPolicy_learn_process(
+            'PPO','Walker2d-v4', # pack
+            seed,1e6+.5*1e6,experiment_name,library_dir,save_policies=False, # learning process
+            n_steps_per_env=512,n_workers=1, # learning interaction
+            n_epoch=20,batch_size=32, # policy update
+            device='auto', vec_env_type='sequential', # execution type
+            policy='MlpPolicy',normalize_advantage=True,gae_lambda=0.95,gamma=0.99,ent_coef=0.000585045, learning_rate=5.05041e-05, clip_range=0.1,max_grad_norm=1, vf_coef= 0.871923,# learning process parameters
+            callback=True, n_eval_ep=1000, eval_freq=512, n_eval_envs=1, deterministic_eval=True # selection criteria
+            )
+
 
 #==================================================================================================
 # Pruebas de funcionamiento en PC (tambien sirve como ejemplo para el cluster, se especifica
@@ -1303,10 +1373,10 @@ total_timesteps=2048*3
 library_dir='_bender/project_SB3/outputs'
 
 # Experimentos con OnPolicy
-# Options.OnPolicy_learn_process('PPO',env,seed,total_timesteps,'execution1',library_dir,
-#                       n_workers=1,
-#                       device='cpu',
-#                       callback=True,n_eval_ep=2,eval_freq=2048,n_eval_envs=1,deterministic_eval=True)
+Options.OnPolicy_learn_process('PPO',env,seed,total_timesteps,'execution8',library_dir,
+                      n_workers=1,
+                      device='cpu',
+                      callback=True,n_eval_ep=1,eval_freq=2048,n_eval_envs=2,deterministic_eval=True)
 
 # Options.OnPolicylearn_process('PPO',env,seed,total_timesteps,'execution2',library_dir,
 #                       n_workers=2,
