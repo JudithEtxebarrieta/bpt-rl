@@ -1,15 +1,16 @@
 import os
 import pandas as pd
-from Main import EvolutionGrapher, EstimationAnalyzer, CriteriaTuner, ProcessIndependentAnalysis
+from Main import EvolutionGrapher, EstimationAnalyzer, CriteriaTuner, ProcessIndependentAnalyzer
 
 # EXPERIMENTOS
 experiments_intuition=False
 experiments_more_env=False
 experiments_invest_time_evol=False
+experiment_pack=True
 
 #==================================================================================================
 # Experimentos realizados para ganar intuicion 
-# (esta experimentación esta resumida cronologicamente en experiments_intuition/README/main.pdf )
+# (esta experimentación esta resumida cronologicamente en experiments_intuition/README_intuition/main.pdf )
 #==================================================================================================
 
 class SingleProcessAnalisys():
@@ -62,35 +63,12 @@ class SingleProcessAnalisys():
         grapher.graph_magnitude_evolution()
         grapher.graph_magnitude_evolution(True,True)
 
-
 if experiments_intuition:
     # Analisis de procesos individuales (306 iteraciones equivalen aproximadamente a 10000000 steps de aprendizaje con 16 environments en paralelo)
     for i in [1,2,3,4,5,6,7,8,9,10]:
         SingleProcessAnalisys('PPO','Ant',i,'16cpu1gpu_mejorado',306)
         SingleProcessAnalisys('PPO','Humanoid',i,'16cpu1gpu_mejorado',306)
         SingleProcessAnalisys('PPO','HumanoidStandup',i,'16cpu1gpu_mejorado',306)
-
-    # Analisis general (independiente de proceso): comparacion de criterios por nivel de degradacion (usando diferentes metricas de degradacion)
-    all_process_ids=['PPO_Ant_seed1','PPO_Ant_seed2','PPO_Ant_seed3','PPO_Ant_seed4',
-                    'PPO_Humanoid_seed1','PPO_Humanoid_seed2','PPO_Humanoid_seed3','PPO_Humanoid_seed4',
-                    'PPO_HumanoidStandup_seed1']
-    global_deg_metric='mean_update_deg'
-    local_deg_metric='greater_prob'
-    ProcessIndependentAnalysis(all_process_ids[0:4],'all_Ant',global_deg_metric,local_deg_metric)
-    ProcessIndependentAnalysis(all_process_ids[4:8],'all_Humanoid',global_deg_metric,local_deg_metric)
-    ProcessIndependentAnalysis(all_process_ids,'all_Ant_Humanoid_HumanoidStandup',global_deg_metric,local_deg_metric)
-
-    global_deg_metric='weighted_mean_best_later_deg'
-    local_deg_metric='paired_diff_probpos_meanpos'
-    ProcessIndependentAnalysis(all_process_ids[0:4],'all_Ant',global_deg_metric,local_deg_metric)
-    ProcessIndependentAnalysis(all_process_ids[4:8],'all_Humanoid',global_deg_metric,local_deg_metric)
-    ProcessIndependentAnalysis(all_process_ids,'all_Ant_Humanoid_HumanoidStandup',global_deg_metric,local_deg_metric)
-
-    global_deg_metric='weighted_mean_best_later_deg'
-    local_deg_metric='greater_prob'
-    ProcessIndependentAnalysis(all_process_ids[0:4],'all_Ant',global_deg_metric,local_deg_metric)
-    ProcessIndependentAnalysis(all_process_ids[4:8],'all_Humanoid',global_deg_metric,local_deg_metric)
-    ProcessIndependentAnalysis(all_process_ids,'all_Ant_Humanoid_HumanoidStandup',global_deg_metric,local_deg_metric)
 
 #==================================================================================================
 # Experimentos posteriores
@@ -131,3 +109,7 @@ if experiments_invest_time_evol:
     analyzer.graph_invest_time_evolution([500,250,100,50,25,16,10,5])
     analyzer=EstimationAnalyzer('PPO','Walker2d',1,'16cpu1gpu_mejorado',[],[16,10],306)
     analyzer.graph_invest_time_evolution([500,250,100,50,25,16,10,5])
+
+if experiment_pack:
+    analyzer=EstimationAnalyzer('pack_PPO','BipedalWalker',1,'',[500, 250, 100, 50, 25, 5],[500, 250, 100, 50, 25, 5],114)
+    analyzer.graph_cost_analysis()
