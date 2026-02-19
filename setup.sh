@@ -8,6 +8,10 @@ pip install stable-baselines3[extra]
 # PPO with Gymnasium-Robotics environments
 pip install gymnasium-robotics[mujoco-py]
 
+# PPO with Gymnasium-Box2D environmnets
+pip install swig
+pip install gymnasium[box2d]
+
 # PPO with pybullet environments with gymnasium
 pip install pybullet_envs_gymnasium
 
