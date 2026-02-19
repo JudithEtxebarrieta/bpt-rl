@@ -481,7 +481,7 @@ class DataFrameUtils:
 
         return a,b
 
-    def add_criteria_prec_cost_to_csv(path,pack,seed,conf=[None,None],criteria='train',metric='relative_perc_criteria_best'):
+    def add_criteria_prec_cost_to_csv(path,pack,seed,conf=[None,None],criteria='train',metric='relative_perc_criteria_best',cost_perc=0.1):
         _,algo,env=pack.split('_')
         n_ep,freq=conf
         if n_ep==None:
@@ -490,6 +490,9 @@ class DataFrameUtils:
             conf='_'+str(n_ep)
         if n_ep!=None and freq!=None:
             conf='_'+str(n_ep)+'_'+str(freq)
+
+        if criteria=='best_val_with_cost':
+            conf='_'+str(cost_perc)+'cost'
 
         generator=EvolutionGenerator('pack_'+algo,env,seed,'',0.1)
         x_times=generator.df_train['time_seconds'].tolist()
@@ -510,7 +513,7 @@ class DataFrameUtils:
         else:
             df=Estimator.read_create_estimates_csv(path,generator.df_train.shape[0])
             if pack+str(seed)+str(conf)+'_'+metric not in df.columns:
-                eff_evol=generator.effectiveness_evolution(x_times,n_ep=n_ep,freq=None,criteria=criteria,metric=metric,for_analyzer=True)
+                eff_evol=generator.effectiveness_evolution(x_times,n_ep=n_ep,freq=None,criteria=criteria,metric=metric,for_analyzer=True,cost_perc=cost_perc)
                 df[pack+str(seed)+str(conf)+'_'+metric]=eff_evol
                 df.to_csv(path,index=False)
 
@@ -1082,7 +1085,7 @@ class EvolutionGenerator:
         return [self.degradation_level(time,global_metric,local_metric) for time in x_times]
 
     def effectiveness_evolution(self,x_times,n_ep=None,freq=None,criteria='last',normalized=False,for_analyzer=False,
-                                local_deg_metric=None,metric='perc_criteria_best'):
+                                local_deg_metric=None,metric='perc_criteria_best',cost_perc=0.1):
 
         y_eff=[]
         x_extras=[]
@@ -1099,6 +1102,9 @@ class EvolutionGenerator:
             if criteria=='best_val':
                 policy_id,val_time=self.best_policy_validation(time,n_ep,freq)
                 x_extras.append(val_time)
+
+            if criteria=='best_val_with_cost':
+                policy_id=self.best_policy_validation_with_cost(time,cost_perc)
 
             if for_analyzer:
                 val_time=0
@@ -5030,7 +5036,7 @@ class ProcessIndependentAnalyzer():
 
     # Analisis 6: 
     def generate_data_pack_complete_analysis(self,pack,seeds,
-                                             prec_metric='relative_perc_criteria_best'):
+                                             prec_metric='relative_perc_criteria_best',cost_perc=0.1):
 
         # Antes de ejecutar esta funcion, se asume que ya se han ejecutado las funciones:
         # graph_pack_all_truth_with_regions -> con la que se almacenan los datos de deg y regiones
@@ -5042,10 +5048,10 @@ class ProcessIndependentAnalyzer():
         path_test_cost='experiments_intuition/results/SingleEnvAnalysis/data/pack/test_cost.csv'
 
         
-
         # Generar los datos de precision y coste de seleccion
         for i in tqdm(range(len(seeds))):
             DataFrameUtils.add_criteria_prec_cost_to_csv(path_last,pack,seeds[i],criteria='last')
+            DataFrameUtils.add_criteria_prec_cost_to_csv(path_test_prec,pack,seeds[i],criteria='best_val_with_cost',cost_perc=cost_perc)
 
             for n_ep in [500,250,100,50,25,5]:
                 DataFrameUtils.add_criteria_prec_cost_to_csv(path_train,pack,seeds[i],conf=[n_ep,None],criteria='best_train')

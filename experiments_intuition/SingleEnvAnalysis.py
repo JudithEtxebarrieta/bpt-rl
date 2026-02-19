@@ -56,16 +56,21 @@ if experiment_per_pack:
     seeds=list(range(1,17))+[18,19,20,23]
     analyzer=ProcessIndependentAnalyzer(114)
 
-    #analyzer.graph_pack_all_truth_with_regions('pack_PPO_BipedalWalker',seeds,cost_perc=0.25)
-    # analyzer.graph_pack_all_truth_with_regions('pack_PPO_BipedalWalker',seeds,
-    #                                            global_deg_metric='best_last_deg',local_deg_metric='paired_diff_probpos')
-    # analyzer.graph_pack_all_truth_with_regions('pack_PPO_BipedalWalker',seeds,
-    #                                            global_deg_metric='best_last_deg',local_deg_metric='paired_diff_KDEprobpos')
-    # analyzer.graph_pack_all_truth_with_regions('pack_PPO_BipedalWalker',seeds,
-    #                                            global_deg_metric='norm_from_mean_worsening_to_improvement')
+    # Analizando degradacion y regiones de aprendizaje por proceso
+    analyzer.graph_pack_all_truth_with_regions('pack_PPO_BipedalWalker',seeds)
+    analyzer.graph_pack_all_truth_with_regions('pack_PPO_BipedalWalker',seeds,
+                                               global_deg_metric='best_last_deg',local_deg_metric='paired_diff_probpos')
+    analyzer.graph_pack_all_truth_with_regions('pack_PPO_BipedalWalker',seeds,
+                                               global_deg_metric='best_last_deg',local_deg_metric='paired_diff_KDEprobpos')
+    analyzer.graph_pack_all_truth_with_regions('pack_PPO_BipedalWalker',seeds,
+                                               global_deg_metric='norm_from_mean_worsening_to_improvement')
 
+    # Analizando curvas de aprendizaje con diferentes criterios y configuraciones de estos
     analyzer.graph_pack_learning_curves_with_criteria('pack_PPO_BipedalWalker',seeds,default_conf=[5,5,5],cost_perc=0.1) #default_test_n_ep=eval_freq/n_steps
+    analyzer.graph_pack_learning_curves_with_criteria('pack_PPO_BipedalWalker',seeds,default_conf=[5,5,5],cost_perc=0.2)
+    analyzer.graph_pack_learning_curves_with_criteria('pack_PPO_BipedalWalker',seeds,default_conf=[5,5,5],cost_perc=0.25)
 
-    #analyzer.generate_data_pack_complete_analysis('pack_PPO_BipedalWalker',seeds)
-    # analyzer.generate_data_pack_complete_analysis('pack_PPO_BipedalWalker',seeds,
-    #                                               prec_metric='paired_diff_KDEprob0')
+    # Generar datos de precision de seleccion para los diferentes criterios
+    analyzer.generate_data_pack_complete_analysis('pack_PPO_BipedalWalker',seeds,cost_perc=0.25)
+    analyzer.generate_data_pack_complete_analysis('pack_PPO_BipedalWalker',seeds,
+                                                  prec_metric='paired_diff_KDEprob0')
