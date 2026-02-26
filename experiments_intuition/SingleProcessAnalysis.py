@@ -1,6 +1,6 @@
 import os
 import pandas as pd
-from Main import EvolutionGrapher, EstimationAnalyzer, CriteriaTuner, ProcessIndependentAnalyzer
+from Main import EvolutionGrapher, EstimationAnalyzer, CriteriaTuner, Estimator
 
 # EXPERIMENTOS
 experiments_intuition=False
@@ -71,7 +71,8 @@ if experiments_intuition:
         SingleProcessAnalisys('PPO','HumanoidStandup',i,'16cpu1gpu_mejorado',306)
 
 #==================================================================================================
-# Experimentos posteriores
+# Experimentos posteriores al MAEB (entre septiembre y octubre de 2025)
+# (esta experimentación esta resumida en experiments_intuition/README_new/main.pdf )
 #==================================================================================================
 
 if experiments_more_env:
@@ -101,8 +102,6 @@ if experiments_more_env:
     df_opt_conf_per_env=pd.DataFrame(df_opt_conf_per_env,columns=['algo','env','train_n_ep','test_n_ep','test_freq'])
     df_opt_conf_per_env.to_csv("experiments_intuition/results/CriteriaComparison/data/opt_criteria_conf_by_env.csv", index=False)
     
-
-
 if experiments_invest_time_evol:
 
     analyzer=EstimationAnalyzer('PPO','HalfCheetah',1,'16cpu1gpu_mejorado',[],[16,10],306)
@@ -110,6 +109,22 @@ if experiments_invest_time_evol:
     analyzer=EstimationAnalyzer('PPO','Walker2d',1,'16cpu1gpu_mejorado',[],[16,10],306)
     analyzer.graph_invest_time_evolution([500,250,100,50,25,16,10,5])
 
+
+############# NEW
+
 if experiment_pack:
-    analyzer=EstimationAnalyzer('pack_PPO','BipedalWalker',1,'',[500, 250, 100, 50, 25, 5],[500, 250, 100, 50, 25, 5],114)
-    analyzer.graph_cost_analysis()
+
+    seed=14
+    Estimator.compute_estimates('pack_PPO','BipedalWalker',seed,'',[],[])
+    grapher=EvolutionGrapher('pack_PPO','BipedalWalker',seed,'',114)
+    grapher.start_iter=1
+    grapher.start_time=grapher.generator.df_train['time_seconds'].min()
+    grapher.generator.start_time=grapher.generator.df_train['time_seconds'].min()
+
+    grapher.graph_degradation_evolution('best_last_deg','paired_diff_probpos')
+    grapher.graph_degradation_evolution('best_last_deg','greater_prob')
+    grapher.graph_degradation_evolution('norm_worsening_to_improvement','reward_diff')
+    grapher.graph_degradation_evolution('norm_from_mean_worsening_to_improvement','reward_diff')
+    
+    # analyzer=EstimationAnalyzer('pack_PPO','BipedalWalker',1,'',[500, 250, 100, 50, 25, 5],[500, 250, 100, 50, 25, 5],114)
+    # analyzer.graph_cost_analysis()

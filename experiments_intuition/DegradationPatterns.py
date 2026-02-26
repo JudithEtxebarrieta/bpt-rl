@@ -11,7 +11,7 @@ episodios generables desde los posibles estados iniciales). Si las dos cosas ant
 los procesos de aprendizaje sufran de mayor degradacion.
 
 NOTE: 
-Mantengo el script por si me vale en el futuro, pero ahora mismo no fuciona, por haber eliminado datos que ya no uso
+Mantengo el script por si me vale en el futuro, pero ahora mismo no funciona, por haber eliminado datos que ya no uso
 aunque el codigo depende de ellos. Sobre todo son utiles las graficas que tengo guardadas que ejecute usando este codigo.
 
 Conclusiones a las que llegamos con este analisis de prueba:

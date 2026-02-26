@@ -5,6 +5,9 @@ usando ejecucion secuencial y midiendo el tiempo en steps:
 - Identificar semillas interesante: Moderate, Critical, Catastrophic
 - Grafica de kernel density estimation por iteracion
 
+Este experimento "pequeño" se realizo al princio del todo para ganar intuicion 
+(esta experimentacion esta resumida al principio de en experiments_intuition/README_intuition/main.pdf )
+
 NOTE: los cambios bruscos en el average episodic reward (ER) no son por outliers, la distribucion de los ER cambia significativamente.
 
 TODO: (con datos obtenidos del cluster)
@@ -28,7 +31,7 @@ import sys, os
 
 parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0,parent_dir )
-from experiments.our_library import UtilsDataFrame
+from experiments_getstarting.our_library import UtilsDataFrame
 
 
 def learning_curve(x,env_name,seed,title):

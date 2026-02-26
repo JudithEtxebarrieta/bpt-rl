@@ -71,6 +71,9 @@ import seaborn as sns
 from matplotlib.ticker import FuncFormatter, FormatStrFormatter, MultipleLocator
 from matplotlib.colors import ListedColormap
 import matplotlib.cm as cm
+import numpy as np
+from scipy.stats import beta
+from matplotlib.lines import Line2D
 
 
 
@@ -85,6 +88,28 @@ class Estimator:
     1) Estimaciones de expected episodic reward
     2) Estimaciones de degradacion
     '''
+
+    # TODO: esta funcion no la estoy usando
+    def beta_kde(data, x_grid, bandwidth=0.05):
+
+        '''
+        KDE para las degradaciones definidas en [0,1]. Los kernels gaussianos no funcionan bien para variables definidas en
+        intervalos cerrados (gran parte del area del kernel en las muestras de los estremos queda fuera)
+        '''
+        data = np.asarray(data)
+        x_grid = np.asarray(x_grid)
+
+        # parámetros alpha y beta para cada observación
+        alpha = data[:, None] / bandwidth + 1
+        beta_param = (1 - data[:, None]) / bandwidth + 1
+
+        # evaluar todas las betas en todos los puntos
+        kernels = beta.pdf(x_grid[None, :], alpha, beta_param)
+
+        # promedio sobre las observaciones
+        return kernels.mean(axis=0)
+
+
     # TODO: esta funcion igual encaja mas en Converter
     def time_discretizer(algo,env,seed,resources,iter_freq,iter_max,min_time):
         '''
@@ -266,7 +291,7 @@ class Estimator:
         
         if degradation_metric=='reward_diff':
 
-            return [0 if additionals[1]==additionals[0] else abs(np.mean(A)-np.mean(B))/(additionals[1]-additionals[0])][0]
+            return [0 if additionals[1]==additionals[0] else abs(np.mean(A)-np.mean(B))/(max([np.mean(A),np.mean(B)])-additionals[0])][0]
    
     def estimate_update_degradations(algo,env,seed,resources, iter_max,degradation_metric='greater_prob',additionals=None):
         '''
@@ -276,6 +301,7 @@ class Estimator:
 
         # Leer base de datos test
         df_test=pd.read_csv(current_path+'/df_val.csv')
+        df_test_estimates=pd.read_csv(current_path+'/df_val_estimates.csv')
         df_test['ep_rewards']=[Converter.compress_decompress_list(i,compress=False) for i in df_test['ep_rewards']][:iter_max]
 
         # Calcular vector de degradaciones por actualizacion
@@ -291,13 +317,16 @@ class Estimator:
                 update_dominances.append(dominance)
             if degradation_metric in ['paired_diff_probpos_meanpos','paired_diff_median','paired_diff_probpos']:
                 update_degradations.append(Estimator.estimate_any_degradation(np.array(X_current),np.array(X_prev),degradation_metric))
-            if degradation_metric=='relative_reward_diff':
+            if degradation_metric =='relative_reward_diff':
                 update_degradations.append(Estimator.estimate_any_degradation(np.array(X_current),np.array(X_prev),degradation_metric,
                                                                               additionals=additionals))
+            if degradation_metric =='reward_diff':
+                update_degradations.append(Estimator.estimate_any_degradation(np.array(X_current),np.array(X_prev),degradation_metric,
+                                                                              additionals=[df_test_estimates.loc[:row,'truth'].min(),None]))
 
         if degradation_metric=='greater_prob':
             return update_degradations,update_dominances
-        if degradation_metric in ['paired_diff_probpos_meanpos','paired_diff_median','paired_diff_probpos','relative_reward_diff']:
+        if degradation_metric in ['paired_diff_probpos_meanpos','paired_diff_median','paired_diff_probpos','relative_reward_diff','reward_diff']:
             return update_degradations
 
     #----------------------------------------------------------------------------------------------
@@ -344,23 +373,23 @@ class Estimator:
         if 'truth_norm' not in df_val_estimates.columns.tolist():
             df_val_estimates['truth_norm']=[ (i-min(df_val_estimates['truth']))/(max(df_val_estimates['truth'])-min(df_val_estimates['truth'])) for i in df_val_estimates['truth'] ]
             df_val_estimates.to_csv(current_path+'/df_val_estimates.csv', index=False)
-        '''
+        
         # Tambien estimaciones de degradacion para añadir a las learning-curve mas informativas (empezar a considerar la degradacion despues del 10% del tiempo)
-        degradation_metrics=['greater_prob','paired_diff_probpos_meanpos','paired_diff_median','paired_diff_probpos','relative_reward_diff']
+        degradation_metrics=['greater_prob','paired_diff_probpos_meanpos','paired_diff_median','paired_diff_probpos','relative_reward_diff','reward_diff']
         for degradation_metric in degradation_metrics:
             if 'update_deg_'+degradation_metric not in df_val_estimates.columns.tolist():
                 if degradation_metric=='greater_prob':
                     update_degradations,update_dominances=Estimator.estimate_update_degradations(algo,env,seed,resources,df_test.shape[0],degradation_metric)
                     df_val_estimates['update_dominances']=[0 for _ in range(int(df_test.shape[0]*.1))]+update_dominances[int(df_test.shape[0]*.1):]
-                if degradation_metric in ['paired_diff_probpos_meanpos','paired_diff_median','paired_diff_probpos']:
+                if degradation_metric in ['paired_diff_probpos_meanpos','paired_diff_median','paired_diff_probpos','reward_diff']:
                     update_degradations=Estimator.estimate_update_degradations(algo,env,seed,resources,df_test.shape[0],degradation_metric)
-                if degradation_metric=='relative_reward_diff':
+                if degradation_metric in ['relative_reward_diff']:
                     update_degradations=Estimator.estimate_update_degradations(algo,env,seed,resources,df_test.shape[0],degradation_metric,
                                                                                additionals=[df_val_estimates['truth'].min(),df_val_estimates['truth'].max()])
-
-                df_val_estimates['update_deg_'+degradation_metric]=[0 for _ in range(int(df_test.shape[0]*.1))]+update_degradations[int(df_test.shape[0]*.1):]
+  
+                df_val_estimates['update_deg_'+degradation_metric]=update_degradations
                 df_val_estimates.to_csv(current_path+'/df_val_estimates.csv', index=False)
-        '''
+        
         # Calcular estimaciones a partir de datos de train
         df_traj_estimates=Estimator.read_create_estimates_csv(current_path+'/df_traj_estimates.csv',df_train.shape[0])
         if train_test_estimate=='train':
@@ -392,10 +421,10 @@ class Estimator:
                 df_val_estimates[str(n_ep)+'_val_ep']=[Converter.compress_decompress_list(i) for i in zip(estimates,val_times)]
                 df_val_estimates.to_csv(current_path+'/df_val_estimates.csv', index=False)
         
-    def compute_test_estimates_with_max_cost(algo,env,seed,resources,cost_perc=0.1):
+    def compute_test_estimates_with_max_cost(algo,env,seed,resources,cost_perc):
 
         '''
-        Estimaciones test que consumen un cost_perc de coste de validacion frente al tiempo consumido en aprendizaje
+        Estimaciones test que consumen un cost_perc_list de coste de validacion frente al tiempo consumido en aprendizaje
         '''
         test_estimates=[]
 
@@ -407,8 +436,11 @@ class Estimator:
         df_test_ep_rewards=[ Converter.compress_decompress_list(i,compress=False) for i in df_test['ep_rewards']]
         df_test_elapsed_val_times=[ Converter.compress_decompress_list(i,compress=False) for i in df_test['elapsed_val_time']]
         learning_times=df_train['time_seconds'].tolist()
-        validation_time=0
+        val_times=[]
 
+        
+  
+        validation_time=0
         #n_ep_list=[]
         for i,elapsed_time in enumerate(learning_times):
             percentage=(np.array(df_test_elapsed_val_times[i])+validation_time)/elapsed_time
@@ -416,45 +448,165 @@ class Estimator:
             test_estimates.append(np.mean(df_test_ep_rewards[i][:index_best+1]))
             validation_time+=df_test_elapsed_val_times[i][index_best]
 
+            val_times.append(validation_time)
             #n_ep_list.append(index_best+1)
         #print(n_ep_list[:5])
-        df_val_estimates[str(cost_perc)+'cost_val_ep']=test_estimates
+        df_val_estimates[str(cost_perc)+'cost_val_ep']=[Converter.compress_decompress_list(i) for i in zip(test_estimates,val_times)]
         df_val_estimates.to_csv(current_path+'/df_val_estimates.csv', index=False)
-        
+
+
 class DataFrameUtils:
+    '''
+    Las funciones de esta clase permiten añadir/seleccionar a bases de datos que acumulan informacion de diferentes procesos:
+    - Evoluciones de truth, estimaciones, degradaciones, precisiones o costes
+    - Limites de regiones de aprendizaje
+
+    NOTE: Las funciones de esta clase asumen ya se han obtenido las bases de datos asociadas a los estimadore, i.e., se ha 
+    ejecutado previamente el Estimator.compute_estimates asociado al proceso para obtenter:
+    df_traj.csv -> df_traj_estimates.csv
+    df_val.csv-> df_val_estimates.csv
+    '''
+
     def add_truth_to_csv(path,pack,seed,conf=[None,None],criteria='truth_best',cost_perc=0.1):
-
         '''
-        Añadir (si no existe) una columna con el truth de las politicas seleccionadas por los criterios
+        Añadir (si no existe) una columna con el truth de las politicas seleccionadas por los criterios.
 
-        ´criteria´ puede ser 'truth_best', 'worst', 'last', 'best_train', 'best_val', 'best_val_with_cost'
+        `path`: directorio asociado al .csv en donde queremos añadir una nueva evolucion de truth asociada a un proceso
+        `criteria`: puede ser 'truth_best', 'worst', 'last', 'best_train', 'best_val', 'best_val_with_cost'
         '''
+
+        # Extraer informacion de variables "comprimidas"
         _,algo,env=pack.split('_')
         n_ep,freq=conf
+
+        # Determinar el label de la configuracion dependiendo del criterio que se usara para el nombre de la columna
+        if criteria in ['last','truth_best','worst']:
+            conf=''
+        if n_ep!=None and freq==None:
+            conf='_'+str(n_ep)
+        if n_ep!=None and freq!=None:
+            conf='_'+str(n_ep)+'_'+str(freq)
+        if criteria=='best_val_with_cost':
+            conf='_'+str(cost_perc)+'cost'+'_'+str(conf[1])
+
+        # Inicializar clase que permite calcular las evoluciones de truth
+        generator=EvolutionGenerator('pack_'+algo,env,seed,'',0.1) # TODO: aqui si perc_time_start=0 da error, por eso hay que forzarlo despues de inicializar
+        x_times=generator.df_train['time_seconds'].tolist()
+        generator.start_iter=1 # TODO: en esta clase añadi start_iter porque antes del MAEB decidimos eliminar el 10% inicial, ahora ya no lo uso ya que tenemos regiones. no se si merece la pena modificarlo, o tener en cuenta que debo aplicar esta modificacion cuando no quiero considerara un start point desplazado.
+        generator.start_time=x_times[0] 
+        
+        # Leer/generar csv para almacenar la nueva evolucion de truth si no esta ya almacenada
+        df=Estimator.read_create_estimates_csv(path,generator.df_train.shape[0])
+        if pack+str(seed)+str(conf) not in df.columns:
+            truth_evol=generator.truth_evolution(x_times,n_ep=n_ep,freq=x_times[::freq],criteria=criteria,cost_perc=cost_perc)
+            df[pack+str(seed)+str(conf)]=truth_evol
+            df.to_csv(path,index=False)
+
+    def add_estimates_to_csv(path,pack,seed,conf=[None,None],criteria='truth_best',cost_perc=0.1):
+
+        '''
+        Añadir (si no existe) una columna con las estimaciones de las politicas seleccionadas por los criterios.
+
+        `criteria`: puede ser 'best_train', 'best_val', 'best_val_with_cost'
+
+        NOTE: esta funcion la defino con la idea de representar las curvas de aprendizaje que se estan mostrando en la
+        practica experimental. En la practica experimental no creo que las learning curves se muestren con el truth, sino
+        con los valores estimados del truth para cada politica output en cada iteracion. Sin embargo, para nuestro analisis,
+        lo que nos interesa es mostrar la influencia de los criterios conociendo la verdad absoluta. Por tanto, la evolucion de
+        estos estimadores para las learning curves no nos sirve para nuestra motivacion.
+
+        '''
+
+        # Extraer informacion de variables "comprimidas"
+        _,algo,env=pack.split('_')
+        n_ep,freq=conf
+
+        # Determinar el label de la configuracion dependiendo del criterio que se usara para el nombre de la columna
         if n_ep==None:
             conf=''
         if n_ep!=None and freq==None:
             conf='_'+str(n_ep)
         if n_ep!=None and freq!=None:
             conf='_'+str(n_ep)+'_'+str(freq)
-
         if criteria=='best_val_with_cost':
             conf='_'+str(cost_perc)+'cost'
 
+        # Inicializar clase que permite calcular las evoluciones de estimaciones
         generator=EvolutionGenerator('pack_'+algo,env,seed,'',0.1)
         x_times=generator.df_train['time_seconds'].tolist()
         generator.start_iter=1
         generator.start_time=x_times[0]
         
+        # Leer/generar csv para almacenar la nueva evolucion de estimaciones si no esta ya almacenada
         df=Estimator.read_create_estimates_csv(path,generator.df_train.shape[0])
-        #if pack+str(seed)+str(conf) not in df.columns:
-        truth_evol=generator.truth_evolution(x_times,n_ep=n_ep,freq=x_times[::freq],criteria=criteria,cost_perc=cost_perc)
-        df[pack+str(seed)+str(conf)]=truth_evol
-        df.to_csv(path,index=False)
+        if criteria!='last':
+            if pack+str(seed)+str(conf) not in df.columns:
+                estimation_evol=generator.estimation_evolution(x_times,n_ep=n_ep,freq=x_times[::freq],criteria=criteria,cost_perc=cost_perc)
+                df[pack+str(seed)+str(conf)]=estimation_evol
+                df.to_csv(path,index=False)
+        else: # Last es un criterio que no considera estimaciones, por tanto para representar su curva con estimaciones, considero que usa las asociadas a la ultima politica con train default
+            if pack+str(seed)+str(conf) not in df.columns:
+                current_path=parent_dir+'/_bender/project_SB3/data/'+pack+'_seed'+str(seed)+'_'
+                df_train_estimates=pd.read_csv(current_path+'/df_traj_estimates.csv')
+                last=np.array(df_train_estimates[conf.replace('_','')+'_traj_ep'].tolist())
+                df[pack+str(seed)+str(conf)]=last
+                df.to_csv(path,index=False)
+                  
+    def add_criteria_prec_cost_to_csv(path,pack,seed,conf=[None,None,None],criteria='train',metric='relative_perc_criteria_best'):
+        
+        '''
+        Añadir (si no existe) una columna con la precision y coste de las politicas seleccionadas por los criterios.
+
+        `path`: directorio asociado al .csv en donde queremos añadir una nueva evolucion de precisiones y costes asociada a un proceso.
+        En el caso de `criteria` 'best_val' o 'best_val_with_cost' tendra esta extructura: path=[path1,path2], con el csv de las precisiones y de los costes, respectivamente.
+        `criteria`: puede ser 'truth_best', 'worst', 'last', 'best_train', 'best_val', 'best_val_with_cost'
+        '''
+        
+        # Extraer informacion de variables "comprimidas"
+        _,algo,env=pack.split('_')
+        n_ep,freq,cost_perc=conf
+
+        # Determinar el label de la configuracion dependiendo del criterio que se usara para el nombre de la columna
+        if criteria=='last':
+            conf=''
+        if n_ep!=None and freq==None:
+            conf='_'+str(n_ep)
+        if n_ep!=None and freq!=None:
+            conf='_'+str(n_ep)+'_'+str(freq)
+        if criteria=='best_val_with_cost':
+            conf='_'+str(cost_perc)+'cost_'+str(conf[1])
+
+        # Inicializar clase que permite calcular las evoluciones 
+        generator=EvolutionGenerator('pack_'+algo,env,seed,'',0.1)
+        x_times=generator.df_train['time_seconds'].tolist()
+        generator.start_iter=1
+        generator.start_time=x_times[0]
+        
+        # Leer/generar csv para almacenar la nueva evolucion si no esta ya almacenada
+        if criteria in ['best_val','best_val_with_cost']:
+            path_prec,path_cost=path
+            df_prec=Estimator.read_create_estimates_csv(path_prec,generator.df_train.shape[0])
+            df_cost=Estimator.read_create_estimates_csv(path_cost,generator.df_train.shape[0])
+            if pack+str(seed)+str(conf)+'_'+metric not in df_prec.columns:
+                eff_evol,cost_evol=generator.effectiveness_evolution(x_times,n_ep=n_ep,freq=x_times[::freq],criteria=criteria,metric=metric,for_analyzer=True,cost_perc=cost_perc)
+                df_prec[pack+str(seed)+str(conf)+'_'+metric]=eff_evol
+                df_cost[pack+str(seed)+str(conf)+'_'+metric]=np.array(cost_evol) / np.array(x_times)
+                df_prec.to_csv(path_prec,index=False)
+                df_cost.to_csv(path_cost,index=False)
+
+        if criteria in ['last','train']: 
+            df=Estimator.read_create_estimates_csv(path,generator.df_train.shape[0])
+            if pack+str(seed)+str(conf)+'_'+metric not in df.columns:
+                eff_evol=generator.effectiveness_evolution(x_times,n_ep=n_ep,freq=None,criteria=criteria,metric=metric,for_analyzer=True,cost_perc=cost_perc)
+                df[pack+str(seed)+str(conf)+'_'+metric]=eff_evol
+                df.to_csv(path,index=False)
 
     def get_add_deg_to_csv(path,algo,env,seed,resources,global_deg_metric='norm_worsening_to_improvement',local_deg_metric='reward_diff'):
+        '''
+        Obtener/añadir evolucion de degradacion asociada a un proceso.
+        '''
 
-
+        # Inicializar clase que permite calcular las evoluciones de degradacion
         generator=EvolutionGenerator(algo,env,seed,resources,0.1)
         x_times=generator.df_train['time_seconds'].tolist()
         generator.start_iter=1
@@ -462,6 +614,7 @@ class DataFrameUtils:
 
         deg=generator.degradation_evolution(x_times,global_deg_metric,local_deg_metric)
 
+        # Leer/generar csv para almacenar la nueva evolucion de degradacion si no esta ya almacenada
         df=Estimator.read_create_estimates_csv(path,generator.df_train.shape[0])
         if algo+'_'+env+str(seed)+'_'+global_deg_metric+'_'+local_deg_metric not in df.columns:
             df[algo+'_'+env+str(seed)+'_'+global_deg_metric+'_'+local_deg_metric]=deg
@@ -471,54 +624,22 @@ class DataFrameUtils:
 
     def get_add_learning_limits_to_csv(path,algo,env,seed,resources,limit_metric):
 
+        '''
+        Obtener/añadir limites de regiones de aprendizaje.
+        
+        '''
+
+        # Inicializar clase que permite calcular los limites 
         generator=EvolutionGenerator(algo,env,seed,resources,0.1)
         a,b= generator.learning_region_limits(limit_metric)
 
+        # Leer/generar csv para almacenar los nuevos limites si no esta ya almacenada
         df=Converter.generate_df(path,['pack_seed','limit_metric','a','b','T'])
         if not ((df['pack_seed'] == algo+'_'+env+str(seed)) & (df['limit_metric'] == limit_metric)).any():
             df.loc[len(df)]=[algo+'_'+env+str(seed),limit_metric,a,b,generator.df_test.shape[0]]
             df.to_csv(path,index=False)
 
         return a,b
-
-    def add_criteria_prec_cost_to_csv(path,pack,seed,conf=[None,None],criteria='train',metric='relative_perc_criteria_best',cost_perc=0.1):
-        _,algo,env=pack.split('_')
-        n_ep,freq=conf
-        if n_ep==None:
-            conf=''
-        if n_ep!=None and freq==None:
-            conf='_'+str(n_ep)
-        if n_ep!=None and freq!=None:
-            conf='_'+str(n_ep)+'_'+str(freq)
-
-        if criteria=='best_val_with_cost':
-            conf='_'+str(cost_perc)+'cost'
-
-        generator=EvolutionGenerator('pack_'+algo,env,seed,'',0.1)
-        x_times=generator.df_train['time_seconds'].tolist()
-        generator.start_iter=1
-        generator.start_time=x_times[0]
-        
-        if criteria=='best_val':
-            path_prec,path_cost=path
-            df_prec=Estimator.read_create_estimates_csv(path_prec,generator.df_train.shape[0])
-            df_cost=Estimator.read_create_estimates_csv(path_cost,generator.df_train.shape[0])
-            if pack+str(seed)+str(conf)+'_'+metric not in df_prec.columns:
-                eff_evol,cost_evol=generator.effectiveness_evolution(x_times,n_ep=n_ep,freq=x_times[::freq],criteria=criteria,metric=metric,for_analyzer=True)
-                df_prec[pack+str(seed)+str(conf)+'_'+metric]=eff_evol
-                df_cost[pack+str(seed)+str(conf)+'_'+metric]=np.array(cost_evol) / np.array(x_times)
-                df_prec.to_csv(path_prec,index=False)
-                df_cost.to_csv(path_cost,index=False)
-
-        else:
-            df=Estimator.read_create_estimates_csv(path,generator.df_train.shape[0])
-            if pack+str(seed)+str(conf)+'_'+metric not in df.columns:
-                eff_evol=generator.effectiveness_evolution(x_times,n_ep=n_ep,freq=None,criteria=criteria,metric=metric,for_analyzer=True,cost_perc=cost_perc)
-                df[pack+str(seed)+str(conf)+'_'+metric]=eff_evol
-                df.to_csv(path,index=False)
-
-
-        
 
 
 class Converter:
@@ -665,6 +786,8 @@ class Converter:
 
     def bootstrap_mean_and_confidence_interval(data,bootstrap_iterations=1000):
         '''
+        NOTE: por ahora no la he usado
+
         The 95% confidence interval of a given data sample is calculated.
 
         Parameters
@@ -686,6 +809,8 @@ class EvolutionGenerator:
     '''
     Esta clase contiene funciones que permiten generar la evolucion de diferentes metricas durante un proceso determinado por
     algortimo-environment-semilla. 
+
+    NOTE: Asume que ya se ha ejecutado previamente Estimator.compute_estimates, para generar los csv de los estimadores del proceso.
     '''
     def __init__(self,algo,env,seed,resources,perc_time_start):
         '''
@@ -769,6 +894,7 @@ class EvolutionGenerator:
         '''
         TODO: todas las metricas que no usan la variable aleatoria no tienen porque tener asignada una metrica local de degradacion,
         creo que se puede simplificar el codigo asociado a esas metricas globales
+        TODO: tambien hay un monton de metricas que no uso. Deberia borrar todas las que finalmente no he usado en ningun momento.
 
         `global_metric`: 'mean_update_deg', 'weighted_mean_best_later_deg', 'best_last_deg', 'relative_worsening_to_improvement', 'norm_worsening_to_improvement'
         `local_metric`: 'greater_prob', 'paired_diff_probpos_meanpos', 'paired_diff_median', 'paired_diff_probpos', 'relative_reward_diff'
@@ -819,13 +945,11 @@ class EvolutionGenerator:
             last_ep_rewards=np.array(Converter.compress_decompress_list(self.df_test.loc[last_idx,'ep_rewards'],compress=False)[:500])
             degradation_level=Estimator.estimate_any_degradation(last_ep_rewards,best_ep_rewards,local_metric)
             
-
         if global_metric=='relative_worsening_to_improvement':
             # Indices de la ultima y mejor politica en el tiempo transcurrido
             last_idx=self.last_policy(elapsed_time)
             init_idx=last_idx-self.start_iter+1
             truth_best_idx=self.df_test_estimates.loc[init_idx:(last_idx+1),'truth'].idxmax()
-
 
             # Identificar la peor y mejor politicas del proceso (para la normmalizacion y que la metrica local este en [0,1])
             process_worst_ep_truth=self.df_test_estimates['truth'].min()
@@ -897,9 +1021,11 @@ class EvolutionGenerator:
 
         return degradation_level
     
-    def effectiveness(self,elapsed_time,n_policy,normalized,metric='perc_criteria_best'):
+    def effectiveness(self,elapsed_time,n_policy,normalized,metric='perc_criteria_best',val_time=0):
 
         '''
+        TODO: hay alguna metricas que no uso. Deberia borrar todas las que finalmente no he usado en ningun momento.
+
         Diferentes opciones para medir la precision de seleccion: 'perc_criteria_best', 'relative_perc_criteria_best', 'paired_diff_KDEprob0'
 
         Todas ellas estan definidas en [0,1], 1 es beuno y 0 malo.
@@ -922,23 +1048,24 @@ class EvolutionGenerator:
                 return EER_criteria_best/EER_real_best
             
         if metric=='relative_perc_criteria_best':
-            # NEW: este es igual que el anterior pero normalizado con el minimo observado hasta ahora
+            # NOTE: este es igual que el anterior pero normalizado con el minimo observado hasta ahora
 
             last_policy=self.last_policy(elapsed_time)
+            last_policy_without_val=self.last_policy(elapsed_time-val_time)
             if not normalized:
                 EER_list=self.df_test_estimates[(self.df_test['n_policy']<=last_policy) & (self.df_test['n_policy']>=self.start_iter-1)]['truth'].tolist()
+                EER_list_without_val=self.df_test_estimates[(self.df_test['n_policy']<=last_policy_without_val) & (self.df_test['n_policy']>=self.start_iter-1)]['truth'].tolist()
             if normalized:
                 EER_list=self.df_test_estimates[(self.df_test['n_policy']<=last_policy) & (self.df_test['n_policy']>=self.start_iter-1)]['truth_norm'].tolist()
 
             EER_real_best=max(EER_list)
             EER_criteria_best=EER_list[n_policy-self.start_iter+1]
 
-            if EER_criteria_best==min(EER_list):
+            if EER_criteria_best==min(EER_list_without_val):
                 return 1
             else:
-                return (EER_criteria_best-min(EER_list))/(EER_real_best-min(EER_list))
+                return (EER_criteria_best-min(EER_list_without_val))/(EER_real_best-min(EER_list_without_val))
  
-
         if metric=='paired_diff_KDEprob0':
 
             truth_best_idx=self.truth_best_policy(elapsed_time)
@@ -955,12 +1082,11 @@ class EvolutionGenerator:
                 prob0=kde.integrate_box_1d(-0.01, 0.01) 
 
             return prob0
-
-
-        
+ 
     #----------------------------------------------------------------------------------------------
     # Criterios de seleccion
     #----------------------------------------------------------------------------------------------
+    # Devolver el indice de la politica seleccionada
     def truth_best_policy(self,elapsed_time):
         policy_id=self.df_test_estimates[(self.df_train['time_seconds']<=elapsed_time) & (self.df_train['time_seconds']>=self.start_time)]['truth'].idxmax()
         return policy_id
@@ -1012,14 +1138,90 @@ class EvolutionGenerator:
         # Politica seleccionada y tiempo extra total invertido en su seleccion
         return current_val_policies[indx_subseq], sum(times_seq)
     
-    def best_policy_validation_with_cost(self,elapsed_time,cost_perc=0.1):
+    def best_policy_validation_with_cost(self,elapsed_time,cost_perc,freq):
+
+        # Descomprimir columnas necesarias de df_test
+        df_test_ep_rewards=[Converter.compress_decompress_list(i,compress=False) for i in self.df_test['ep_rewards']]
+        df_test_elapsed_val_times=[Converter.compress_decompress_list(i,compress=False) for i in self.df_test['elapsed_val_time']]
+        df_test_n_val_ep=[Converter.compress_decompress_list(i,compress=False) for i in self.df_test['n_val_ep']]
+
+        # Seleccionar unicamente los datos asociados a los episodios reservados para test
+        df_test_ep_rewards=[ep_rewards[500:] for ep_rewards in df_test_ep_rewards]
+
+        # Tiempos de validacion con frecuencia constante indicada
+        current_val_times=[i for i in freq if i<=elapsed_time]
+
+        # Indices de las politicas asociadas a esos tiempos, sus estimaciones de EER y el tiempo adicional consumido para su calculo
+        current_val_policies=[]
+        esti_time_seq=[]
+        validation_time=0 # lo necesito ir almacenando para calcular el n_ep de validacion que consume el coste que queremos
+        for time in current_val_times:
+            policy_id=self.df_train.loc[(self.df_train['time_seconds']<=time) & (self.df_train['time_seconds']>=self.start_time)].index.max()
+            current_val_policies.append(policy_id) 
+
+            val_time_until_truth=df_test_elapsed_val_times[policy_id][df_test_n_val_ep[policy_id].index(500)] 
+            current_times=list(np.array(df_test_elapsed_val_times[policy_id])-val_time_until_truth)[500:]
+
+            percentage=(np.array(current_times)+validation_time)/time
+            index_best=next((i for i, val in reversed(list(enumerate(percentage))) if val < cost_perc), 0)
+
+            esti_time_seq.append([np.mean(df_test_ep_rewards[policy_id][:index_best+1]),current_times[index_best]])
+
+            validation_time+=current_times[index_best]
+
+        # Dividir estimaciones de tiempos adicionales
+        estimated_EER_seq=[]
+        times_seq=[]
+        for estimation, time in esti_time_seq:
+            estimated_EER_seq.append(estimation)
+            times_seq.append(time)
+
+        # Indice de la politica (en la subsecuencia de las politicas asociadas a las frecuencias) con mayor mean ER en validacion
+        indx_subseq=estimated_EER_seq.index(max(estimated_EER_seq))
+
+
+        # Politica seleccionada y tiempo extra total invertido en su seleccion
+        return current_val_policies[indx_subseq], sum(times_seq)
+    
+    # Devolver las estimaciones del mejor seleccionado en lugar del indice de la politica
+    def best_estimation_training(self,elapsed_time,n_traj_ep):
+
+        # Lista de EER estimados con datos de train de la secunencia de politicas visitada hasta el momento
+        estimated_EER_seq=self.df_train_estimates[(self.df_train['time_seconds']<=elapsed_time) & (self.df_train['time_seconds']>=self.start_time)][str(n_traj_ep)+'_traj_ep'].tolist()
+
+        return max(estimated_EER_seq)
+
+    def best_estimation_validation(self,elapsed_time,n_val_ep,freq):
+
+        # Tiempos de validacion con frecuencia constante indicada
+        current_val_times=[i for i in freq if i<=elapsed_time]
+
+        # Indices de las politicas asociadas a esos tiempos, sus estimaciones de EER y el tiempo adicional consumido para su calculo
+        current_val_policies=[]
+        esti_time_seq=[]
+        for time in current_val_times:
+            policy_id=self.df_train.loc[(self.df_train['time_seconds']<=time) & (self.df_train['time_seconds']>=self.start_time)].index.max()
+
+            current_val_policies.append(policy_id) 
+            esti_time_seq.append(self.df_test_estimates[self.df_test_estimates['n_policy']==policy_id][str(n_val_ep)+'_val_ep'].values[0])
+
+        esti_time_seq= [Converter.compress_decompress_list(i,compress=False) for i in esti_time_seq]
+
+        # Dividir estimaciones de tiempos adicionales
+        estimated_EER_seq=[]
+        times_seq=[]
+        for estimation, time in esti_time_seq:
+            estimated_EER_seq.append(estimation)
+            times_seq.append(time)
+
+        return max(estimated_EER_seq)
+    
+    def best_estimation_validation_with_cost(self,elapsed_time,cost_perc=0.1):
         # Lista de EER estimados con datos de test de la secunencia de politicas visitada hasta el momento
         estimated_EER_seq=self.df_test_estimates[(self.df_train['time_seconds']<=elapsed_time) & (self.df_train['time_seconds']>=self.start_time)][str(cost_perc)+'cost_val_ep'].tolist()
 
-        # Indice de la politica con mayor mean ER en train
-        return estimated_EER_seq.index(max(estimated_EER_seq))+self.start_iter-1 # Debemos devolver el indice en la tabla y no en esta secuencia
+        return max(estimated_EER_seq)
 
-    
     #----------------------------------------------------------------------------------------------
     # Generadores de la evolucion completa de las metricas
     #----------------------------------------------------------------------------------------------
@@ -1086,6 +1288,10 @@ class EvolutionGenerator:
 
     def effectiveness_evolution(self,x_times,n_ep=None,freq=None,criteria='last',normalized=False,for_analyzer=False,
                                 local_deg_metric=None,metric='perc_criteria_best',cost_perc=0.1):
+        
+        '''
+        NOTE: ahora esta comentado parte de codigo que si use para ejecutar ciertor experimentos de getstarting despues del MAEB
+        '''
 
         y_eff=[]
         x_extras=[]
@@ -1102,15 +1308,15 @@ class EvolutionGenerator:
             if criteria=='best_val':
                 policy_id,val_time=self.best_policy_validation(time,n_ep,freq)
                 x_extras.append(val_time)
-
             if criteria=='best_val_with_cost':
-                policy_id=self.best_policy_validation_with_cost(time,cost_perc)
+                policy_id,val_time=self.best_policy_validation_with_cost(time,cost_perc,freq)
+                x_extras.append(val_time)
 
             if for_analyzer:
                 val_time=0
 
             #if local_deg_metric==None: # La eficacia se calcula como la relacion de los truth entre la seleccionada y la mejor
-            eff=self.effectiveness(time+val_time,policy_id,normalized=normalized,metric=metric)
+            eff=self.effectiveness(time+val_time,policy_id,normalized=normalized,metric=metric,val_time=val_time)
 
             #NEW: comentado por ahora (esto lo puse asi para construir los getstarting alternativos)    
             # else: # La eficacia se calcula como la degradacion entre la mejor politica y la seleccionada por el criterio
@@ -1121,7 +1327,7 @@ class EvolutionGenerator:
 
             y_eff.append(eff)
 
-        if criteria=='best_val':
+        if criteria in ['best_val','best_val_with_cost']:
             return y_eff, x_extras
         else:
             return y_eff
@@ -1131,7 +1337,7 @@ class EvolutionGenerator:
         '''
         Evolucion del expected episodic reward real de las politicas seleccionadas por el criterio indicado
         
-        :param criteria: puede ser 'truth_best', 'worst', 'last', 'best_train', 'best_val'
+        :param criteria: puede ser 'truth_best', 'worst', 'last', 'best_train', 'best_val', 'best_val_with_cost'
         '''
 
         y_truth=[]
@@ -1147,14 +1353,35 @@ class EvolutionGenerator:
                 policy_id=self.best_policy_training(time,n_ep)
             if criteria=='best_val':
                 policy_id,_=self.best_policy_validation(time,n_ep,freq)
-
             if criteria=='best_val_with_cost':
-                policy_id=self.best_policy_validation_with_cost(time,cost_perc)
+                policy_id,_=self.best_policy_validation_with_cost(time,cost_perc,freq)
             
             y_truth.append(self.df_test_estimates[self.df_test_estimates['n_policy']==policy_id]['truth'].values[0])
         
         return y_truth
+
+    def estimation_evolution(self,x_times,n_ep=None,freq=None,criteria='last',cost_perc=0.1):
+
+        '''
+        Evolucion del expected episodic reward estimado de las politicas seleccionadas por el criterio indicado
         
+        :param criteria: puede ser 'truth_best', 'worst', 'last', 'best_train', 'best_val'
+        '''
+
+        y_estimation=[]
+
+        for time in x_times:
+            if criteria=='best_train':
+                estimation=self.best_estimation_training(time,n_ep)
+            if criteria=='best_val':
+                estimation=self.best_estimation_validation(time,n_ep,freq)
+            if criteria=='best_val_with_cost':
+                estimation=self.best_estimation_validation_with_cost(time,cost_perc)
+            
+            y_estimation.append(estimation)
+        
+        return y_estimation  
+
 class EvolutionGrapher():
     '''
     Las funciones de esta clase permiten representar graficamente la evolucion de diferentes metricas.
@@ -1166,13 +1393,12 @@ class EvolutionGrapher():
                  cost_perc=0.1):
         
         # Primero generar los datos necesarios para las graficas
-        # if len(list_n_traj_ep)+len(list_n_val_ep)==0:
-        #     Estimator.compute_estimates(algo,env,seed,resources,None,None)
-        # for n_ep in tqdm(list_n_traj_ep):
-        #     Estimator.compute_estimates(algo,env,seed,resources,n_ep,'train')
-        # for n_ep in tqdm(list_n_val_ep):
-        #     Estimator.compute_estimates(algo,env,seed,resources,n_ep,'test')
-        Estimator.compute_test_estimates_with_max_cost(algo,env,seed,resources,cost_perc)
+        if len(list_n_traj_ep)+len(list_n_val_ep)==0:
+            Estimator.compute_estimates(algo,env,seed,resources,None,None)
+        for n_ep in tqdm(list_n_traj_ep):
+            Estimator.compute_estimates(algo,env,seed,resources,n_ep,'train')
+        for n_ep in tqdm(list_n_val_ep):
+            Estimator.compute_estimates(algo,env,seed,resources,n_ep,'test')
 
         # Guardar en una variable las 4 bases de datos
         self.generator=EvolutionGenerator(algo,env,seed,resources,perc_time_start)
@@ -1494,11 +1720,14 @@ class EvolutionGrapher():
 
         cmap_white_to_red = mcolors.LinearSegmentedColormap.from_list("white_red", ["white", "red"])
         for i in range(self.iter_max):
-            cmap=Converter.generate_colormap(self.generator.df_test_estimates['update_deg_'+local_metric][i],cmap_white_to_red,0,1)
-            ax.axvline(x=i, color=cmap, linestyle='-', linewidth=1) 
-
-        plt.plot(list(range(self.iter_max))[:int(self.iter_max*.1)], self.generator.df_test_estimates['truth'][:int(self.iter_max*.1)], linewidth=.5,linestyle='--',color='black')
-        plt.plot(list(range(self.iter_max))[int(self.iter_max*.1)-1:], self.generator.df_test_estimates['truth'][int(self.iter_max*.1)-1:], linewidth=1,color='black')
+            if i+1>self.start_iter:
+                cmap=Converter.generate_colormap(self.generator.df_test_estimates['update_deg_'+local_metric][i],cmap_white_to_red,0,1)
+                ax.axvline(x=i, color=cmap, linestyle='-', linewidth=1) 
+            
+        if self.start_iter!=1:
+            plt.plot(list(range(self.iter_max))[:self.start_iter], self.generator.df_test_estimates['truth'][:self.start_iter], linewidth=.5,linestyle='--',color='black')
+    
+        plt.plot(list(range(self.iter_max+1))[self.start_iter-1:], self.generator.df_test_estimates['truth'][self.start_iter-1:], linewidth=1,color='black')
         plt.xlim([0,self.iter_max])
         ax.set_ylabel('Episodic reward')
         ax.set_xlabel('Learning iteration ($i$)')
@@ -1576,66 +1805,12 @@ class EvolutionGrapher():
         #plt.show()
         plt.close()
 
-  
-    #----------------------------------------------------------------------------------------------
-    # NUEVO: experimento por packs
-    #---------------------------------------------------------------------------------------------- 
-    def plot_deg_truth_with_regions(self,ax1,ax2,title,
-                                    global_deg_metric,local_deg_metric,
-                                    limit_metric='from_first_last',
-                                    first_graph=False,first_row=False,first_column=False,last_row=False):
-        '''
-        Learning-curves de un pack-seed con las regiones de aprendizaje y evolucion de degradacion.
-        
-        Esta duncion esta pensada para llamar desde ProcessIndependentAnalyzer.graph_pack_all_truth_with_regions, 
-        he ir dibujando los datos asociados a cada seed en la cuadricula.
-        '''
-
-        colors=list(mcolors.TABLEAU_COLORS.keys())
-        x=range(self.iter_max)
-
-        # Evolucion de degradacion
-        x_times=self.generator.df_train['time_seconds'].tolist()
-        self.generator.start_time=x_times[0]
-        deg=DataFrameUtils.get_add_deg_to_csv('experiments_intuition/results/SingleEnvAnalysis/data/pack/deg_evolution.csv',
-                                                          self.algo,self.env,self.seed,self.resources,
-                                                          global_deg_metric=global_deg_metric,local_deg_metric=local_deg_metric)
-
-        ax1.imshow(np.array(deg)[np.newaxis, :], cmap='gray_r', vmin=0, vmax=1,aspect='auto', interpolation='nearest')
-        ax1.set_aspect(5)
-        ax1.set_xticks([])
-        ax1.set_yticks([])
-        
-        # Evolucion de estimaciones truth
-        truth_last=self.generator.df_test_estimates['truth'][:self.iter_max].tolist()
-        ax2.plot(x, truth_last, label="Truth",color=colors[0])
-
-        # Limites a (donde empieza a aprender) y b (donde se termina de aprender)
-        a,b=DataFrameUtils.get_add_learning_limits_to_csv('experiments_intuition/results/SingleEnvAnalysis/data/pack/learning_regions.csv',
-                                                          self.algo,self.env,self.seed,self.resources,limit_metric=limit_metric)
-
-        ax2.axvline(x=a, color='red', linestyle='-', linewidth=2,label='start learning')
-        ax2.axvline(x=b, color='black', linestyle='-', linewidth=2,label='end learning')
-        ax2.set_xlim(0,self.iter_max)
-
-        if last_row:
-            ax2.set_xlabel("Learning iteration")
-        if first_column:
-            ax2.set_ylabel("Truth reward")
-        if first_graph:
-            ax2.legend(loc="center left", bbox_to_anchor=(-0.9, 0.5))
-        if first_row:
-            ax1.set_title(title)
-        ax2.grid(True)
-
-        return deg,truth_last,a,b
-
 
 class EstimationAnalyzer():  
     '''
     Las funciones de esta clase permiten analizar graficamente el coste de las estimaciones de expected episodic reward
     a partir de los datos test, y la precision de seleccion de las estimaciones con test y train. Los analisis estan enfocados
-    en un unico proceso determinado por una combinacion de algortimo-environment-semilla-resursos
+    en un unico proceso determinado por una combinacion de algortimo-environment-semilla-resursos.
     '''  
 
     def __init__(self,algo,env,seed,resources,
@@ -2262,7 +2437,8 @@ class CriteriaTuner():
     '''
     Esta clase esta enfocada a fijar la configuracion optima de los criterios train (n_ep) y test (n_ep y freq),
     analizando la evolucion de la magnitud para un grid de posibles valores de cada parametro. El tuning se 
-    analiza graficamente, y las mejores configuraciones basadas en ese analisis se almacenan en un csv.
+    analiza graficamente, y las mejores configuraciones basadas en ese analisis se almacenan en un csv. 
+    El analisis esta pensado para un solo proceso determinado por algo-env-seed-resources.
     '''
 
     def __init__(self,algo,env,seed,resources,
@@ -2270,9 +2446,9 @@ class CriteriaTuner():
                 iter_max,perc_time_start=0.1):
     
         # Primero generar los datos necesarios para las graficas
-        # for n_ep in tqdm(list_n_val_ep):
-        #     Estimator.compute_estimates(algo,env,seed,resources,n_ep,'train')
-        #     Estimator.compute_estimates(algo,env,seed,resources,n_ep,'test')
+        for n_ep in tqdm(list_n_val_ep):
+            Estimator.compute_estimates(algo,env,seed,resources,n_ep,'train')
+            Estimator.compute_estimates(algo,env,seed,resources,n_ep,'test')
 
         # Guardar en una variable las 4 bases de datos
         self.generator=EvolutionGenerator(algo,env,seed,resources,perc_time_start)
@@ -2677,8 +2853,6 @@ class ProcessIndependentAnalyzer():
 
         #TODO: hay secciones que ponen ##NEW, y es porque he vuelto a recalcular los deg,mag,eff partiendo desde la iteracion 0, sin considerar el 
         #start_iter (que antes era el 10%, para quitarnos la primera parte aleatoria de aprendizaje).
-
-
 
         start_iter=int(iter_max*perc_time_start)-1
         self.iter_max=iter_max
@@ -4806,259 +4980,6 @@ class ProcessIndependentAnalyzer():
             plt.savefig('experiments_intuition/results/SingleEnvAnalysis/figures/getstarting_by_env/limits_'+env+'_'+global_deg_metric+'_'+local_deg_metric+'_prec_'+prec_with+'.pdf')
 
         #plt.show()
-
-    ############NEW
-    # Analisis 4: estudio de magnitud de la degradacion junto a etapa de aprendizaje donde aparece
-    def graph_pack_all_truth_with_regions(self,pack,seeds,
-                                          global_deg_metric='norm_worsening_to_improvement',local_deg_metric='reward_diff',
-                                          limit_metric='from_first_last',cost_perc=0.1):
-        _,algo,env=pack.split("_")
-        all_truth,all_deg,all_a,all_b=[],[],[],[]
-        deg_init,deg_learning,deg_stabilization=[],[],[]
-
-        # Figura 1: procesos por individual (degradacion-truth-regiones)
-        fig, axs = plt.subplots(4*2,5, figsize=(5*8,4*5),height_ratios=[0.25,1]*4)
-        plt.subplots_adjust(top=0.95,bottom=0.08,left=0.1,right=0.95, hspace=0.1,wspace=0.2)
-
-        for i in range(len(seeds)):
-            first_graph,first_row,last_row,first_column=[False]*4
-
-            if i==0:
-                first_graph=True
-                first_row=True
-            if (i+1)%4==0:
-                last_row=True
-            if i//4==0:
-                first_column=True
-            
-            grapher=EvolutionGrapher('pack_'+algo,env,seeds[i],'',self.iter_max,list_n_traj_ep=[500,250,100,50,25,5],list_n_val_ep=[500,250,100,50,25,5],cost_perc=cost_perc)
-            deg,truth,a,b=grapher.plot_deg_truth_with_regions(axs[i*2-8*((i+1)//4),i//4],axs[i*2+1-8*((i+1)//4),i//4],pack,
-                                                              global_deg_metric,local_deg_metric,
-                                                              limit_metric=limit_metric,
-                                                              first_graph=first_graph,first_row=first_row,first_column=first_column,last_row=last_row)
-            
-            all_truth.append(truth)
-            all_deg.append(deg)
-            all_a.append(a)
-            all_b.append(b)
-
-            deg_init+=deg[:a]
-            deg_learning+=deg[a:b]
-            deg_stabilization+=deg[b:]
-
-        plt.savefig('experiments_intuition/results/SingleEnvAnalysis/figures/pack/'+pack+'_deg_truth_with_regions_'+global_deg_metric+'_'+local_deg_metric+'.pdf')
-
-        # Figura 2: 
-        fig,axs=plt.subplots(1,4, figsize=(8*4,5))
-
-        #------ Truth en conjunto
-        all_truth=np.array(all_truth)
-        axs[0].plot(np.arange(all_truth.shape[1]), np.median(all_truth, axis=0), color='blue')
-        axs[0].fill_between(np.arange(all_truth.shape[1]), np.percentile(all_truth, 5, axis=0), np.percentile(all_truth, 95, axis=0), color='blue', alpha=0.2)
-        axs[0].axvspan(np.percentile(all_a, 5), np.percentile(all_a, 95), color='red', alpha=0.15)
-        axs[0].axvline(np.median(all_a), color='red', linewidth=2)
-        axs[0].axvspan(np.percentile(all_b, 5), np.percentile(all_b, 95), color='black', alpha=0.1)
-        axs[0].axvline(np.median(all_b), color='black', linewidth=2)
-
-        axs[0].set_xlabel("Number of iterations")
-        axs[0].set_ylabel("Truth reward")
-        axs[0].set_title(pack)
-        axs[0].grid(alpha=0.3)
-
-        #------ Distribucion de degradacion por region
-        def desgradation_distribution(ax,title,deg_list):
-            data = np.array(deg_list)
-            kde = KernelDensity(bandwidth=0.1, kernel='gaussian')
-            kde.fit(data[:, None])
-            x = np.linspace(0, 1, 200)
-            y_prob = np.exp(kde.score_samples(x[:, None]))
-
-            ax.plot(x, y_prob, color='gray')
-            ax.fill_between(x, 0, y_prob, color='gray', alpha=0.3)
-            ax.axvline(np.median(data), color='black')
-            ax.set_xlim(-0.1,1.1)
-            ax.set_title(title)
-            ax.legend(title=str(len(data)), loc='upper left',frameon=False)
-
-        desgradation_distribution(axs[1],'Degradation: Initialization',deg_init)
-        desgradation_distribution(axs[2],'Degradation: Learning',deg_learning)
-        desgradation_distribution(axs[3],'Degradation: Stabilization',deg_stabilization)
-
-        plt.savefig('experiments_intuition/results/SingleEnvAnalysis/figures/pack/'+pack+'_all_truth_with_regions_'+global_deg_metric+'_'+local_deg_metric+'.pdf')
-
-        # Figura 3: Degradacion en conjunto
-        fig,axs=plt.subplots(1,4, figsize=(8*4,5))
-
-        #------ Truth en conjunto
-        all_deg=np.array(all_deg)
-        axs[0].plot(np.arange(all_deg.shape[1]), np.median(all_deg, axis=0), color='blue')
-        axs[0].fill_between(np.arange(all_deg.shape[1]), np.percentile(all_deg, 5, axis=0), np.percentile(all_deg, 95, axis=0), color='blue', alpha=0.2)
-        axs[0].axvspan(np.percentile(all_a, 5), np.percentile(all_a, 95), color='red', alpha=0.15)
-        axs[0].axvline(np.median(all_a), color='red', linewidth=2)
-        axs[0].axvspan(np.percentile(all_b, 5), np.percentile(all_b, 95), color='black', alpha=0.1)
-        axs[0].axvline(np.median(all_b), color='black', linewidth=2)
-
-        axs[0].set_xlabel("Number of iterations")
-        axs[0].set_ylabel("Degradation: relative worsening to improvement")
-        axs[0].set_title(pack)
-        axs[0].grid(alpha=0.3)
-
-        desgradation_distribution(axs[1],'Degradation: Initialization',deg_init)
-        desgradation_distribution(axs[2],'Degradation: Learning',deg_learning)
-        desgradation_distribution(axs[3],'Degradation: Stabilization',deg_stabilization)
-
-        plt.savefig('experiments_intuition/results/SingleEnvAnalysis/figures/pack/'+pack+'_all_deg_with_regions_'+global_deg_metric+'_'+local_deg_metric+'.pdf')
-
-    # Analisis 5: como se estan representando las curvas de aprendizaje?
-    def graph_pack_learning_curves_with_criteria(self,pack,seeds,
-                                                 list_n_ep=[500,250,100,50,25,5],list_n_freq=[50,25,10,5,2,1],
-                                                 default_conf=[None,None,None],cost_perc=0.1):
-
-        '''
-        :param default_conf: [default_train_n_ep,default_test_n_ep,default_test_freq]
-        '''
-        
-        path_train='experiments_intuition/results/SingleEnvAnalysis/data/pack/df_train_truth.csv'
-        path_test='experiments_intuition/results/SingleEnvAnalysis/data/pack/df_test_truth.csv'
-        path_last='experiments_intuition/results/SingleEnvAnalysis/data/pack/df_last_truth.csv'
-        path_truth='experiments_intuition/results/SingleEnvAnalysis/data/pack/df_best_truth.csv'
-
-        # Generar datos si no estan ya generados
-        # TODO: una vez ya generadas las bases de datos, esto sigue tardando muchisimo
-        for i in tqdm(range(len(seeds))):
-            #DataFrameUtils.add_truth_to_csv(path_last,pack,seeds[i],criteria='last')
-            #DataFrameUtils.add_truth_to_csv(path_truth,pack,seeds[i],criteria='truth_best')
-            DataFrameUtils.add_truth_to_csv(path_test,pack,seeds[i],criteria='best_val_with_cost',cost_perc=cost_perc)
-
-            # for n_ep in list_n_ep:
-            #     DataFrameUtils.add_truth_to_csv(path_train,pack,seeds[i],conf=[n_ep,None],criteria='best_train')
-
-            # for freq in list_n_freq:
-            #     for n_ep in list_n_ep:
-            #        DataFrameUtils.add_truth_to_csv(path_test,pack,seeds[i],conf=[n_ep,freq],criteria='best_val')
-
-        # Leer bases de datos ya generadas
-        df_train=pd.read_csv(path_train)
-        df_test=pd.read_csv(path_test)
-        df_last=pd.read_csv(path_last)
-        df_truth=pd.read_csv(path_truth)
-
-        def plot_mediana_ci(ax, df, color, label=None, alpha_fill=0.2):
-            ax.plot(df.index , df.median(axis=1), color=color, linewidth=2, label=label)
-            ax.fill_between(df.index, df.quantile(0.05, axis=1), df.quantile(0.95, axis=1), color=color, alpha=alpha_fill)
-            ax.legend()
-
-        fig, axs = plt.subplots(2,3, figsize=(15, 8))
-        plt.subplots_adjust(top=0.96,bottom=0.06,left=0.06,right=0.98, hspace=0.24,wspace=0.22)
-
-        # Reducir bases de datos al pack de interes
-        df_truth_pack=df_truth.filter(like=pack)
-        df_last_pack=df_last.filter(like=pack)
-        df_train_pack=df_train.filter(like=pack)
-        df_test_pack=df_test.filter(like=pack)
-
-        
-        # Truth vs last
-        plot_mediana_ci(axs[0,0], df_truth_pack, color='black', label='Truth best')
-        plot_mediana_ci(axs[0,0], df_last_pack, color='blue', label='Last')
-        axs[0,0].set_xlabel('Learning iteration')
-        axs[0,0].set_ylabel('Truth of selected as best')
-        axs[0,0].set_title('Truth vs Last')
-
-        # Truth vs default train
-        plot_mediana_ci(axs[0,1], df_truth_pack, color='black', label='Truth best')
-        df_train_pack_conf=df_train_pack.loc[:, df_train_pack.columns.str.endswith('_'+str(default_conf[0]))]
-        plot_mediana_ci(axs[0,1], df_train_pack_conf, color='orange', label='Train best')
-        
-        axs[0,1].set_xlabel('Learning iteration')
-        axs[0,1].set_title('Truth vs default Train')
-
-        # Truth vs default test
-        plot_mediana_ci(axs[0,2], df_truth_pack, color='black', label='Truth best')
-        df_test_pack_conf=df_test_pack.loc[:, df_test_pack.columns.str.endswith('_'+str(default_conf[1])+'_'+str(default_conf[2]))]
-        plot_mediana_ci(axs[0,2], df_test_pack_conf, color='green', label='Test best')
-
-        axs[0,2].set_xlabel('Learning iteration')
-        axs[0,2].set_title('Truth vs default Test')
-
-        # Truth vs train
-        plot_mediana_ci(axs[1,0], df_truth_pack, color='black', label='Truth best')
-
-        cmap = cm.get_cmap("Oranges")
-        levels = np.linspace(0.4, 0.9, 6)
-        all_n_ep=[500,250,100,50,25,5][::-1]
-        for i in range(len(all_n_ep)):
-            df_train_pack_conf=df_train_pack.loc[:, df_train_pack.columns.str.endswith('_'+str(all_n_ep[i]))]
-            plot_mediana_ci(axs[1,0], df_train_pack_conf, color=cmap(levels[i]), label=f'n_ep {all_n_ep[i]}')
-
-        axs[1,0].set_xlabel('Learning iteration')
-        axs[1,0].set_ylabel('Truth of selected as best')
-        axs[1,0].set_title('Truth vs Train')
-
-        # Truth vs test freq=1
-        plot_mediana_ci(axs[1,1], df_truth_pack, color='black', label='Truth best')
-
-        cmap = cm.get_cmap("Greens")
-        levels = np.linspace(0.4, 0.9, 6)
-        for i in range(len(all_n_ep)):
-            df_test_pack_conf=df_test_pack.loc[:, df_test_pack.columns.str.endswith('_'+str(all_n_ep[i])+'_1')]
-            plot_mediana_ci(axs[1,1], df_test_pack_conf, color=cmap(levels[i]), label=f'n_ep {all_n_ep[i]}')
-
-        axs[1,1].set_xlabel('Learning iteration')
-        axs[1,1].set_title('Truth vs Test with freq=1')
-
-        # Truth vs test n_ep=5
-        plot_mediana_ci(axs[1,2], df_truth_pack, color='black', label='Truth best')
-
-        cmap = cm.get_cmap("Greens")
-        levels = np.linspace(0.4, 0.9, 6)
-        all_freq=[50,25,10,5,2,1][::-1]
-        for i in range(len(all_freq)):
-            df_test_pack_conf=df_test_pack.loc[:, df_test_pack.columns.str.endswith('_5_'+str(all_freq[i]))]
-            plot_mediana_ci(axs[1,2], df_test_pack_conf, color=cmap(levels[i]), label=f'freq {all_freq[i]}')
-
-        axs[1,2].set_xlabel('Learning iteration')
-        axs[1,2].set_title('Truth vs Test with n_ep=5')
-    
-        plt.savefig('experiments_intuition/results/SingleEnvAnalysis/figures/pack/'+pack+'_learning_curves.pdf')
-
-        # Figura ultima: podemos recomendar un criterio que mejore la representacion?
-        fig, axs = plt.subplots(1, 1, figsize=(4, 4))
-        plot_mediana_ci(axs, df_truth_pack, color='black', label='Truth best')
-        df_test_pack_conf=df_test_pack.loc[:, df_test_pack.columns.str.endswith('_'+str(cost_perc)+'cost')]
-        plot_mediana_ci(axs, df_test_pack_conf, color='green', label='Test best')
-
-        axs.set_xlabel('Learning iteration')
-        axs.set_ylabel('Truth of selected as best')
-        axs.set_title('Truth vs Test (n_ep='+str(cost_perc)+'cost; freq=1)')
-
-        plt.savefig('experiments_intuition/results/SingleEnvAnalysis/figures/pack/'+pack+'_learning_curves_proposal'+str(cost_perc)+'.pdf')
-
-    # Analisis 6: 
-    def generate_data_pack_complete_analysis(self,pack,seeds,
-                                             prec_metric='relative_perc_criteria_best',cost_perc=0.1):
-
-        # Antes de ejecutar esta funcion, se asume que ya se han ejecutado las funciones:
-        # graph_pack_all_truth_with_regions -> con la que se almacenan los datos de deg y regiones
-        # graph_pack_learning_curves_with_criteria -> con la que se almacenana datos de estimaciones truth
-
-        path_last='experiments_intuition/results/SingleEnvAnalysis/data/pack/last_prec.csv'
-        path_train='experiments_intuition/results/SingleEnvAnalysis/data/pack/train_prec.csv'
-        path_test_prec='experiments_intuition/results/SingleEnvAnalysis/data/pack/test_prec.csv'
-        path_test_cost='experiments_intuition/results/SingleEnvAnalysis/data/pack/test_cost.csv'
-
-        
-        # Generar los datos de precision y coste de seleccion
-        for i in tqdm(range(len(seeds))):
-            DataFrameUtils.add_criteria_prec_cost_to_csv(path_last,pack,seeds[i],criteria='last')
-            DataFrameUtils.add_criteria_prec_cost_to_csv(path_test_prec,pack,seeds[i],criteria='best_val_with_cost',cost_perc=cost_perc)
-
-            for n_ep in [500,250,100,50,25,5]:
-                DataFrameUtils.add_criteria_prec_cost_to_csv(path_train,pack,seeds[i],conf=[n_ep,None],criteria='best_train')
-
-            for freq in [50,25,10,5,2,1]:
-                for n_ep in [500,250,100,50,25,5]:
-                   DataFrameUtils.add_criteria_prec_cost_to_csv([path_test_prec,path_test_cost],pack,seeds[i],conf=[n_ep,freq],criteria='best_val')
 
 
 #==================================================================================================

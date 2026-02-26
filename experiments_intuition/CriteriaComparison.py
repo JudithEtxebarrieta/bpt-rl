@@ -69,8 +69,30 @@ class ProcessIndependentAnalysis():
                                                                        global_deg_metric,local_deg_metric)
 
 if experiments_intuition:
-    # Analisis general (independiente de proceso): comparacion de criterios por tiempos de aprendizaje
 
+    # Analisis general (independiente de proceso): comparacion de criterios por nivel de degradacion (usando diferentes metricas de degradacion)
+    all_process_ids=['PPO_Ant_seed1','PPO_Ant_seed2','PPO_Ant_seed3','PPO_Ant_seed4',
+                    'PPO_Humanoid_seed1','PPO_Humanoid_seed2','PPO_Humanoid_seed3','PPO_Humanoid_seed4',
+                    'PPO_HumanoidStandup_seed1']
+    global_deg_metric='mean_update_deg'
+    local_deg_metric='greater_prob'
+    ProcessIndependentAnalysis(all_process_ids[0:4],'all_Ant',global_deg_metric,local_deg_metric)
+    ProcessIndependentAnalysis(all_process_ids[4:8],'all_Humanoid',global_deg_metric,local_deg_metric)
+    ProcessIndependentAnalysis(all_process_ids,'all_Ant_Humanoid_HumanoidStandup',global_deg_metric,local_deg_metric)
+
+    global_deg_metric='weighted_mean_best_later_deg'
+    local_deg_metric='paired_diff_probpos_meanpos'
+    ProcessIndependentAnalysis(all_process_ids[0:4],'all_Ant',global_deg_metric,local_deg_metric)
+    ProcessIndependentAnalysis(all_process_ids[4:8],'all_Humanoid',global_deg_metric,local_deg_metric)
+    ProcessIndependentAnalysis(all_process_ids,'all_Ant_Humanoid_HumanoidStandup',global_deg_metric,local_deg_metric)
+
+    global_deg_metric='weighted_mean_best_later_deg'
+    local_deg_metric='greater_prob'
+    ProcessIndependentAnalysis(all_process_ids[0:4],'all_Ant',global_deg_metric,local_deg_metric)
+    ProcessIndependentAnalysis(all_process_ids[4:8],'all_Humanoid',global_deg_metric,local_deg_metric)
+    ProcessIndependentAnalysis(all_process_ids,'all_Ant_Humanoid_HumanoidStandup',global_deg_metric,local_deg_metric)
+
+    # Analisis general (independiente de proceso): comparacion de criterios por tiempos de aprendizaje
     grid_train_n_ep=[500,250,100,50,25] # Numeros de episodios optimos observados para train
     grid_test_n_ep=[150,50,25,5] # Maximo valor considerado aquel que no supera de media el 25% del tiempo total
     grid_test_freq=[5,1] # Frecuencias optimas observadas despues de los tunings
@@ -98,7 +120,8 @@ if experiments_intuition:
                             grid_train_n_ep=grid_train_n_ep,grid_test_n_ep=grid_test_n_ep,grid_test_freq=grid_test_freq,customized='criteria_by_time')
 
 #==================================================================================================
-# Experimentos posteriores
+# Todos son experimentos posteriores a MAEB (entre septiembre y octubre de 2025)
+# (esta experimentacion esta resumida en experiments_intuition/README_new/main.pdf )
 #==================================================================================================
 
 #--------------------------------------------------------------------------------------------------
