@@ -1304,6 +1304,31 @@ class Options:
  
 class PackOptions:
 
+    def PPO_LunarLanderContinuous(seed,experiment_name,library_dir):
+
+        ''' Configuracion tomada de: https://github.com/DLR-RM/rl-baselines3-zoo/tree/master/hyperparams
+            LunarLanderContinuous-v3:
+            n_envs: 16
+            n_timesteps: !!float 1e6
+            policy: 'MlpPolicy'
+            n_steps: 1024
+            batch_size: 64
+            gae_lambda: 0.98
+            gamma: 0.999
+            n_epochs: 4
+            ent_coef: 0.01
+
+        '''
+        Options.OnPolicy_learn_process(
+            'PPO','LunarLanderContinuous-v3', # pack
+            seed,1e6+.5*1e6,experiment_name,library_dir,save_policies=False, # learning process
+            n_steps_per_env=1024,n_workers=16, # learning interaction
+            n_epoch=4,batch_size=64, # policy update
+            device='auto', vec_env_type='sequential', # execution type
+            policy='MlpPolicy',gae_lambda=0.98,gamma=0.999,ent_coef=0.01, # learning process parameters
+            callback=True, n_eval_ep=1000, eval_freq=1024, n_eval_envs=16, deterministic_eval=True # selection criteria
+            )
+
     def PPO_BipedalWalker(seed,experiment_name,library_dir):
 
         ''' Configuracion tomada de: https://github.com/DLR-RM/rl-baselines3-zoo/tree/master/hyperparams

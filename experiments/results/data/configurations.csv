@@ -1,3 +1,4 @@
 pack,train_default,train_opt,test_default,test_opt,test_cost_opt
-pack_PPO_BipedalWalker,100,,5_5,25_1,0.15_1
-pack_PPO_BipedalWalker,100,,5_5,25_1,0.15_1
+pack_PPO_BipedalWalker,100.0,,5_5,25_1,0.15_1
+pack_PPO_LunarLanderContinuous,100,500.0,5_10,,0.15_1
+pack_PPO_LunarLanderContinuous,100,500.0,5_10,,0.15_1
