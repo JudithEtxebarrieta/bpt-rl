@@ -38,6 +38,7 @@ He visto que cuando #CPU/num_workers no es entero, SF asigna todos los cores a t
 FIXME: aunque todas las politicas se guarden y cargen igual, alguna no se pueden cargar. Sale un error de torch. 
 '''
 
+
 import numpy as np
 import torch as th
 import pandas as pd
@@ -160,7 +161,7 @@ class ModifiedFunctions:
                 if self.training_iteration_since_resume==0:
                     df_traj_csv=pd.DataFrame(columns=['n_policy','n_timesteps','time_seconds','traj_rewards','traj_ep_end','traj_inits'])
                     df_traj_csv.to_csv(join(process_dir, "df_traj.csv"), index=False)
-                    df_val_csv=pd.DataFrame(columns=['n_policy','val_time_seconds','model_load_time','ep_times','ep_between_times','ep_inits','ep_rewards','ep_lens'])
+                    df_val_csv=pd.DataFrame(columns=['n_policy','val_time_seconds','model_load_time','ep_times','ep_between_times','ep_inits','ep_rewards','ep_lens','elapsed_val_time'])
                     df_val_csv.to_csv(join(process_dir, "df_val.csv"), index=False)
 
                 # Guardar las politicas (inspirada en funciones existentes)
@@ -187,12 +188,12 @@ class ModifiedFunctions:
 
                 # Validar la politica y guardar datos de interes
                 val_time_seconds=time.time()
-                ep_rewards,ep_lens,ep_times,ep_inits,model_load_time,ep_between_times=Options.eval_policy(self.cfg.env,self.cfg.seed,n_val_ep,self.cfg.experiment,self.cfg.train_dir,policy_id=n_policy,deterministic_eval=True)
+                ep_rewards,ep_lens,ep_times,ep_inits,model_load_time,ep_between_times,elapsed_val_time=Options.eval_policy(self.cfg.env,self.cfg.seed,n_val_ep,self.cfg.experiment,self.cfg.train_dir,policy_id=n_policy,deterministic_eval=True)
                 val_time_seconds=time.time()-val_time_seconds
 
                 with open(join(experiment_dir(cfg=self.cfg), "process_info/df_val.csv"), 'a',newline='') as df_traj_csv:
                     writer = csv.writer(df_traj_csv)
-                    writer.writerow([n_policy,val_time_seconds,model_load_time,compress_decompress_list(ep_times),compress_decompress_list(ep_between_times),compress_decompress_list(ep_inits),compress_decompress_list(ep_rewards),compress_decompress_list(ep_lens)])
+                    writer.writerow([n_policy,val_time_seconds,model_load_time,compress_decompress_list(ep_times),compress_decompress_list(ep_between_times),compress_decompress_list(ep_inits),compress_decompress_list(ep_rewards),compress_decompress_list(ep_lens),compress_decompress_list(elapsed_val_time[1:])])
 
                 # Comprobar si es la ultima iteracion
                 if n_timesteps>self.cfg.train_for_env_steps:
@@ -295,6 +296,7 @@ class ModifiedFunctions:
         episode_times=[]#MODIFICACION
         episode_between_times=[]#MODIFICACION
         episode_inits=[]#MODIFICACION
+        elapsed_val_time=[0]#MODIFICACION
 
         last_render_start = time.time()
 
@@ -313,8 +315,8 @@ class ModifiedFunctions:
         action_mask = obs.pop("action_mask").to(device) if "action_mask" in obs else None
         rnn_states = th.zeros([env.num_agents, get_rnn_size(cfg)], dtype=th.float32, device=device)
         episode_reward = None
-        episode_len=0#MODIFICACION
-        episode_time=0#MODIFICACION
+        episode_start_time = time.time()#MODIFICACION
+        episode_len = 0#MODIFICACION
 
         finished_episode = [False for _ in range(env.num_agents)]
 
@@ -322,7 +324,7 @@ class ModifiedFunctions:
         num_episodes = 0
         with th.no_grad():
             while not max_frames_reached(num_frames):
-                episode_step_time=time.time()#MODIFICACION
+                
                 normalized_obs = prepare_and_normalize_obs(actor_critic, obs)
 
                 if not cfg.no_render:
@@ -362,7 +364,6 @@ class ModifiedFunctions:
                     else:
                         episode_reward += rew.float()
                         episode_len+=1#MODIFICACION
-                        episode_time+=time.time()-episode_step_time#MODIFICACION
      
                     num_frames += 1
                     #MODIFICADO: para ahorrar tiempo no imprimiendo mensajes
@@ -376,8 +377,10 @@ class ModifiedFunctions:
                             rew = episode_reward[agent_i].item()
                             episode_rewards[agent_i].append(rew)
                             episode_lens.append(episode_len)#MODIFICACION
-                            episode_times.append(episode_time)#MODIFICACION
+                            ep_time=time.time() - episode_start_time#MODIFICACION
+                            episode_times.append(ep_time)#MODIFICACION
                             episode_inits.append(episode_init)# MODIFICACION
+                            elapsed_val_time.append(elapsed_val_time[-1]+ ep_time)#MODIFICACION
 
                             true_objective = rew
                             if isinstance(infos, (list, tuple)):
@@ -395,7 +398,7 @@ class ModifiedFunctions:
                             rnn_states[agent_i] = th.zeros([get_rnn_size(cfg)], dtype=th.float32, device=device)
                             episode_reward[agent_i] = 0
                             episode_len=0#MODIFICACION
-                            episode_time=0#MODIFICACION
+                            episode_start_time = time.time()#MODIFICACION
 
                             if cfg.use_record_episode_statistics:
                                 # we want the scores from the full episode not a single agent death (due to EpisodicLifeEnv wrapper)
@@ -469,7 +472,7 @@ class ModifiedFunctions:
             )
             push_to_hf(experiment_dir(cfg=cfg), cfg.hf_repository)
 
-        return np.array(episode_rewards)[0].tolist(), episode_lens, episode_times, episode_inits,load_time,episode_between_times
+        return np.array(episode_rewards)[0].tolist(), episode_lens, episode_times, episode_inits,load_time,episode_between_times,elapsed_val_time
         #return np.array(episode_rewards)[0],np.mean(np.array(episode_rewards)[0])
 
 
@@ -591,7 +594,76 @@ class Options:
         if eval_policy_from_learn_process: # Esto es porque si llamo a eval_policy desde learn_process, ya no entra en el if de main.
             return start_eval(env,seed,experiment_name,library_dir)
 
+class PackOption:
 
+    def PPO_MuJoCo(env,seed,experiment_name,library_dir,total_timesteps=10000000,method='APPO', # Parametros que determinan el proceso
+                      n_steps_per_env=64, n_workers=8,n_envs_per_worker=8, # Interaccion
+                      n_epoch=3,batch_size=1024, n_batches_per_epoch=8, # Actualizacion de politica
+                      device='cpu', # Tipo de ejecucion
+                      save_every_sec=15, keep_checkpoints=2, save_best_every_sec=5,save_best_metric='reward',save_best_after=100000, stats_avg=100, # Para seleccionar politica output
+                      validate_policies=False,n_validation_ep=100,sleep_between_ep=True, # Si se quieren validar las politicas
+                      log_to_file=True,experiment_summaries_interval=3,heartbeat_interval=20,heartbeat_reporting_interval=180 # Valores por defecto que yo modifico cuando hago validacion para que el proceso no se pare o no consuma tiempo al logear
+                      ):
+        
+        # Variables globales
+        global  total_time, n_val_ep, eval_policy_from_learn_process,end_saving, no_sleep_between_ep
+
+        total_time=MyTimer()
+        total_time.reset()
+        n_val_ep=n_validation_ep
+        eval_policy_from_learn_process=validate_policies
+        end_saving=False
+        no_sleep_between_ep= not sleep_between_ep
+
+        # Para que cuando se valida no se pare por no recibir hearbeats (si no al validar tarda mas que por defecto y piensa que se ha atascado)
+        # y no tarde mas por imprimir mensajes de info.
+        if validate_policies:
+            heartbeat_interval=10**100
+            heartbeat_reporting_interval=10**100
+            experiment_summaries_interval=10**100
+            log_to_file=False
+
+        # Redefinir funciones
+        LearnerWorker.on_new_training_batch=ModifiedFunctions.on_new_training_batch
+
+        def start_learn(algo,env,seed,train_for_env_steps,experiment_name,train_dir):
+
+            # Parametros de interes
+            args = [
+                # Para determinar el proceso
+                f'--algo={algo}',
+                f'--env={env}',
+                f'--seed={seed}',
+                f"--train_for_env_steps={train_for_env_steps}",
+
+                # Para ejecutar en PC (para ejecuciones futuras en el cluster esto quitar)
+                f'--device={device}',
+
+                # Directorio de almacenamiento
+                f'--experiment={experiment_name}',f'--train_dir={train_dir}',
+
+                # Relacionados con la interaccion, modifico los valores por defecto para poder almacenar los datos como en SB3 y poder simular diferentes estimaciones de train
+                f'--worker_num_splits={1}',
+                f'--num_workers={n_workers*n_envs_per_worker}', # ponemos en num_workers el num_workers*num_envs_per_worker anterior
+                f'--num_envs_per_worker={1}', # como los num_envs_per_worker los contamos en num_workers, este lo dejamos en 1
+
+                # Para evitar mensajes de informacion
+                f'--log_to_file={log_to_file}',
+                f'--experiment_summaries_interval={experiment_summaries_interval}',
+
+                # Para evitar pausa por integrar la validacion en el proceso
+                f'--heartbeat_interval={heartbeat_interval}',
+                f'--heartbeat_reporting_interval={heartbeat_reporting_interval}'
+                
+            ]
+            register_mujoco_components()
+            cfg = parse_mujoco_cfg(argv=args)
+            run_rl(cfg)
+
+        if __name__ == "__main__":
+            start_learn(method,env,seed,total_timesteps+0.5*total_timesteps,experiment_name,library_dir)
+
+    
 # Probando que el script funciona.
 method='APPO'
 env='mujoco_ant'
@@ -599,50 +671,57 @@ seed=1
 total_timesteps=100*2*2
 library_dir=os.path.join(os.path.dirname(os.path.abspath(__file__)), "outputs")
 
-# Ejecutar por separado los siguientes tres lear_process
-Options.learn_process(method,env,seed,total_timesteps,'execution_bender1',library_dir,
-                        n_steps_per_env=100,n_workers=1,n_envs_per_worker=1,
-                        batch_size=100*2,n_batches_per_epoch=1,n_epoch=1,
-                        validate_policies=True,n_validation_ep=2)
-
-Options.learn_process(method,env,seed,total_timesteps,'execution_bender2',library_dir,
-                        n_steps_per_env=100,n_workers=1,n_envs_per_worker=1,
-                        batch_size=100*2,n_batches_per_epoch=1,n_epoch=1,
-                        validate_policies=True,n_validation_ep=50)
-
-Options.learn_process(method,env,seed,total_timesteps,'execution_bender3',library_dir,
-                        n_steps_per_env=100,n_workers=1,n_envs_per_worker=1,
-                        batch_size=100*2,n_batches_per_epoch=1,n_epoch=1,
-                        validate_policies=True,n_validation_ep=50,sleep_between_ep=False)
-
-# Mirar si los episodios de validacion estan pareados (he puesto determinitil_eval=True asique deberia)
-df_val=pd.read_csv('_bender/project/outputs/execution_bender1/process_info/df_val.csv')
-print([np.array(compress_decompress_list(i,compress=False)) for i in np.array(compress_decompress_list(df_val['ep_inits'][0],compress=False))])
-print([np.array(compress_decompress_list(i,compress=False)) for i in np.array(compress_decompress_list(df_val['ep_inits'][1],compress=False))])
+# Para ejecucion en el cluster (estamos modificando los parametros pordefecto worker_num_splits y num_envs_per_worker)
+PackOption.PPO_MuJoCo('mujoco_ant',seed,'pack_PPO_Ant_seed'+str(seed)+'_',library_dir,
+                      validate_policies=True,n_validation_ep=1000,
+                      device='gpu',sleep_between_ep=False)
 
 
-# Analizar donde consume tanto tiempo la validacion. Por defecto se espera 0.05 segundos entre episodio, esto realentiza la validacion.
-df_val=pd.read_csv('_bender/project/outputs/execution_bender2/process_info/df_val.csv')
-total_val_time=df_val['val_time_seconds'][0]
-model_load_time=df_val['model_load_time'][0]
-times_per_ep=np.array(compress_decompress_list(df_val['ep_times'][0],compress=False))
-times_between_ep=np.array(compress_decompress_list(df_val['ep_between_times'][0],compress=False))
-print('')
-print('Porcentajes cuando si se hace pausa entre episodios')
-print('Model load: ',model_load_time/total_val_time)
-print('Episode eval: ',sum(times_per_ep)/total_val_time)
-print('Episode restart: ',sum(times_between_ep)/total_val_time)
 
-df_val=pd.read_csv('_bender/project/outputs/execution_bender3/process_info/df_val.csv')
-total_val_time=df_val['val_time_seconds'][0]
-model_load_time=df_val['model_load_time'][0]
-times_per_ep=np.array(compress_decompress_list(df_val['ep_times'][0],compress=False))
-times_between_ep=np.array(compress_decompress_list(df_val['ep_between_times'][0],compress=False))
-print('')
-print('Porcentajes cuando no se hace pausa entre episodios')
-print('Model load: ',model_load_time/total_val_time)
-print('Episode eval: ',sum(times_per_ep)/total_val_time)
-print('Episode restart: ',sum(times_between_ep)/total_val_time)
+# # Ejecutar por separado los siguientes tres lear_process
+# Options.learn_process(method,env,seed,total_timesteps,'execution_bender1',library_dir,
+#                         n_steps_per_env=100,n_workers=1,n_envs_per_worker=1,
+#                         batch_size=100*2,n_batches_per_epoch=1,n_epoch=1,
+#                         validate_policies=True,n_validation_ep=2)
+
+# Options.learn_process(method,env,seed,total_timesteps,'execution_bender2',library_dir,
+#                         n_steps_per_env=100,n_workers=1,n_envs_per_worker=1,
+#                         batch_size=100*2,n_batches_per_epoch=1,n_epoch=1,
+#                         validate_policies=True,n_validation_ep=50)
+
+# Options.learn_process(method,env,seed,total_timesteps,'execution_bender3',library_dir,
+#                         n_steps_per_env=100,n_workers=1,n_envs_per_worker=1,
+#                         batch_size=100*2,n_batches_per_epoch=1,n_epoch=1,
+#                         validate_policies=True,n_validation_ep=50,sleep_between_ep=False)
+
+# # Mirar si los episodios de validacion estan pareados (he puesto determinitil_eval=True asique deberia)
+# df_val=pd.read_csv('_bender/project/outputs/execution_bender1/process_info/df_val.csv')
+# print([np.array(compress_decompress_list(i,compress=False)) for i in np.array(compress_decompress_list(df_val['ep_inits'][0],compress=False))])
+# print([np.array(compress_decompress_list(i,compress=False)) for i in np.array(compress_decompress_list(df_val['ep_inits'][1],compress=False))])
+
+
+# # Analizar donde consume tanto tiempo la validacion. Por defecto se espera 0.05 segundos entre episodio, esto realentiza la validacion.
+# df_val=pd.read_csv('_bender/project/outputs/execution_bender2/process_info/df_val.csv')
+# total_val_time=df_val['val_time_seconds'][0]
+# model_load_time=df_val['model_load_time'][0]
+# times_per_ep=np.array(compress_decompress_list(df_val['ep_times'][0],compress=False))
+# times_between_ep=np.array(compress_decompress_list(df_val['ep_between_times'][0],compress=False))
+# print('')
+# print('Porcentajes cuando si se hace pausa entre episodios')
+# print('Model load: ',model_load_time/total_val_time)
+# print('Episode eval: ',sum(times_per_ep)/total_val_time)
+# print('Episode restart: ',sum(times_between_ep)/total_val_time)
+
+# df_val=pd.read_csv('_bender/project/outputs/execution_bender3/process_info/df_val.csv')
+# total_val_time=df_val['val_time_seconds'][0]
+# model_load_time=df_val['model_load_time'][0]
+# times_per_ep=np.array(compress_decompress_list(df_val['ep_times'][0],compress=False))
+# times_between_ep=np.array(compress_decompress_list(df_val['ep_between_times'][0],compress=False))
+# print('')
+# print('Porcentajes cuando no se hace pausa entre episodios')
+# print('Model load: ',model_load_time/total_val_time)
+# print('Episode eval: ',sum(times_per_ep)/total_val_time)
+# print('Episode restart: ',sum(times_between_ep)/total_val_time)
 
 
 
