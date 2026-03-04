@@ -118,7 +118,7 @@ class ModifiedFunctions_Common:
     def _on_step(self) -> bool:
 
         #####################################
-        global all_initial_states, eval_env_name, make_eval_deterministic, n_policy, make_vec_env_type
+        global all_initial_states, eval_env_name, make_eval_deterministic,n_envs_for_truth_eval, n_policy, make_vec_env_type, make_eval_for_test
 
         def my_evaluate_policy(
             model: "type_aliases.PolicyPredictor",
@@ -171,21 +171,38 @@ class ModifiedFunctions_Common:
             from stable_baselines3.common.monitor import Monitor
 
             if make_eval_deterministic:# MODIFICADO
-                if env.num_envs==1:
-                    env=gym.make(eval_env_name)
-                else:
-                    if make_vec_env_type=='sequential':
-                        env = make_vec_env(eval_env_name, n_envs=env.num_envs)
-                    if make_vec_env_type=='parallel':
-                        env = make_vec_env(eval_env_name, n_envs=env.num_envs,vec_env_cls=SubprocVecEnv)
-                            
+
+                if make_eval_for_test:
+
+                    if env.num_envs==1:
+                        env=gym.make(eval_env_name)
+                    else:
+                        if make_vec_env_type=='sequential':
+                            env = make_vec_env(eval_env_name, n_envs=env.num_envs)
+                        if make_vec_env_type=='parallel':
+                            env = make_vec_env(eval_env_name, n_envs=env.num_envs,vec_env_cls=SubprocVecEnv)
+
+                if not make_eval_for_test:
+
+                    if env.num_envs==1:
+                        env=gym.make(eval_env_name)
+                    else:
+                        if make_vec_env_type=='sequential':
+                            env = make_vec_env(eval_env_name, n_envs=n_envs_for_truth_eval)
+                        if make_vec_env_type=='parallel':
+                            env = make_vec_env(eval_env_name, n_envs=n_envs_for_truth_eval,vec_env_cls=SubprocVecEnv)
+
+
 
             if not isinstance(env, VecEnv):
                 print('ENTRE AQUI')
                 env = DummyVecEnv([lambda: env])  # type: ignore[list-item, return-value]
 
-            if make_eval_deterministic:
-                env.seed(0)# MODIFICADO
+            if make_eval_deterministic:# MODIFICADO: para que sea determinista y considerar diferentes estados iniciales para test y para truth
+                if make_eval_for_test: 
+                    env.seed(99999)
+                else:
+                    env.seed(0)
 
             is_monitor_wrapped = is_vecenv_wrapped(env, VecMonitor) or env.env_is_wrapped(Monitor)[0]
 
@@ -284,6 +301,8 @@ class ModifiedFunctions_Common:
             return mean_reward, std_reward
 
         ###################################
+
+
         continue_training = True
 
         if self.eval_freq > 0 and self.n_calls % self.eval_freq == 0:
@@ -301,6 +320,21 @@ class ModifiedFunctions_Common:
             # Reset success rate buffer
             self._is_success_buffer = []
 
+            # MODIFICACION: Primero validacion para datos truth
+            make_eval_for_test=False
+            episode_rewards_truth, episode_lengths_truth, episode_inits_truth, num_episodes_truth, times_per_episode_truth = my_evaluate_policy( #MODIFICADO
+                self.model,
+                self.eval_env,
+                n_eval_episodes=self.n_eval_episodes,
+                render=self.render,
+                deterministic=self.deterministic,
+                return_episode_rewards=True,
+                warn=self.warn,
+                callback=self._log_success_callback,
+            )
+
+            #MODIFICACION: despues validacion para simulacion test
+            make_eval_for_test=True
             episode_rewards, episode_lengths, episode_inits, num_episodes, times_per_episode = my_evaluate_policy( #MODIFICADO
                 self.model,
                 self.eval_env,
@@ -312,11 +346,12 @@ class ModifiedFunctions_Common:
                 callback=self._log_success_callback,
             )
 
+
             #######################################MODIFICADO
             # Escribir datos de validacion de la nueva politica
             with open(join(process_dir, "df_val.csv"), 'a',newline='') as df_val_csv:
                 writer = csv.writer(df_val_csv)
-                writer.writerow([n_policy,compress_decompress_list(episode_inits),compress_decompress_list(episode_rewards),compress_decompress_list([int(i) for i in episode_lengths]),compress_decompress_list([int(i) for i in num_episodes]),compress_decompress_list(times_per_episode)])
+                writer.writerow([n_policy,compress_decompress_list(episode_inits_truth+episode_inits),compress_decompress_list(episode_rewards_truth+episode_rewards),compress_decompress_list([int(i) for i in episode_lengths_truth+episode_lengths]),compress_decompress_list([int(i) for i in num_episodes_truth+list(np.array(num_episodes)+num_episodes_truth[-1])]),compress_decompress_list([0]*len(times_per_episode_truth)+times_per_episode)])
             #######################################
 
             if self.log_path is not None:
@@ -534,7 +569,7 @@ class ModifiedFunctions_OnPolicy:
 
             # Give access to local variables
             callback.update_locals(locals())
-            total_time_seconds.pause()#MODIFICACION: cuando no de define un callback esto no trada nada, pero cuando si se define esto tarda porque se hace validacion
+            total_time_seconds.pause()#MODIFICACION: cuando no se define un callback esto no tarda nada, pero cuando si se define esto tarda porque se hace validacion
             if not callback.on_step():
                 return False
             total_time_seconds.resume()#MODIFICACION
@@ -1105,18 +1140,20 @@ class ModifiedFunctions_OffPolicy:
 class Options:
     def OffPolicy_learn_process(method,env_name,seed,total_timesteps,experiment_name,library_dir, save_policies=True, # Parametros que determinan el proceso
                       n_steps_per_env=1,n_workers=1, # Parametros que determinan la interaccion (aqui siempre n_envs_per_worker=1)
+                      truth_n_workers=1, # Para el truth podemos usar un numero de workers mas elevado diferente al de por defecto para validacion
                       n_epoch=1,batch_size=256, # Parametros que determinan la actualizacion de politica
                       device='auto', vec_env_type='sequential', # Parametros que determinan el tipo de ejecucion (cpu,gpu)
                       callback=None, n_eval_ep=5, eval_freq=10000, n_eval_envs=1, deterministic_eval=False,stats_window_size=100, # tecnicas de rastreo
                       ):# Añadidas como predefinidas las variables/parametros que especifican la interaccion y la actualizacion de politica
         
         # Variables globales
-        global df_traj, process_dir,make_policy_saving,all_initial_states, eval_env_name, make_eval_deterministic, make_vec_env_type
+        global df_traj, process_dir,make_policy_saving,all_initial_states, eval_env_name, make_eval_deterministic, make_vec_env_type, n_envs_for_truth_eval
         df_traj=[]
         make_policy_saving= save_policies
         process_dir=library_dir+'/'+experiment_name+'/process_info'
         all_initial_states=[]
         eval_env_name=env_name
+        n_envs_for_truth_eval=truth_n_workers
         make_eval_deterministic=deterministic_eval
         make_vec_env_type=vec_env_type
 
@@ -1171,6 +1208,7 @@ class Options:
     def OnPolicy_learn_process(method,env_name, # Parametros que determinan en pack
                       seed,total_timesteps,experiment_name,library_dir, save_policies=True, # Parametros que determinan el proceso
                       n_steps_per_env=2048,n_workers=1, # Parametros que determinan la interaccion (aqui siempre n_envs_per_worker=1)
+                      truth_n_workers=1, # Para el truth podemos usar un numero de workers mas elevado diferente al de por defecto para validacion
                       n_epoch=10,batch_size=64, # Parametros que determinan la actualizacion de politica
                       device='auto', vec_env_type='sequential', # Parametros que determinan el tipo de ejecucion (cpu,gpu)
                       policy='MlpPolicy',normalize_advantage=True,gae_lambda=0.95,gamma=0.99,ent_coef=0,learning_rate=0.0003,clip_range=0.2,max_grad_norm=0.5, vf_coef=0.5, # Parametros del aprendizaje
@@ -1182,12 +1220,13 @@ class Options:
                         # ajustaremos solo aquellos que presenten una configuracion predefinida diferente segun SB3 Zoo.
         
         # Variables globales
-        global df_traj, process_dir,make_policy_saving, all_initial_states, eval_env_name, make_eval_deterministic, make_vec_env_type
+        global df_traj, process_dir,make_policy_saving, all_initial_states, eval_env_name, make_eval_deterministic, make_vec_env_type, n_envs_for_truth_eval
         df_traj=[]
         make_policy_saving=save_policies
         process_dir=library_dir+'/'+experiment_name+'/process_info'
         all_initial_states=[]
         eval_env_name=env_name
+        n_envs_for_truth_eval=truth_n_workers
         make_eval_deterministic=deterministic_eval
         make_vec_env_type=vec_env_type
 
@@ -1221,7 +1260,7 @@ class Options:
                 eval_env = make_vec_env(env_name, n_envs=n_eval_envs,vec_env_cls=SubprocVecEnv)
 
         if method=='PPO':
-            model = PPO(MlpPolicy,
+            model = PPO(policy,
                         env, seed=seed,
                         n_steps=n_steps_per_env,batch_size=batch_size,n_epochs=n_epoch,
                         learning_rate=learning_rate,gamma=gamma,gae_lambda=gae_lambda,clip_range=clip_range,normalize_advantage=normalize_advantage,ent_coef=ent_coef,max_grad_norm=max_grad_norm,vf_coef=vf_coef,
@@ -1322,11 +1361,11 @@ class PackOptions:
         Options.OnPolicy_learn_process(
             'PPO','LunarLanderContinuous-v3', # pack
             seed,1e6+.5*1e6,experiment_name,library_dir,save_policies=False, # learning process
-            n_steps_per_env=1024,n_workers=16, # learning interaction
+            n_steps_per_env=1024,n_workers=16,truth_n_workers=16, # learning interaction
             n_epoch=4,batch_size=64, # policy update
             device='auto', vec_env_type='sequential', # execution type
             policy='MlpPolicy',gae_lambda=0.98,gamma=0.999,ent_coef=0.01, # learning process parameters
-            callback=True, n_eval_ep=1000, eval_freq=1024, n_eval_envs=16, deterministic_eval=True # selection criteria
+            callback=True, n_eval_ep=500, eval_freq=1024, n_eval_envs=16, deterministic_eval=True # selection criteria
             )
 
     def PPO_BipedalWalker(seed,experiment_name,library_dir):
@@ -1350,11 +1389,11 @@ class PackOptions:
         Options.OnPolicy_learn_process(
             'PPO','BipedalWalker-v3', # pack
             seed,5e6+.5*5e6,experiment_name,library_dir,save_policies=False, # learning process
-            n_steps_per_env=2048,n_workers=32, # learning interaction
+            n_steps_per_env=2048,n_workers=32, truth_n_workers=32, # learning interaction
             n_epoch=10,batch_size=64, # policy update
             device='auto', vec_env_type='sequential', # execution type
             policy='MlpPolicy',normalize_advantage=True,gae_lambda=0.95,gamma=0.999,ent_coef=0.0, learning_rate=3e-4, clip_range=0.18, # learning process parameters
-            callback=True, n_eval_ep=1000, eval_freq=2048, n_eval_envs=32, deterministic_eval=True # selection criteria
+            callback=True, n_eval_ep=500, eval_freq=2048, n_eval_envs=32, deterministic_eval=True # selection criteria
             )
 
     def PPO_Walker2d(seed,experiment_name,library_dir):
@@ -1380,12 +1419,13 @@ class PackOptions:
         Options.OnPolicy_learn_process(
             'PPO','Walker2d-v4', # pack
             seed,1e6+.5*1e6,experiment_name,library_dir,save_policies=False, # learning process
-            n_steps_per_env=512,n_workers=1, # learning interaction
+            n_steps_per_env=512,n_workers=1,truth_n_workers=16, # learning interaction
             n_epoch=20,batch_size=32, # policy update
             device='auto', vec_env_type='sequential', # execution type
             policy='MlpPolicy',normalize_advantage=True,gae_lambda=0.95,gamma=0.99,ent_coef=0.000585045, learning_rate=5.05041e-05, clip_range=0.1,max_grad_norm=1, vf_coef= 0.871923,# learning process parameters
-            callback=True, n_eval_ep=1000, eval_freq=512, n_eval_envs=1, deterministic_eval=True # selection criteria
+            callback=True, n_eval_ep=500, eval_freq=512, n_eval_envs=1, deterministic_eval=True # selection criteria
             )
+        
 
 
 #==================================================================================================
@@ -1398,10 +1438,10 @@ total_timesteps=2048*3
 library_dir='_bender/project_SB3/outputs'
 
 # Experimentos con OnPolicy
-Options.OnPolicy_learn_process('PPO',env,seed,total_timesteps,'execution8',library_dir,
-                      n_workers=1,
-                      device='cpu',
-                      callback=True,n_eval_ep=1,eval_freq=2048,n_eval_envs=2,deterministic_eval=True)
+# Options.OnPolicy_learn_process('PPO',env,seed,total_timesteps,'execution8',library_dir,
+#                       n_workers=1,
+#                       device='cpu',
+#                       callback=True,n_eval_ep=1,eval_freq=2048,n_eval_envs=2,deterministic_eval=True)
 
 # Options.OnPolicylearn_process('PPO',env,seed,total_timesteps,'execution2',library_dir,
 #                       n_workers=2,
@@ -1432,12 +1472,17 @@ Options.OnPolicy_learn_process('PPO',env,seed,total_timesteps,'execution8',libra
 #                         device='cpu',
 #                         callback=True,n_eval_ep=2,eval_freq=1024,n_eval_envs=2,deterministic_eval=True)
 
+# if __name__ == "__main__": 
+#     PackOptions.PPO_Walker2d(seed,'execution10',library_dir)
+
+
 
 # Comprobar que los estados iniciales de validacion son los mismos
 # df_val=pd.read_csv('_bender/project_SB3/outputs/execution3/process_info/df_val.csv')
 # df_traj=pd.read_csv('_bender/project_SB3/outputs/execution3/process_info/df_traj.csv')
 # print([np.array(compress_decompress_list(i,compress=False)) for i in np.array(compress_decompress_list(df_val['ep_inits'][0],compress=False))])
 # print([np.array(compress_decompress_list(i,compress=False)) for i in np.array(compress_decompress_list(df_val['ep_inits'][1],compress=False))])
+
 
 
 # Dimensiones de trajectorias 
