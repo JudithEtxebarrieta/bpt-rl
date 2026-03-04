@@ -1,6 +1,8 @@
 '''
 Este script permite generar en el cluster los df necesarios para el analisis a partir de los df_traj.csv y df_val.csv almacenados por
 proceso. De esta manera no hace falta bajar las df grandes al PC, sino que podemos bajar ya las df que usamos para el analisis.
+
+NOTE: los path necesarios ya estan correctamente escritos en este script con los pasth del cluster.
 '''
 
 import os
@@ -79,7 +81,7 @@ class DataGenerator:
                    self.add_criteria_prec_cost_to_csv([data_path+'df_test_prec.csv',data_path+'df_test_cost.csv'],pack,seeds[i],conf=[n_ep,freq,None],criteria='best_val')
                 for cost_perc in list_cost_perc:
                     self.add_criteria_prec_cost_to_csv([data_path+'df_test_prec.csv',data_path+'df_test_cost.csv',data_path+'df_test_n_ep.csv'],pack,seeds[i],conf= [None,freq,cost_perc],criteria='best_val_with_cost')
-                    self.add_truth_to_csv(self.data_path+'df_test_truth.csv',self.pack,self.seeds[i],conf= [None,freq],criteria='best_val_with_cost',cost_perc=cost_perc)
+                    #self.add_truth_to_csv(data_path+'df_test_truth.csv',self.pack,self.seeds[i],conf= [None,freq],criteria='best_val_with_cost',cost_perc=cost_perc)
 
         # Guardar variable
         self.data_path=data_path
@@ -1307,3 +1309,4 @@ class EvolutionGenerator:
 if __name__ == "__main__":
 
     DataGenerator('pack_PPO_BipedalWalker',list(range(1,31)),[50,25,10,5,2,1])
+    DataGenerator('pack_PPO_LunarLanderContinuous',list(range(1,31)),[40,20,10,5,2,1])
