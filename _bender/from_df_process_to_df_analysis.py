@@ -28,61 +28,56 @@ class DataGenerator:
                 list_freq,list_n_ep=[500,250,100,50,25,5], list_cost_perc=[0.05,0.1,0.15,0.2,0.25], # la lista de frecuanzias depende del numero de iteraciones con que se ejecute cada pack
                 global_deg_metric='norm_from_mean_worsening_to_improvement',local_deg_metric='reward_diff',prec_metric='relative_perc_criteria_best', limit_metric='from_first_last',
                 last_estimates_conf=100,
-                data_common_path=os.path.join(os.path.dirname(os.path.abspath(__file__)), "outputs")):
+                data_common_path=os.path.join(os.path.dirname(os.path.abspath(__file__)), "outputs"),
+                already_generated_main_data=False):
         
         data_path=data_common_path+'/'+pack+'/analysis_data/'
 
-        # Generar base de datos en donde se guardaran configuraciones por defecto y optimas de los criterios por pack, y los errores de las learning curves
-        # df_conf = self.read_generate_df(data_common_path+'/configurations.csv',['pack','train_default','train_opt','test_default','test_opt','test_cost_opt'])
-        # df_err=self.read_generate_df(data_common_path+'/errors.csv',['pack','last','train_default','test_default','test_cost_opt'])
-        # df_conf.loc[len(df_conf)] = [pack, None, None, None, None, None]
-        # df_err.loc[len(df_err)] = [pack, None, None, None, None]
-        # df_conf.to_csv(data_common_path+'/configurations.csv', index=False)
-        # df_err.to_csv(data_common_path+'/errors.csv', index=False)   
-
-        # Primero generar las bases de datos de estimadores en la misma carpeta del cluster para cada proceso
-        init,algo,env=pack.split('_')
-        for i in tqdm(range(len(seeds))):
-            # ProcessEstimator.compute_estimates(init+'_'+algo,env,seeds[i],'',None,'SE',data_path=data_path)
-            # ProcessEstimator.compute_estimates(init+'_'+algo,env,seeds[i],'',None,'mean_diff',data_path=data_path)
-            # ProcessEstimator.compute_estimates(init+'_'+algo,env,seeds[i],'',None,'CI_width',data_path=data_path)
-            for n_ep in list_n_ep:
-                ProcessEstimator.compute_estimates(init+'_'+algo,env,seeds[i],'',n_ep,'train')
-                ProcessEstimator.compute_estimates(init+'_'+algo,env,seeds[i],'',n_ep,'test')
+        if not already_generated_main_data:
             
-
-        # Despues generar las bases de datos necesarias para construir todas las graficas del analisis completo por pack
-        # Necesitamos: limites de regiones de aprendizaje por proceso.
-        # Necesitamos evoluciones de: degradacion, truth, truth de criterios por defecto, truth de criterio test con coste,
-        # precision de criterios, coste de criterio test.
-
-        for i in tqdm(range(len(seeds))):
-
-            self.add_learning_limits_to_csv(data_path+'learning_regions.csv',pack,seeds[i],limit_metric=limit_metric)
-            
-            self.add_deg_to_csv(data_path+'deg_evolution.csv',pack,seeds[i],global_deg_metric=global_deg_metric,local_deg_metric=local_deg_metric)
-
-            self.add_truth_to_csv(data_path+'df_best_truth.csv',pack,seeds[i],criteria='truth_best')
-            self.add_truth_to_csv(data_path+'df_worst_truth.csv',pack,seeds[i],criteria='worst')
-
-            self.add_truth_to_csv(data_path+'df_last_truth.csv',pack,seeds[i],criteria='last')
-            # self.add_estimates_to_csv(data_path+'df_last_est.csv',pack,seeds[i],criteria='last',conf=[last_estimates_conf,None])
-            self.add_criteria_prec_cost_to_csv(data_path+'df_last_prec.csv',pack,seeds[i],criteria='last')
-
-            for n_ep in list_n_ep:
-                self.add_truth_to_csv(data_path+'df_train_truth.csv',pack,seeds[i],conf=[n_ep,None],criteria='best_train')
-                # self.add_estimates_to_csv(data_path+'df_train_est.csv',pack,seeds[i],conf=[n_ep,None],criteria='best_train')
-                self.add_criteria_prec_cost_to_csv(data_path+'df_train_prec.csv',pack,seeds[i],conf=[n_ep,None,None],criteria='best_train')
-
-            for freq in list_freq:
+            # Primero generar las bases de datos de estimadores en la misma carpeta del cluster para cada proceso
+            init,algo,env=pack.split('_')
+            for i in tqdm(range(len(seeds))):
+                # ProcessEstimator.compute_estimates(init+'_'+algo,env,seeds[i],'',None,'SE',data_path=data_path)
+                # ProcessEstimator.compute_estimates(init+'_'+algo,env,seeds[i],'',None,'mean_diff',data_path=data_path)
+                # ProcessEstimator.compute_estimates(init+'_'+algo,env,seeds[i],'',None,'CI_width',data_path=data_path)
                 for n_ep in list_n_ep:
-                   self.add_truth_to_csv(data_path+'df_test_truth.csv',pack,seeds[i],conf=[n_ep,freq],criteria='best_val')
-                #    self.add_estimates_to_csv(data_path+'df_test_est.csv',pack,seeds[i],conf=[n_ep,freq],criteria='best_val')
-                   self.add_criteria_prec_cost_to_csv([data_path+'df_test_prec.csv',data_path+'df_test_cost.csv'],pack,seeds[i],conf=[n_ep,freq,None],criteria='best_val')
-                for cost_perc in list_cost_perc:
-                    self.add_criteria_prec_cost_to_csv([data_path+'df_test_prec.csv',data_path+'df_test_cost.csv',data_path+'df_test_n_ep.csv'],pack,seeds[i],conf= [None,freq,cost_perc],criteria='best_val_with_cost')
-                    #self.add_truth_to_csv(data_path+'df_test_truth.csv',self.pack,self.seeds[i],conf= [None,freq],criteria='best_val_with_cost',cost_perc=cost_perc)
+                    ProcessEstimator.compute_estimates(init+'_'+algo,env,seeds[i],'',n_ep,'train')
+                    ProcessEstimator.compute_estimates(init+'_'+algo,env,seeds[i],'',n_ep,'test')
+                
+            
+            # Despues generar las bases de datos necesarias para construir todas las graficas del analisis completo por pack
+            # Necesitamos: limites de regiones de aprendizaje por proceso.
+            # Necesitamos evoluciones de: degradacion, truth, truth de criterios por defecto, truth de criterio test con coste,
+            # precision de criterios, coste de criterio test.
 
+            for i in tqdm(range(len(seeds))):
+
+                self.add_learning_limits_to_csv(data_path+'learning_regions.csv',pack,seeds[i],limit_metric=limit_metric)
+                
+                self.add_deg_to_csv(data_path+'deg_evolution.csv',pack,seeds[i],global_deg_metric=global_deg_metric,local_deg_metric=local_deg_metric)
+
+                self.add_truth_to_csv(data_path+'df_best_truth.csv',pack,seeds[i],criteria='truth_best')
+                self.add_truth_to_csv(data_path+'df_worst_truth.csv',pack,seeds[i],criteria='worst')
+
+                self.add_truth_to_csv(data_path+'df_last_truth.csv',pack,seeds[i],criteria='last')
+                # self.add_estimates_to_csv(data_path+'df_last_est.csv',pack,seeds[i],criteria='last',conf=[last_estimates_conf,None])
+                self.add_criteria_prec_cost_to_csv(data_path+'df_last_prec.csv',pack,seeds[i],criteria='last')
+
+                for n_ep in list_n_ep:
+                    self.add_truth_to_csv(data_path+'df_train_truth.csv',pack,seeds[i],conf=[n_ep,None],criteria='best_train')
+                    # self.add_estimates_to_csv(data_path+'df_train_est.csv',pack,seeds[i],conf=[n_ep,None],criteria='best_train')
+                    self.add_criteria_prec_cost_to_csv(data_path+'df_train_prec.csv',pack,seeds[i],conf=[n_ep,None,None],criteria='best_train')
+
+                for freq in list_freq:
+                    for n_ep in list_n_ep:
+                        self.add_truth_to_csv(data_path+'df_test_truth.csv',pack,seeds[i],conf=[n_ep,freq],criteria='best_val')
+                    #    self.add_estimates_to_csv(data_path+'df_test_est.csv',pack,seeds[i],conf=[n_ep,freq],criteria='best_val')
+                        self.add_criteria_prec_cost_to_csv([data_path+'df_test_prec.csv',data_path+'df_test_cost.csv'],pack,seeds[i],conf=[n_ep,freq,None],criteria='best_val')
+                    for cost_perc in list_cost_perc:
+                        self.add_criteria_prec_cost_to_csv([data_path+'df_test_prec.csv',data_path+'df_test_cost.csv',data_path+'df_test_n_ep.csv'],pack,seeds[i],conf= [None,freq,cost_perc],criteria='best_val_with_cost')
+                        #self.add_truth_to_csv(data_path+'df_test_truth.csv',self.pack,self.seeds[i],conf= [None,freq],criteria='best_val_with_cost',cost_perc=cost_perc)
+                
         # Guardar variable
         self.data_path=data_path
         self.data_source_path=data_common_path+'/'+pack+'/'
@@ -1308,5 +1303,14 @@ class EvolutionGenerator:
 
 if __name__ == "__main__":
 
+    # Generar datos generales para analysis 
     DataGenerator('pack_PPO_BipedalWalker',list(range(1,31)),[50,25,10,5,2,1])
     DataGenerator('pack_PPO_LunarLanderContinuous',list(range(1,31)),[40,20,10,5,2,1])
+
+    # Generar los datos de test cost con configuracion optima detectada
+    datagenerator=DataGenerator('pack_PPO_BipedalWalker',list(range(1,31)),[50,25,10,5,2,1],already_generated_main_data=True)
+    datagenerator.add_test_cost_truth('0.2',1)
+
+    datagenerator=DataGenerator('pack_PPO_LunarLanderContinuous',list(range(1,31)),[40,20,10,5,2,1],already_generated_main_data=True)
+    datagenerator.add_test_cost_truth('0.15',1)
+
