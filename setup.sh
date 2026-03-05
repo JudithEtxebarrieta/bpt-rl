@@ -2,8 +2,9 @@
 pip install sample-factory[mujoco]
 sudo apt-get install libglew-dev libosmesa6-dev
 
-# PPO with stable_baselines3
+# PPO with stable_baselines3 and sb3-zoo hyperparameters
 pip install stable-baselines3[extra]
+pip install rl_zoo3
 
 # PPO with Gymnasium-Robotics environments
 pip install gymnasium-robotics[mujoco-py]
