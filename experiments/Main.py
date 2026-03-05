@@ -30,59 +30,54 @@ class DataGenerator:
                 list_freq,list_n_ep=[500,250,100,50,25,5], list_cost_perc=[0.05,0.1,0.15,0.2,0.25], # la lista de frecuanzias depende del numero de iteraciones con que se ejecute cada pack
                 global_deg_metric='norm_from_mean_worsening_to_improvement',local_deg_metric='reward_diff',prec_metric='relative_perc_criteria_best', limit_metric='from_first_last',
                 last_estimates_conf=100,
-                data_common_path='experiments/results/data'):
+                data_common_path='experiments/results/data',
+                generated_in_cluster=True):
         
         data_path=data_common_path+'/'+library+'_'+pack.replace('pack_','')+'/'
 
-        # Generar base de datos en donde se guardaran configuraciones por defecto y optimas de los criterios por pack, y los errores de las learning curves
-        # df_conf = self.read_generate_df(data_common_path+'/configurations.csv',['pack','train_default','train_opt','test_default','test_opt','test_cost_opt'])
-        # df_err=self.read_generate_df(data_common_path+'/errors.csv',['pack','last','train_default','test_default','test_cost_opt'])
-        # df_conf.loc[len(df_conf)] = [pack, None, None, None, None, None]
-        # df_err.loc[len(df_err)] = [pack, None, None, None, None]
-        # df_conf.to_csv(data_common_path+'/configurations.csv', index=False)
-        # df_err.to_csv(data_common_path+'/errors.csv', index=False)   
+        if not generated_in_cluster:
 
-        # Primero generar las bases de datos de estimadores en la misma carpeta del cluster para cada proceso
-        init,algo,env=pack.split('_')
-        for i in tqdm(range(len(seeds))):
-            # ProcessEstimator.compute_estimates(init+'_'+algo,env,seeds[i],'',None,'SE',data_path=data_path)
-            # ProcessEstimator.compute_estimates(init+'_'+algo,env,seeds[i],'',None,'mean_diff',data_path=data_path)
-            # ProcessEstimator.compute_estimates(init+'_'+algo,env,seeds[i],'',None,'CI_width',data_path=data_path)
-            for n_ep in tqdm(list_n_ep):
-                ProcessEstimator.compute_estimates(init+'_'+algo,env,seeds[i],'',n_ep,'train')
-                ProcessEstimator.compute_estimates(init+'_'+algo,env,seeds[i],'',n_ep,'test')
-            
+            # Primero generar las bases de datos de estimadores en la misma carpeta del cluster para cada proceso
+            init,algo,env=pack.split('_')
+            for i in tqdm(range(len(seeds))):
+                # ProcessEstimator.compute_estimates(init+'_'+algo,env,seeds[i],'',None,'SE',data_path=data_path)
+                # ProcessEstimator.compute_estimates(init+'_'+algo,env,seeds[i],'',None,'mean_diff',data_path=data_path)
+                # ProcessEstimator.compute_estimates(init+'_'+algo,env,seeds[i],'',None,'CI_width',data_path=data_path)
+                for n_ep in tqdm(list_n_ep):
+                    ProcessEstimator.compute_estimates(init+'_'+algo,env,seeds[i],'',n_ep,'train')
+                    ProcessEstimator.compute_estimates(init+'_'+algo,env,seeds[i],'',n_ep,'test')
+                
 
-        # Despues generar las bases de datos necesarias para construir todas las graficas del analisis completo por pack
-        # Necesitamos: limites de regiones de aprendizaje por proceso.
-        # Necesitamos evoluciones de: degradacion, truth, truth de criterios por defecto, truth de criterio test con coste,
-        # precision de criterios, coste de criterio test.
+            # Despues generar las bases de datos necesarias para construir todas las graficas del analisis completo por pack
+            # Necesitamos: limites de regiones de aprendizaje por proceso.
+            # Necesitamos evoluciones de: degradacion, truth, truth de criterios por defecto, truth de criterio test con coste,
+            # precision de criterios, coste de criterio test.
 
-        for i in tqdm(range(len(seeds))):
+            for i in tqdm(range(len(seeds))):
 
-            self.add_learning_limits_to_csv(data_path+'learning_regions.csv',pack,seeds[i],limit_metric=limit_metric)
-            
-            self.add_deg_to_csv(data_path+'deg_evolution.csv',pack,seeds[i],global_deg_metric=global_deg_metric,local_deg_metric=local_deg_metric)
+                self.add_learning_limits_to_csv(data_path+'learning_regions.csv',pack,seeds[i],limit_metric=limit_metric)
+                
+                self.add_deg_to_csv(data_path+'deg_evolution.csv',pack,seeds[i],global_deg_metric=global_deg_metric,local_deg_metric=local_deg_metric)
 
-            self.add_truth_to_csv(data_path+'df_best_truth.csv',pack,seeds[i],criteria='truth_best')
-            self.add_truth_to_csv(data_path+'df_worst_truth.csv',pack,seeds[i],criteria='worst')
+                self.add_truth_to_csv(data_path+'df_best_truth.csv',pack,seeds[i],criteria='truth_best')
+                self.add_truth_to_csv(data_path+'df_worst_truth.csv',pack,seeds[i],criteria='worst')
 
-            self.add_truth_to_csv(data_path+'df_last_truth.csv',pack,seeds[i],criteria='last')
-            # self.add_estimates_to_csv(data_path+'df_last_est.csv',pack,seeds[i],criteria='last',conf=[last_estimates_conf,None])
-            self.add_criteria_prec_cost_to_csv(data_path+'df_last_prec.csv',pack,seeds[i],criteria='last')
+                self.add_truth_to_csv(data_path+'df_last_truth.csv',pack,seeds[i],criteria='last')
+                # self.add_estimates_to_csv(data_path+'df_last_est.csv',pack,seeds[i],criteria='last',conf=[last_estimates_conf,None])
+                self.add_criteria_prec_cost_to_csv(data_path+'df_last_prec.csv',pack,seeds[i],criteria='last')
 
-            for n_ep in list_n_ep:
-                self.add_truth_to_csv(data_path+'df_train_truth.csv',pack,seeds[i],conf=[n_ep,None],criteria='best_train')
-                # self.add_estimates_to_csv(data_path+'df_train_est.csv',pack,seeds[i],conf=[n_ep,None],criteria='best_train')
-                self.add_criteria_prec_cost_to_csv(data_path+'df_train_prec.csv',pack,seeds[i],conf=[n_ep,None,None],criteria='best_train')
-
-            for freq in list_freq:
                 for n_ep in list_n_ep:
-                   self.add_truth_to_csv(data_path+'df_test_truth.csv',pack,seeds[i],conf=[n_ep,freq],criteria='best_val')
-                #    self.add_estimates_to_csv(data_path+'df_test_est.csv',pack,seeds[i],conf=[n_ep,freq],criteria='best_val')
-                   self.add_criteria_prec_cost_to_csv([data_path+'df_test_prec.csv',data_path+'df_test_cost.csv'],pack,seeds[i],conf=[n_ep,freq,None],criteria='best_val')
-                for cost_perc in list_cost_perc:
-                    self.add_criteria_prec_cost_to_csv([data_path+'df_test_prec.csv',data_path+'df_test_cost.csv',data_path+'df_test_n_ep.csv'],pack,seeds[i],conf= [None,freq,cost_perc],criteria='best_val_with_cost')
+                    self.add_truth_to_csv(data_path+'df_train_truth.csv',pack,seeds[i],conf=[n_ep,None],criteria='best_train')
+                    # self.add_estimates_to_csv(data_path+'df_train_est.csv',pack,seeds[i],conf=[n_ep,None],criteria='best_train')
+                    self.add_criteria_prec_cost_to_csv(data_path+'df_train_prec.csv',pack,seeds[i],conf=[n_ep,None,None],criteria='best_train')
+
+                for freq in list_freq:
+                    for n_ep in list_n_ep:
+                        self.add_truth_to_csv(data_path+'df_test_truth.csv',pack,seeds[i],conf=[n_ep,freq],criteria='best_val')
+                        #self.add_estimates_to_csv(data_path+'df_test_est.csv',pack,seeds[i],conf=[n_ep,freq],criteria='best_val')
+                        self.add_criteria_prec_cost_to_csv([data_path+'df_test_prec.csv',data_path+'df_test_cost.csv'],pack,seeds[i],conf=[n_ep,freq,None],criteria='best_val')
+                    for cost_perc in list_cost_perc:
+                        self.add_criteria_prec_cost_to_csv([data_path+'df_test_prec.csv',data_path+'df_test_cost.csv',data_path+'df_test_n_ep.csv'],pack,seeds[i],conf= [None,freq,cost_perc],criteria='best_val_with_cost')
 
 
         # Guardar variable
@@ -90,6 +85,7 @@ class DataGenerator:
         self.data_source_path=parent_dir+'/_bender/project_SB3/data/'
         self.seeds=seeds
         self.pack=pack
+        self.data_common_path=data_common_path
 
     def add_test_cost_truth(self,optimal_cost,optimal_freq):
 
@@ -1370,7 +1366,7 @@ class Grapher:
                 ax1.set_title(title)
             ax2.grid(True)
 
-        fig, axs = plt.subplots(4*2,5, figsize=(5*8,4*5),height_ratios=[0.25,1]*4)
+        fig, axs = plt.subplots(6*2,5, figsize=(5*8,6*5),height_ratios=[0.25,1]*6)
         plt.subplots_adjust(top=0.95,bottom=0.08,left=0.1,right=0.95, hspace=0.1,wspace=0.2)
 
         for i in tqdm(range(len(seeds))):
@@ -1379,12 +1375,12 @@ class Grapher:
             if i==0:
                 first_graph=True
                 first_row=True
-            if (i+1)%4==0:
+            if (i+1)%6==0:
                 last_row=True
-            if i//4==0:
+            if i//6==0:
                 first_column=True
             
-            plot_deg_truth_with_regions(axs[i*2-8*((i+1)//4),i//4],axs[i*2+1-8*((i+1)//4),i//4],pack,seeds[i],
+            plot_deg_truth_with_regions(axs[i*2-12*((i+1)//6),i//6],axs[i*2+1-12*((i+1)//6),i//6],pack,seeds[i],
                                                                 global_deg_metric,local_deg_metric,
                                                                 limit_metric=limit_metric,
                                                                 first_graph=first_graph,first_row=first_row,first_column=first_column,last_row=last_row)
@@ -1749,14 +1745,6 @@ class Grapher:
 
         plt.savefig(self.graph_path+'/main_analysis1_'+n_ep_type+'.pdf')
 
-        # Almacenar configuraciones optimas en base de datos
-        df_conf=pd.read_csv(self.data_common_path+'configurations.csv')
-        if n_ep_type=='constant':
-            df_conf.loc[df_conf['pack'].str.contains(pack, na=False),['train_opt', 'test_opt']] = [str(n_ep_train),str(n_ep_test)+'_'+str(freq_test)]
-        if n_ep_type=='with_cost':
-            df_conf.loc[df_conf['pack'].str.contains(pack, na=False),['train_opt', 'test_cost_opt']] = [str(n_ep_train),str(n_ep_test)+'_'+str(freq_test)]
-        df_conf.to_csv(self.data_common_path+'configurations.csv',index=False)
-
         return n_ep_train,n_ep_test,freq_test
 
     def graph_criteria_comparison_by_regions(self,pack,
@@ -1944,7 +1932,7 @@ class Grapher:
                                                         train_conf=train_conf,test_conf=test_conf,
                                                         prec_metric=prec_metric
                                                         )
-        print(train_conf,type(train_conf))
+
         with_what_prec_diff_best(axs[2,0],matrix1,nombre=True)
         with_what_prec_diff_best(axs[2,1],matrix2)
         with_what_prec_diff_best(axs[2,2],matrix3)
@@ -2084,9 +2072,6 @@ class Grapher:
         df_last_truth=pd.read_csv(self.data_path+'df_last_truth.csv')
         df_train_truth=pd.read_csv(self.data_path+'df_train_truth.csv')
         df_test_truth=pd.read_csv(self.data_path+'df_test_truth.csv')
-        df_last_est=pd.read_csv(self.data_path+'df_last_est.csv')
-        df_train_est=pd.read_csv(self.data_path+'df_train_est.csv')
-        df_test_est=pd.read_csv(self.data_path+'df_test_est.csv')
 
         # Reducir bases de datos al pack de interes
         df_truth_pack=df_truth.filter(like=pack)
@@ -2101,7 +2086,11 @@ class Grapher:
 
             truth=np.array(df_truth_pack[pack_seed].tolist())
 
-            if diff=='estimate_truth':          
+            if diff=='estimate_truth':      
+                df_last_est=pd.read_csv(self.data_path+'df_last_est.csv')
+                df_train_est=pd.read_csv(self.data_path+'df_train_est.csv')
+                df_test_est=pd.read_csv(self.data_path+'df_test_est.csv')
+    
                 last=np.array(df_last_est[pack_seed+'_'+str(default_conf[0])].tolist())
                 train=np.array(df_train_est[pack_seed+'_'+str(default_conf[0])].tolist())
                 test=np.array(df_test_est[pack_seed+'_'+str(default_conf[1])+'_'+str(default_conf[2])].tolist())
@@ -2190,15 +2179,6 @@ class Grapher:
 
             plt.savefig(self.graph_path+'/main_cummulative_paired_diff_learning_curves_'+diff+'_all.pdf')
 
-            # Guardar configuraciones por defecto y errores acumulados en bases de datos
-            df_conf=pd.read_csv(self.data_common_path+'configurations.csv')
-            df_err=pd.read_csv(self.data_common_path+'errors.csv')
-
-            df_conf.loc[df_conf['pack'].str.contains(pack, na=False),['train_default', 'test_default']] = [str(default_conf[0]),str(default_conf[1])+'_'+str(default_conf[2])]
-            df_err.loc[df_conf['pack'].str.contains(pack, na=False),['last','train_default', 'test_default','test_cost_opt']] = [last_accumulated/worst_accumulated,train_accumulated/worst_accumulated,test_accumulated/worst_accumulated,optimal_accumulated/worst_accumulated]
-
-            df_conf.to_csv(self.data_common_path+'configurations.csv',index=False)
-            df_err.to_csv(self.data_common_path+'errors.csv',index=False)
 
 
     # Graficas de discusion

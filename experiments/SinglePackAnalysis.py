@@ -9,53 +9,102 @@ class ExecutePackAnalysis():
                  limit_metric='from_first_last'
                  ):
         
-        # ----------------- Generar datos necesarios
-        datagenerator=DataGenerator(library,pack,seeds,list_freq)
+        # Generar datos necesarios (esto lo hacemos en el cluster, aqui solo inicializamos la clase)
+        self.datagenerator=DataGenerator(library,pack,seeds,list_freq)
+        self.grapher=Grapher(library,pack.replace('pack_',''))
 
-        # ----------------- Graficas principales
-        grapher=Grapher(library,pack.replace('pack_',''))
-
-        # Analisis 1
-        grapher.graph_deg_criteria_conf_by_regions(pack,100,5,5,global_deg_metric=global_deg_metric,local_deg_metric=local_deg_metric)
-        n_ep_train,n_ep_test,freq_test=grapher.graph_deg_criteria_conf_by_regions(pack,100,5,5,global_deg_metric=global_deg_metric,local_deg_metric=local_deg_metric,n_ep_type='with_cost')
+        # Base de datos para guardar las configuraciones
+        self.df_conf = self.datagenerator.read_generate_df(self.datagenerator.data_common_path+'/configurations.csv',['pack','train_default','train_opt','test_default','test_opt','test_cost_opt'])
         
-        n_ep_test,freq_test=0.15,1 # TODO: LunarLanderContinuos deberia salir asi automatico
-        # Analisis 2
-        datagenerator.add_test_cost_truth(n_ep_test,freq_test)
-        grapher.graph_criteria_comparison_by_regions(pack,global_deg_metric=global_deg_metric,local_deg_metric=local_deg_metric,
-                                                    prec_metric=prec_metric,limit_metric=limit_metric,
-                                                    train_conf=[n_ep_train if n_ep_train!=None else train_default_n_ep ][0],test_conf=str(n_ep_test)+'cost_'+str(freq_test))
+
+        # Las demas variables
+        self.pack=pack
+        self.seeds=seeds
+        self.list_freq=list_freq
+        self.train_default_n_ep=train_default_n_ep
+        self.test_default_n_ep=test_default_n_ep
+        self.test_default_freq=test_default_freq
+        self.global_deg_metric=global_deg_metric
+        self.local_deg_metric=local_deg_metric
+        self.prec_metric=prec_metric
+        self.limit_metric=limit_metric
+        
+        
+    #Graficas principales
+    def main_analysis1(self):
+        # Generar las graficas para test con n_ep constante y test con n_ep regulado por el coste de validacion
+        n_ep_train,n_ep_test1,freq_test1=self.grapher.graph_deg_criteria_conf_by_regions(self.pack,self.train_default_n_ep,self.test_default_n_ep,self.test_default_freq,global_deg_metric=self.global_deg_metric,local_deg_metric=self.local_deg_metric)
+        n_ep_train,n_ep_test2,freq_test2=self.grapher.graph_deg_criteria_conf_by_regions(self.pack,self.train_default_n_ep,self.test_default_n_ep,self.test_default_freq,global_deg_metric=self.global_deg_metric,local_deg_metric=self.local_deg_metric,n_ep_type='with_cost')
+        
+        # Guardar configuraciones optimas
+        self.df_conf.loc[len(self.df_conf)] = [self.pack, self.train_default_n_ep, [int(n_ep_train) if n_ep_train!=None else n_ep_train ][0], str(self.test_default_n_ep)+'_'+str(self.test_default_freq), str(n_ep_test1)+'_'+str(freq_test1), str(n_ep_test2)+'_'+str(freq_test2)]
+        self.df_conf.to_csv(self.datagenerator.data_common_path+'/configurations.csv', index=False)
+
+        # Los datos truth del criterio test con coste optimo debemos almacenarlos antes de ejecutar el main_analysis2 
+        # Aahora esto lo hago en el cluster tras ejecutar aqui main_analysis1 y conseguir la configuracion optima)
+        #self.datagenerator.add_test_cost_truth(n_ep_test2,freq_test2)
+
+    def main_analysis2(self):
+
+        # Leer configuraciones optimas almacenadas
+        n_ep_train,test_cost_opt = self.df_conf.loc[self.df_conf['pack'] == self.pack,['train_opt', 'test_cost_opt']].iloc[0]
+        n_ep_test,freq_test=test_cost_opt.split('_')
+
+        # generar analisis comparativo de mejores versiones de los criterios
+        self.grapher.graph_criteria_comparison_by_regions(self.pack,global_deg_metric=self.global_deg_metric,local_deg_metric=self.local_deg_metric,
+                                                    prec_metric=self.prec_metric,limit_metric=self.limit_metric,
+                                                    train_conf=[int(n_ep_train) if n_ep_train!=None else self.train_default_n_ep ][0],test_conf=str(n_ep_test)+'cost_'+str(freq_test))
+        
+    def main_motivation_recommendation(self):
+
+        # Leer configuraciones optimas almacenadas
+        n_ep_train,test_cost_opt = self.df_conf.loc[self.df_conf['pack'] == self.pack,['train_opt', 'test_cost_opt']].iloc[0]
+        n_ep_test,freq_test=test_cost_opt.split('_')
+
         # Recomendacion
-        grapher.graph_pack_learning_curves_with_criteria(pack,default_conf=[train_default_n_ep,test_default_n_ep,test_default_freq],optimal_conf=str(n_ep_test)+'cost_'+str(freq_test)) #default_test_n_ep=eval_freq/n_steps
-        # grapher.graph_pack_learning_curves_with_criteria(pack,default_conf=[train_default_n_ep,test_default_n_ep,test_default_freq],optimal_conf=n_ep_test+'cost_'+freq_test,curves='estimate_truth')
+        self.grapher.graph_pack_learning_curves_with_criteria(self.pack,default_conf=[self.train_default_n_ep,self.test_default_n_ep,self.test_default_freq],optimal_conf=str(n_ep_test)+'cost_'+str(freq_test)) #default_test_n_ep=eval_freq/n_steps
+        # self.grapher.graph_pack_learning_curves_with_criteria(self.pack,default_conf=[self.train_default_n_ep,self.test_default_n_ep,self.test_default_freq],optimal_conf=str(n_ep_test)+'cost_'+str(freq_test),curves='estimate_truth')
 
-        grapher.graph_pack_learning_curves_error(pack,default_conf=[train_default_n_ep,test_default_n_ep,test_default_freq],diff='truth',optimal_conf=str(n_ep_test)+'cost_'+str(freq_test))
-        # grapher.graph_pack_learning_curves_error(pack,default_conf=[train_default_n_ep,test_default_n_ep,test_default_freq],optimal_conf=n_ep_test+'cost_'+freq_test)
+        self.grapher.graph_pack_learning_curves_error(self.pack,default_conf=[self.train_default_n_ep,self.test_default_n_ep,self.test_default_freq],diff='truth',optimal_conf=str(n_ep_test)+'cost_'+str(freq_test))
+        # self.grapher.graph_pack_learning_curves_error(self.pack,default_conf=[self.train_default_n_ep,self.test_default_n_ep,self.test_default_freq],optimal_conf=str(n_ep_test)+'cost_'+str(freq_test))
 
-        # ----------------- Graficas secundarias
+
+    # Graficas secundarias
+    def internal_analysis(self):
         # Para mostrar como la degradacion y los limites definen lo que decimos
-        grapher.graph_pack_all_truth_with_regions(pack,seeds,
+        self.grapher.graph_pack_all_truth_with_regions(self.pack,self.seeds,
                                                 global_deg_metric='norm_from_mean_worsening_to_improvement')
-        # grapher.graph_pack_all_truth_with_regions(pack,seeds,
+        # self.grapher.graph_pack_all_truth_with_regions(self.pack,self.seeds,
         #                                         global_deg_metric='best_last_deg',local_deg_metric='paired_diff_probpos')
-        # grapher.graph_pack_all_truth_with_regions(pack,seeds,
+        # self.grapher.graph_pack_all_truth_with_regions(self.pack,self.seeds,
         #                                         global_deg_metric='best_last_deg',local_deg_metric='greater_prob')
 
         # Para mostrar la estabilidad de la estimacion considerada para truth
-        grapher.graph_pack_all_stability_truth_estimator(pack,seeds)
-        grapher.graph_pack_all_stability_truth_estimator(pack,seeds,stability_metric='mean_diff')
-        grapher.graph_pack_all_stability_truth_estimator(pack,seeds,stability_metric='CI_width')
+        # self.grapher.graph_pack_all_stability_truth_estimator(self.pack,self.seeds)
+        # self.grapher.graph_pack_all_stability_truth_estimator(self.pack,self.seeds,stability_metric='mean_diff')
+        # self.grapher.graph_pack_all_stability_truth_estimator(self.pack,self.seeds,stability_metric='CI_width')
+
+    # Graficas para discusion
+    def discussion_analysis(self):
+        self.grapher.graph_test_with_cost_n_ep(self.list_freq)
 
 
-ExecutePackAnalysis('SB3','pack_PPO_BipedalWalker',list(range(1,17))+[18,19,20,23], #en el cluster estas 20 semilla se ejecutaron antes
-                    100,5,5,[50,25,10,5,2,1])
 
-ExecutePackAnalysis('SB3','pack_PPO_LunarLanderContinuous',list(range(3,22))+[1],#la ejecucion de la semilla 3 se ha interrumpido en el cluster y no estan los datos completos
-                    100,5,10,[40,20,10,5,2,1])
-#TODO: al calcular automaticamente el n_train_ep en n_ep_train,n_ep_test,freq_test=grapher.graph_deg_criteria_conf_by_regions,
-# veo dos cosas raras: 1) lo que veo en la grafica que deberia ser la configuracion optima (primera vez que los intervalos dentro de franja)
-# no coincide con la grafica; 2) si quiero ejecutar la grafica siguiente  grapher.graph_criteria_comparison_by_regions con n_train_ep=250, o 500
-# me da un error. Mirar porque pasan esas cosas. Puede ser que al generar los datos mientras corregia errores algo se haya guardado mal?
+
+analyzer=ExecutePackAnalysis('SB3','pack_PPO_BipedalWalker',list(range(1,31)),100,5,5,[50,25,10,5,2,1])
+analyzer.main_analysis1()
+analyzer.main_analysis2()
+analyzer.main_motivation_recommendation()
+analyzer.discussion_analysis()
+analyzer.internal_analysis()
+
+analyzer=ExecutePackAnalysis('SB3','pack_PPO_LunarLanderContinuous',list(range(1,31)),100,5,10,[40,20,10,5,2,1])
+analyzer.main_analysis1()
+analyzer.main_analysis2()
+analyzer.main_motivation_recommendation()
+analyzer.discussion_analysis()
+analyzer.internal_analysis()
+
 
 
 
