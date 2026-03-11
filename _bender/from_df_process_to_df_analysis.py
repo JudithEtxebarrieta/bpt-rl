@@ -2,10 +2,10 @@
 Este script permite generar en el cluster los df necesarios para el analisis a partir de los df_traj.csv y df_val.csv almacenados por
 proceso. De esta manera no hace falta bajar las df grandes al PC, sino que podemos bajar ya las df que usamos para el analisis.
 
-NOTE: los path necesarios ya estan correctamente escritos en este script con los pasth del cluster.
+NOTE: los path necesarios ya estan correctamente escritos en este script con los path del cluster.
 '''
 
-import os
+import os,sys
 import pandas as pd
 import json
 import bz2
@@ -25,9 +25,9 @@ class DataGenerator:
     '''
 
     def __init__(self,pack,seeds,
-                list_freq,list_n_ep=[500,250,100,50,25,5], list_cost_perc=[0.05,0.1,0.15,0.2,0.25], # la lista de frecuanzias depende del numero de iteraciones con que se ejecute cada pack
+                list_freq=[20,15,10,5,2,1],list_n_ep=[500,250,100,50,25,5], list_cost_perc=[0.05,0.1,0.15,0.2], # la lista de frecuanzias depende del numero de iteraciones con que se ejecute cada pack
                 global_deg_metric='norm_from_mean_worsening_to_improvement',local_deg_metric='reward_diff',prec_metric='relative_perc_criteria_best', limit_metric='from_first_last',
-                last_estimates_conf=100,
+                last_estimates_conf=100,default_test_conf=[None,None],
                 data_common_path=os.path.join(os.path.dirname(os.path.abspath(__file__)), "outputs"),
                 already_generated_main_data=False):
         
@@ -35,60 +35,67 @@ class DataGenerator:
 
         if not already_generated_main_data:
             
-            # Primero generar las bases de datos de estimadores en la misma carpeta del cluster para cada proceso
-            init,algo,env=pack.split('_')
-            for i in tqdm(range(len(seeds))):
-                # ProcessEstimator.compute_estimates(init+'_'+algo,env,seeds[i],'',None,'SE',data_path=data_path)
-                # ProcessEstimator.compute_estimates(init+'_'+algo,env,seeds[i],'',None,'mean_diff',data_path=data_path)
-                # ProcessEstimator.compute_estimates(init+'_'+algo,env,seeds[i],'',None,'CI_width',data_path=data_path)
-                for n_ep in list_n_ep:
-                    ProcessEstimator.compute_estimates(init+'_'+algo,env,seeds[i],'',n_ep,'train')
-                    ProcessEstimator.compute_estimates(init+'_'+algo,env,seeds[i],'',n_ep,'test')
-                
-            
             # Despues generar las bases de datos necesarias para construir todas las graficas del analisis completo por pack
             # Necesitamos: limites de regiones de aprendizaje por proceso.
             # Necesitamos evoluciones de: degradacion, truth, truth de criterios por defecto, truth de criterio test con coste,
             # precision de criterios, coste de criterio test.
 
-            for i in tqdm(range(len(seeds))):
+            for i in range(len(seeds)):
 
-                self.add_learning_limits_to_csv(data_path+'learning_regions.csv',pack,seeds[i],limit_metric=limit_metric)
+                # Estimaciones 
+                init,algo,env=pack.split('_')
+                for n_ep in tqdm(list_n_ep,desc='completing estimates'):
+                    ProcessEstimator.compute_estimates(init+'_'+algo,env,seeds[i],'',n_ep,'train')
+                    ProcessEstimator.compute_estimates(init+'_'+algo,env,seeds[i],'',n_ep,'test')
                 
-                self.add_deg_to_csv(data_path+'deg_evolution.csv',pack,seeds[i],global_deg_metric=global_deg_metric,local_deg_metric=local_deg_metric)
-
-                self.add_truth_to_csv(data_path+'df_best_truth.csv',pack,seeds[i],criteria='truth_best')
-                self.add_truth_to_csv(data_path+'df_worst_truth.csv',pack,seeds[i],criteria='worst')
-
-                self.add_truth_to_csv(data_path+'df_last_truth.csv',pack,seeds[i],criteria='last')
-                # self.add_estimates_to_csv(data_path+'df_last_est.csv',pack,seeds[i],criteria='last',conf=[last_estimates_conf,None])
-                self.add_criteria_prec_cost_to_csv(data_path+'df_last_prec.csv',pack,seeds[i],criteria='last')
-
-                for n_ep in list_n_ep:
-                    self.add_truth_to_csv(data_path+'df_train_truth.csv',pack,seeds[i],conf=[n_ep,None],criteria='best_train')
-                    # self.add_estimates_to_csv(data_path+'df_train_est.csv',pack,seeds[i],conf=[n_ep,None],criteria='best_train')
-                    self.add_criteria_prec_cost_to_csv(data_path+'df_train_prec.csv',pack,seeds[i],conf=[n_ep,None,None],criteria='best_train')
-
-                for freq in list_freq:
-                    for n_ep in list_n_ep:
-                        self.add_truth_to_csv(data_path+'df_test_truth.csv',pack,seeds[i],conf=[n_ep,freq],criteria='best_val')
-                    #    self.add_estimates_to_csv(data_path+'df_test_est.csv',pack,seeds[i],conf=[n_ep,freq],criteria='best_val')
-                        self.add_criteria_prec_cost_to_csv([data_path+'df_test_prec.csv',data_path+'df_test_cost.csv'],pack,seeds[i],conf=[n_ep,freq,None],criteria='best_val')
-                    for cost_perc in list_cost_perc:
-                        self.add_criteria_prec_cost_to_csv([data_path+'df_test_prec.csv',data_path+'df_test_cost.csv',data_path+'df_test_n_ep.csv'],pack,seeds[i],conf= [None,freq,cost_perc],criteria='best_val_with_cost')
-                        #self.add_truth_to_csv(data_path+'df_test_truth.csv',self.pack,self.seeds[i],conf= [None,freq],criteria='best_val_with_cost',cost_perc=cost_perc)
+                # Generales
+                self.add_learning_limits_to_csv(data_path+'learning_regions'+str(seeds[i])+'.csv',pack,seeds[i],limit_metric=limit_metric)
                 
+                self.add_deg_to_csv(data_path+'deg_evolution'+str(seeds[i])+'.csv',pack,seeds[i],global_deg_metric=global_deg_metric,local_deg_metric=local_deg_metric)
+
+                self.add_truth_to_csv(data_path+'df_best_truth'+str(seeds[i])+'.csv',pack,seeds[i],criteria='truth_best')
+
+                self.add_truth_to_csv(data_path+'df_last_truth'+str(seeds[i])+'.csv',pack,seeds[i],criteria='last')
+                self.add_criteria_prec_cost_to_csv(data_path+'df_last_prec'+str(seeds[i])+'.csv',pack,seeds[i],criteria='last')
+
+                print('general df completed')
+                
+                # Train
+                for n_ep in tqdm(list_n_ep,desc='completing train'):
+                    self.add_truth_to_csv(data_path+'df_train_truth'+str(seeds[i])+'.csv',pack,seeds[i],conf=[n_ep,None],criteria='best_train')
+                    self.add_criteria_prec_cost_to_csv(data_path+'df_train_prec'+str(seeds[i])+'.csv',pack,seeds[i],conf=[n_ep,None,None],criteria='best_train')
+                
+                # Test default
+                self.add_truth_to_csv(data_path+'df_test_truth'+str(seeds[i])+'.csv',pack,seeds[i],conf=[default_test_conf[0],default_test_conf[1]],criteria='best_val')
+                self.add_criteria_prec_cost_to_csv([data_path+'df_test_prec'+str(seeds[i])+'.csv',data_path+'df_test_cost'+str(seeds[i])+'.csv'],pack,seeds[i],conf=[default_test_conf[0],default_test_conf[1],None],criteria='best_val')
+                print('test default completed')
+
+                # Todos los test
+                # for freq in tqdm(list_freq,desc='completing test'):
+                #     for n_ep in list_n_ep:
+                #         self.add_truth_to_csv(data_path+'df_test_truth'+str(seeds[i])+'.csv',pack,seeds[i],conf=[n_ep,freq],criteria='best_val')
+                #         self.add_criteria_prec_cost_to_csv([data_path+'df_test_prec'+str(seeds[i])+'.csv',data_path+'df_test_cost'+str(seeds[i])+'.csv'],pack,seeds[i],conf=[n_ep,freq,None],criteria='best_val')
+                    
+                # Test with cost
+                for freq in tqdm(list_freq,'completing test with cost'):
+                    for cost_perc in tqdm(list_cost_perc,desc='completing prec_cost of test for seed'):
+                        self.add_criteria_prec_cost_to_csv([data_path+'df_test_prec'+str(seeds[i])+'.csv',data_path+'df_test_cost'+str(seeds[i])+'.csv',data_path+'df_test_n_ep'+str(seeds[i])+'.csv'],pack,seeds[i],conf= [None,freq,cost_perc],criteria='best_val_with_cost')
+                    
         # Guardar variable
         self.data_path=data_path
         self.data_source_path=data_common_path+'/'+pack+'/'
         self.seeds=seeds
         self.pack=pack
 
-    def add_test_cost_truth(self,optimal_cost,optimal_freq):
+    def add_test_cost_truth(self,optimal_cost,optimal_freq,single_seed=None):
 
-        for i in tqdm(range(len(self.seeds))):
-            self.add_truth_to_csv(self.data_path+'df_test_truth.csv',self.pack,self.seeds[i],conf= [None,optimal_freq],criteria='best_val_with_cost',cost_perc=optimal_cost)
-        
+        if single_seed==None:
+            for i in tqdm(range(len(self.seeds))):
+                self.add_truth_to_csv(self.data_path+'df_test_truth.csv',self.pack,self.seeds[i],conf= [None,optimal_freq],criteria='best_val_with_cost',cost_perc=optimal_cost)
+            
+        else:
+            self.add_truth_to_csv(self.data_path+'df_test_truth_with_cost'+str(single_seed)+'.csv',self.pack,single_seed,conf= [None,optimal_freq],criteria='best_val_with_cost',cost_perc=optimal_cost)
+
     def add_truth_to_csv(self,path,pack,seed,conf=[None,None],criteria='truth_best',cost_perc=0.1):
         '''
         Añadir (si no existe) una columna con el truth de las politicas seleccionadas por los criterios.
@@ -325,311 +332,43 @@ class DataConverter:
         else:
             return (lst - my_min) / (my_max - my_min)
         
-    def from_df_data_to_graph_data(path,pack,
-                                  which_graph=None,
-                                  global_deg_metric=None,local_deg_metric=None,
-                                  prec_metric=None,limit_metric=None,
-                                  train_conf=None,test_conf=None,
-                                  n_ep_type=None):
-    
-        '''
-        Extrae la informacion pertinente de las bases de datos de degradacion, precision o coste por regiones de aprendizaje, 
-        en el formato apropiado para generar a partir de esos datos las graficas de interes.
-        '''
+    def join_df_analysis_seed(path,seeds,only_test_with_cost_truth=False):
         
-        df_limits=pd.read_csv(path[0])
-        df_limits = df_limits[
-                        df_limits['pack_seed'].str.contains(pack, na=False) &
-                        df_limits['limit_metric'].str.contains(limit_metric, na=False)
-                    ] # Solo filas del pack con la metrica de los limites indicada
+        if only_test_with_cost_truth:
+            df = pd.concat([pd.read_csv(path+'df_test_truth_with_cost'+str(i)+'.csv') for i in seeds],axis=1)
+            df = pd.concat([pd.read_csv(path+"df_test_truth.csv"),df ],axis=1)
+            df.to_csv(path+"df_test_truth.csv", index=False)
 
-        if which_graph in ['deg_distribution','last_prec']:
+            # Borrar archivos usados
+            # for f in [path+'df_test_truth_with_cost'+str(i)+'.csv' for i in seeds]:
+            #     if os.path.exists(f):
+            #         os.remove(f)
 
-            df=pd.read_csv(path[1])
-            df = df.filter(like=pack) # Solo columnas del pack
+        else:
+            list_csv_names=['deg_evolution','learning_regions',
+                'df_best_truth','df_last_truth','df_train_truth','df_test_truth',
+                'df_last_prec','df_train_prec','df_test_prec',
+                'df_test_cost','df_test_n_ep'
+                ]
 
-            if which_graph=='def_distribution':
-                df = df.filter(regex=global_deg_metric+'_'+local_deg_metric+"$") # Solo columnas del pack con deg indicada
-            if which_graph=='last_prec':
-                df = df.filter(regex='_'+prec_metric+"$") # Solo columnas del pack con prec indicada
+            for csv_name in list_csv_names:
+                if csv_name!='learning_regions':
+                    dfs = [pd.read_csv(path+csv_name+str(i)+".csv") for i in seeds]
+                    for i in range(1,len(dfs)):
+                        dfs[i] = dfs[i].drop(columns=['n_policy'], errors='ignore') # Para que la columna 'n_policy' no salga repetida
 
-            # Almacenar degradaciones por region
-            initialization,learning,stabilization=[],[],[]
+                    df = pd.concat(dfs, axis=1)
+                    df.to_csv(path+csv_name+".csv", index=False)
 
-            for pack_seed in tqdm(df_limits['pack_seed'],desc="Data for deg graphs"):
-                a=int(df_limits.loc[df_limits['pack_seed'] == pack_seed, 'a'])
-                b=int(df_limits.loc[df_limits['pack_seed'] == pack_seed, 'b'])
+                else:
+                    df = pd.concat([pd.read_csv(path+csv_name+str(i)+".csv") for i in seeds],ignore_index=True)
+                    df.to_csv(path+csv_name+".csv", index=False)
 
-                df_pack_seed= df.filter(like=pack_seed+'_').iloc[:, 0].tolist()
-                initialization+=df_pack_seed[:a]
-                learning+=df_pack_seed[a:b]
-                stabilization+=df_pack_seed[b:]
-
-            return initialization,learning,stabilization
+                # Borrar archivos usados
+                # for f in [path+csv_name+str(i)+".csv" for i in seeds]:
+                #     if os.path.exists(f):
+                #         os.remove(f)
         
-        if which_graph=='train_conf_prec':
-
-            def get_conf_from_column_name(column_names):
-                conf_list=[]
-                for column_name in column_names:
-                    splited=column_name.split('_')
-                    conf_list.append(splited[3])
-
-                return sorted(list(set(conf_list)), key=int)[::-1]
-
-            df_prec=pd.read_csv(path[1])
-            df_prec = df_prec.filter(like=pack) # Solo columnas del pack
-            df_prec = df_prec.filter(regex=prec_metric+"$") # Solo columnas del pack con metrica de prec indicada
-
-            # Almacenar datos por configuracion para cada region
-            matrix_conf_initialization, matrix_conf_learning,matrix_conf_stabilization=[],[],[]
-
-            conf_list=get_conf_from_column_name(df_prec.columns)
-
-            for conf in tqdm(conf_list,desc="Data for train_prec graphs"):
-                prec_initialization,prec_learning,prec_stabilization=[],[],[]
-
-                df_prec_conf=df_prec.filter(like='_'+conf+'_')
-
-                for pack_seed in df_limits['pack_seed']:
-                    a=int(df_limits.loc[df_limits['pack_seed'] == pack_seed, 'a'])
-                    b=int(df_limits.loc[df_limits['pack_seed'] == pack_seed, 'b'])
-
-                    df_prec_conf_pack_seed= df_prec_conf.filter(like=pack_seed+'_').iloc[:, 0].tolist()
-                    prec_initialization+=df_prec_conf_pack_seed[:a]
-                    prec_learning+=df_prec_conf_pack_seed[a:b]
-                    prec_stabilization+=df_prec_conf_pack_seed[b:]
-
-                matrix_conf_initialization.append(prec_initialization)
-                matrix_conf_learning.append(prec_learning)
-                matrix_conf_stabilization.append(prec_stabilization)
-
-            return matrix_conf_initialization,matrix_conf_learning,matrix_conf_stabilization,conf_list
-
-        if which_graph=='test_conf_prec_cost':
-
-            def get_conf_from_column_name(column_names,n_ep_type):
-                
-                n_ep_list,freq_list=[],[]
-                for column_name in column_names:
-                    splited=column_name.split('_')
-                    if splited[4] not in ['','relative']: # TODO: ahora mismo en test_prec.csv hay algunas columnas mal guardadas, tendria que volver a generar ese csv y quitar la ultimas 2 condicion de este if
-                        if n_ep_type=='with_cost':
-                            n_ep_list.append(splited[3].replace('cost',''))
-                        if n_ep_type=='constant':
-                            n_ep_list.append(splited[3])
-                        freq_list.append(splited[4])
-    
-                return sorted(list(set(n_ep_list)), key=float),sorted(list(set(freq_list)), key=int)
-
-            df_prec=pd.read_csv(path[1])
-            df_prec = df_prec.filter(like=pack) # Solo columnas del pack
-            df_prec = df_prec.filter(regex=prec_metric+"$") # Solo columnas del pack con metrica de prec indicada
-
-            if n_ep_type=='with_cost':
-                df_prec=df_prec.loc[:, df_prec.columns.str.contains("cost")]
-            if n_ep_type=='constant':
-                df_prec=df_prec.loc[:, ~df_prec.columns.str.contains("cost")]
-
-            # Almacenar datos por configuracion para cada region
-            matrix1,matrix2,matrix3=[],[],[]
-            n_ep_list,freq_list=get_conf_from_column_name(df_prec.columns,n_ep_type)
-            for n_ep in tqdm(n_ep_list,desc="Data for test_prec_cost graphs"):
-                n_ep_prec_initialization,n_ep_prec_learning,n_ep_prec_stabilization=[],[],[]
-
-                for freq in freq_list:
-                    freq_prec_initialization,freq_prec_learning,freq_prec_stabilization=[],[],[]
-
-                    if n_ep_type=='constant':
-                        df_prec_conf=df_prec.filter(like='_'+n_ep+'_'+freq+'_')
-                    if n_ep_type=='with_cost':
-                        df_prec_conf=df_prec.filter(like='_'+n_ep+'cost_'+freq+'_')
-
-                    for pack_seed in df_limits['pack_seed']:
-                        a=int(df_limits.loc[df_limits['pack_seed'] == pack_seed, 'a'])
-                        b=int(df_limits.loc[df_limits['pack_seed'] == pack_seed, 'b'])
-
-                        df_prec_conf_pack_seed= df_prec_conf.filter(like=pack_seed+'_').iloc[:, 0].tolist()
-                        freq_prec_initialization+=df_prec_conf_pack_seed[:a]
-                        freq_prec_learning+=df_prec_conf_pack_seed[a:b]
-                        freq_prec_stabilization+=df_prec_conf_pack_seed[b:]
-
-                    n_ep_prec_initialization.append(freq_prec_initialization)
-                    n_ep_prec_learning.append(freq_prec_learning)
-                    n_ep_prec_stabilization.append(freq_prec_stabilization)
-
-                # Escribir aqui las listas para que no pete la memoria
-                matrix1.append(n_ep_prec_initialization)
-                matrix2.append(n_ep_prec_learning)
-                matrix3.append(n_ep_prec_stabilization)
-
-            return matrix1,matrix2,matrix3,n_ep_list,freq_list
-
-        if which_graph=='how_times_best':
-            # Quedarnos unicamente con los datos necesarios
-            df_last=pd.read_csv(path[1])
-            df_last = df_last.filter(regex=r''+pack) # Solo columnas asociadas al pack
-
-            df_train=pd.read_csv(path[2])
-            df_train = df_train.filter(regex=r''+pack+'.*_'+str(train_conf)+'$') # Solo columnas asociadas al pack y la configuracion indicada
-
-            df_test=pd.read_csv(path[3])
-            df_test = df_test.filter(regex=r''+pack+'.*_'+str(test_conf)+'$') # Solo columnas asociadas al pack y la configuracion indicada
-
-            # Contar las veces que es cada par de criterios mejor por regiones (sin empates)
-            last_train1,last_train2,last_train3=[0,0],[0,0],[0,0]
-            last_test1,last_test2,last_test3=[0,0],[0,0],[0,0]
-            train_test1,train_test2,train_test3=[0,0],[0,0],[0,0]
-            len_init,len_learning,len_stabilization=0,0,0
-            for pack_seed in df_limits['pack_seed']:
-
-                def update_times_best_with_new_seed(truth1,truth2,a,b,old1,old2,old3):
-                    truth1=np.array(truth1)
-                    truth2=np.array(truth2)
-                    olds=(np.array(old1),np.array(old2),np.array(old3))
-
-                    news=[np.array([np.sum(truth1[:a]>truth2[:a]), np.sum(truth1[:a]<truth2[:a])]),
-                            np.array([np.sum(truth1[a:b]>truth2[a:b]), np.sum(truth1[a:b]<truth2[a:b])]),
-                            np.array([np.sum(truth1[b:]>truth2[b:]), np.sum(truth1[b:]<truth2[b:])])
-                            ]
-
-                    return [old+new for old,new in zip(olds, news)]
-                
-                a=int(df_limits.loc[df_limits['pack_seed'] == pack_seed, 'a'])
-                b=int(df_limits.loc[df_limits['pack_seed'] == pack_seed, 'b'])
-
-                truth_last=df_last.filter(like=pack_seed).iloc[:, 0].tolist()
-                truth_train=df_train.filter(like=pack_seed+'_'+str(train_conf)).iloc[:, 0].tolist()
-                last_train1,last_train2,last_train3 = update_times_best_with_new_seed(truth_last,truth_train,a,b,last_train1,last_train2,last_train3)
-
-                truth_test=df_test.filter(like=pack_seed+'_'+str(test_conf)).iloc[:, 0].tolist()
-                last_test1,last_test2,last_test3 = update_times_best_with_new_seed(truth_last,truth_test,a,b,last_test1,last_test2,last_test3)
-
-                train_test1,train_test2,train_test3 = update_times_best_with_new_seed(truth_train,truth_test,a,b,train_test1,train_test2,train_test3)
-
-                len_init+=a
-                len_learning+=b-a
-                len_stabilization+=len(truth_last)-b
-
-            # Pasar de numero de veces a procentage
-            matrix1=np.array([last_train1,last_test1,train_test1])/df_limits['a'].sum()
-            matrix2=np.array([last_train2,last_test2,train_test2])/(df_limits['b'] - df_limits['a']).sum()
-            matrix3=np.array([last_train3,last_test3,train_test3])/(df_limits['T'] - df_limits['b']).sum()
-
-            return matrix1,matrix2,matrix3,len_init,len_learning,len_stabilization
-
-        if which_graph=='in_which_deg_best':
-
-            # Quedarnos unicamente con los datos necesarios
-            df_last=pd.read_csv(path[1])
-            df_last = df_last.filter(regex=r''+pack) # Solo columnas asociadas al pack
-
-            df_train=pd.read_csv(path[2])
-            df_train = df_train.filter(regex=r''+pack+'.*_'+str(train_conf)+'$') # Solo columnas asociadas al pack y la configuracion indicada
-
-            df_test=pd.read_csv(path[3])
-            df_test = df_test.filter(regex=r''+pack+'.*_'+str(test_conf)+'$') # Solo columnas asociadas al pack y la configuracion indicada
-
-            df_deg=pd.read_csv(path[4])
-            df_deg = df_deg.filter(like=pack) # Solo columnas del pack
-            df_deg = df_deg.filter(regex=global_deg_metric+'_'+local_deg_metric+"$") # Solo columnas del pack con deg indicada
-
-            # Acumular las degradaciones en que cada uno de los criterios de cada par es mejor 
-            last_train1,last_train2,last_train3=[[],[]],[[],[]],[[],[]]
-            last_test1,last_test2,last_test3=[[],[]],[[],[]],[[],[]]
-            train_test1,train_test2,train_test3=[[],[]],[[],[]],[[],[]]
-            for pack_seed in df_limits['pack_seed']:
-
-                def update_deg_best_with_new_seed(deg,truth1,truth2,a,b,old1,old2,old3):
-                    truth1=np.array(truth1)
-                    truth2=np.array(truth2)
-                    deg=np.array(deg)
-                    olds=[old1,old2,old3]
-
-                    news=[[deg[:a][truth1[:a] > truth2[:a]],deg[:a][truth1[:a] < truth2[:a]]],
-                    [deg[a:b][truth1[a:b] > truth2[a:b]],deg[a:b][truth1[a:b] < truth2[a:b]]],
-                    [deg[b:][truth1[b:] > truth2[b:]],deg[b:][truth1[b:] < truth2[b:]]]
-                    ]
-
-                    return [[list(sub_old) + list(sub_new) for sub_old, sub_new in zip(old_i, new_i)] for old_i, new_i in zip(olds, news)]
-                
-                a=int(df_limits.loc[df_limits['pack_seed'] == pack_seed, 'a'])
-                b=int(df_limits.loc[df_limits['pack_seed'] == pack_seed, 'b'])
-                deg=df_deg.filter(like=pack_seed).iloc[:, 0].tolist()
-
-
-                truth_last=df_last.filter(like=pack_seed).iloc[:, 0].tolist()
-                truth_train=df_train.filter(like=pack_seed+'_'+str(train_conf)).iloc[:, 0].tolist()
-                last_train1,last_train2,last_train3 = update_deg_best_with_new_seed(deg,truth_last,truth_train,a,b,last_train1,last_train2,last_train3)
-
-                truth_test=df_test.filter(like=pack_seed+'_'+str(test_conf)).iloc[:, 0].tolist()
-                last_test1,last_test2,last_test3 = update_deg_best_with_new_seed(deg,truth_last,truth_test,a,b,last_test1,last_test2,last_test3)
-
-                train_test1,train_test2,train_test3 = update_deg_best_with_new_seed(deg,truth_train,truth_test,a,b,train_test1,train_test2,train_test3)
-
-            return [last_train1,last_test1,train_test1], [last_train2,last_test2,train_test2], [last_train3,last_test3,train_test3]
-
-        if which_graph=='with_what_prec_diff_best':
-            # Quedarnos unicamente con los datos necesarios
-            df_last=pd.read_csv(path[1])
-            df_last = df_last.filter(regex=r''+pack) # Solo columnas asociadas al pack
-
-            df_train=pd.read_csv(path[2])
-            df_train = df_train.filter(regex=r''+pack+'.*_'+str(train_conf)+'$') # Solo columnas asociadas al pack y la configuracion indicada
-
-            df_test=pd.read_csv(path[3])
-            df_test = df_test.filter(regex=r''+pack+'.*_'+str(test_conf)+'$') # Solo columnas asociadas al pack y la configuracion indicada
-
-            df_prec_last=pd.read_csv(path[4])
-            df_prec_last = df_prec_last.filter(regex=r''+pack+'.*_'+prec_metric+'$') # Solo columnas del pack con metrica de prec indicada
-
-            df_prec_train=pd.read_csv(path[5])
-            df_prec_train = df_prec_train.filter(regex=r''+pack+'.*_'+str(train_conf)+'_'+prec_metric+'$') # Solo columnas del pack con metrica de prec indicada
-
-            df_prec_test=pd.read_csv(path[6])
-            df_prec_test = df_prec_test.filter(regex=r''+pack+'.*_'+str(test_conf)+'_'+prec_metric+'$') # Solo columnas del pack con metrica de prec indicada
-
-            # Acumular las precisiones en que cada uno de los criterios de cada par es mejor 
-            last_train1,last_train2,last_train3=[[[],[]],[[],[]]],[[[],[]],[[],[]]],[[[],[]],[[],[]]]
-            last_test1,last_test2,last_test3=[[[],[]],[[],[]]],[[[],[]],[[],[]]],[[[],[]],[[],[]]]
-            train_test1,train_test2,train_test3=[[[],[]],[[],[]]],[[[],[]],[[],[]]],[[[],[]],[[],[]]]
-            for pack_seed in df_limits['pack_seed']:
-
-                def update_prec_best_with_new_seed(prec1,prec2,truth1,truth2,a,b,old1,old2,old3):
-                    truth1=np.array(truth1)
-                    truth2=np.array(truth2)
-                    prec1=np.array(prec1)
-                    prec2=np.array(prec2)
-                    olds=[old1,old2,old3]
-
-                    news=[[[prec1[:a][truth1[:a] > truth2[:a]],prec2[:a][truth1[:a] > truth2[:a]]],[prec2[:a][truth1[:a] < truth2[:a]],prec1[:a][truth1[:a] < truth2[:a]]]],
-                    [[prec1[a:b][truth1[a:b] > truth2[a:b]],prec2[a:b][truth1[a:b] > truth2[a:b]]],[prec2[a:b][truth1[a:b] < truth2[a:b]],prec1[a:b][truth1[a:b] < truth2[a:b]]]],
-                    [[prec1[b:][truth1[b:] > truth2[b:]],prec2[b:][truth1[b:] > truth2[b:]]],[prec2[b:][truth1[b:] < truth2[b:]],prec1[b:][truth1[b:] < truth2[b:]]]]
-                    ]
-
-                    return [[[list(x) + list(y) 
-                        for x,y in zip(a_ij, b_ij)] 
-                        for a_ij, b_ij in zip(a_i, b_i)] 
-                        for a_i, b_i in zip(olds, news)]
-                
-                a=int(df_limits.loc[df_limits['pack_seed'] == pack_seed, 'a'])
-                b=int(df_limits.loc[df_limits['pack_seed'] == pack_seed, 'b'])
-                prec_last=df_prec_last.filter(like=pack_seed+'_'+prec_metric).iloc[:, 0].tolist()
-                prec_train=df_prec_train.filter(like=pack_seed+'_'+str(train_conf)+'_'+prec_metric).iloc[:, 0].tolist()
-                prec_test=df_prec_test.filter(like=pack_seed+'_'+str(test_conf)+'_'+prec_metric).iloc[:, 0].tolist()
-
-
-                truth_last=df_last.filter(like=pack_seed).iloc[:, 0].tolist()
-                truth_train=df_train.filter(like=pack_seed+'_'+str(train_conf)).iloc[:, 0].tolist()
-                last_train1,last_train2,last_train3 = update_prec_best_with_new_seed(prec_last,prec_train,truth_last,truth_train,a,b,last_train1,last_train2,last_train3)
-
-                truth_test=df_test.filter(like=pack_seed+'_'+str(test_conf)).iloc[:, 0].tolist()
-                last_test1,last_test2,last_test3 = update_prec_best_with_new_seed(prec_last,prec_test,truth_last,truth_test,a,b,last_test1,last_test2,last_test3)
-
-                train_test1,train_test2,train_test3 = update_prec_best_with_new_seed(prec_train,prec_test,truth_train,truth_test,a,b,train_test1,train_test2,train_test3)
-
-            return [last_train1,last_test1,train_test1], [last_train2,last_test2,train_test2], [last_train3,last_test3,train_test3]
-
 class ProcessEstimator:
     '''
     Las funciones de esta clase permiten hacer estimaciones asociadas a cada iteracion de un proceso a partir de los datos train o test
@@ -686,7 +425,7 @@ class ProcessEstimator:
             return ep_rw, ep_last
         
         ep_rw_policy=[]
-        for time_steps in tqdm(n_timesteps_per_iter):
+        for time_steps in n_timesteps_per_iter:
             ep_rw_workers=[]
             ep_last_workers=[]
 
@@ -1158,9 +897,9 @@ class Selector:
     def best_policy_validation_with_cost(self,elapsed_time,cost_perc,freq):
 
         # Descomprimir columnas necesarias de df_test
-        df_test_ep_rewards=[DataConverter.compress_decompress_list(i,compress=False) for i in self.df_test['ep_rewards']]
-        df_test_elapsed_val_times=[DataConverter.compress_decompress_list(i,compress=False) for i in self.df_test['elapsed_val_time']]
-        df_test_n_val_ep=[DataConverter.compress_decompress_list(i,compress=False) for i in self.df_test['n_val_ep']]
+        df_test_ep_rewards=self.df_test['ep_rewards']#[DataConverter.compress_decompress_list(i,compress=False) for i in self.df_test['ep_rewards']]
+        df_test_elapsed_val_times=self.df_test['elapsed_val_time']#[DataConverter.compress_decompress_list(i,compress=False) for i in self.df_test['elapsed_val_time']]
+        df_test_n_val_ep=self.df_test['n_val_ep']#[DataConverter.compress_decompress_list(i,compress=False) for i in self.df_test['n_val_ep']]
 
         # Seleccionar unicamente los datos asociados a los episodios reservados para test
         df_test_ep_rewards=[ep_rewards[500:] for ep_rewards in df_test_ep_rewards]
@@ -1175,32 +914,40 @@ class Selector:
         validation_time=0 # lo necesito ir almacenando para calcular el n_ep de validacion que consume el coste que queremos
         for time in current_val_times:
             policy_id=self.df_train.loc[(self.df_train['time_seconds']<=time)].index.max()
-            current_val_policies.append(policy_id) 
+            
 
             val_time_until_truth=df_test_elapsed_val_times[policy_id][df_test_n_val_ep[policy_id].index(500)] 
             current_times=list(np.array(df_test_elapsed_val_times[policy_id])-val_time_until_truth)[500:]
 
             percentage=(np.array(current_times)+validation_time)/time
-            index_best=next((i for i, val in reversed(list(enumerate(percentage))) if val < float(cost_perc)), 0)
+            index_best=next((i for i, val in reversed(list(enumerate(percentage))) if val < float(cost_perc)), None)# NOTE: hay veces que hasta con 1 ep ya nos pasamos del porcentage de coste de validacion indicado
 
-            esti_time_seq.append([np.mean(df_test_ep_rewards[policy_id][:index_best+1]),current_times[index_best]])
-            val_n_ep[policy_id]=index_best+1
+            if index_best!=None:
+                current_val_policies.append(policy_id) 
 
-            validation_time+=current_times[index_best]
+                esti_time_seq.append([np.mean(df_test_ep_rewards[policy_id][:index_best+1]),current_times[index_best]])
+                val_n_ep[policy_id]=index_best+1
 
-        # Dividir estimaciones de tiempos adicionales
-        estimated_EER_seq=[]
-        times_seq=[]
-        for estimation, time in esti_time_seq:
-            estimated_EER_seq.append(estimation)
-            times_seq.append(time)
-
-        # Indice de la politica (en la subsecuencia de las politicas asociadas a las frecuencias) con mayor mean ER en validacion
-        indx_subseq=estimated_EER_seq.index(max(estimated_EER_seq))
+                validation_time+=current_times[index_best]
 
 
-        # Politica seleccionada y tiempo extra total invertido en su seleccion
-        return current_val_policies[indx_subseq], sum(times_seq),val_n_ep
+        if len(current_val_policies)>0:
+            # Dividir estimaciones de tiempos adicionales
+            estimated_EER_seq=[]
+            times_seq=[]
+            for estimation, time in esti_time_seq:
+                estimated_EER_seq.append(estimation)
+                times_seq.append(time)
+
+            # Indice de la politica (en la subsecuencia de las politicas asociadas a las frecuencias) con mayor mean ER en validacion
+            indx_subseq=estimated_EER_seq.index(max(estimated_EER_seq))
+
+
+            # Politica seleccionada y tiempo extra total invertido en su seleccion
+            return current_val_policies[indx_subseq], sum(times_seq),val_n_ep
+        else:
+            return self.df_train.loc[(self.df_train['time_seconds']<=elapsed_time)].index.max(),validation_time,val_n_ep
+
 
 class EvolutionGenerator:
     '''
@@ -1211,13 +958,17 @@ class EvolutionGenerator:
         self.selector=Selector(pack,seed)
         self.estimator=PointEstimator(pack,seed)
 
+        self.selector.df_test['ep_rewards']=[DataConverter.compress_decompress_list(i,compress=False) for i in self.selector.df_test['ep_rewards']]
+        self.selector.df_test['elapsed_val_time']=[DataConverter.compress_decompress_list(i,compress=False) for i in self.selector.df_test['elapsed_val_time']]
+        self.selector.df_test['n_val_ep']=[DataConverter.compress_decompress_list(i,compress=False) for i in self.selector.df_test['n_val_ep']]
+
 
     def degradation_evolution(self,x_times,global_metric,local_metric):
         return [self.estimator.degradation_level(time,global_metric,local_metric) for time in x_times]
 
     def effectiveness_evolution(self,x_times,n_ep=None,freq=None,criteria='last',normalized=False,for_analyzer=False,
                                 local_deg_metric=None,metric='perc_criteria_best',cost_perc=0.1):
-
+        
         y_eff=[]
         x_extras=[]
         val_time=0
@@ -1301,16 +1052,31 @@ class EvolutionGenerator:
         
         return y_estimation  
 
+
+# Programa principal
+library_dir=os.path.join(os.path.dirname(os.path.abspath(__file__)), "outputs")
+seed = list(range(1,31))[int(sys.argv[1])]
+
+pack='pack_PPO_Walker2d' 
+default_test_conf=[5,20] 
+optimal_cost=0.2
+optimal_freq=1
+
 if __name__ == "__main__":
 
-    # Generar datos generales para analysis 
-    DataGenerator('pack_PPO_BipedalWalker',list(range(1,31)),[50,25,10,5,2,1])
-    DataGenerator('pack_PPO_LunarLanderContinuous',list(range(1,31)),[40,20,10,5,2,1])
+    # Generar datos generales para analysis (cada semilla en un CPU para hacerlo mas rapido)
+    DataGenerator(pack,[seed],default_test_conf=default_test_conf)
 
-    # Generar los datos de test cost con configuracion optima detectada
-    datagenerator=DataGenerator('pack_PPO_BipedalWalker',list(range(1,31)),[50,25,10,5,2,1],already_generated_main_data=True)
-    datagenerator.add_test_cost_truth('0.2',1)
+    # Juntar df con todas las semillas para bajar al PC
+    DataConverter.join_df_analysis_seed(library_dir+'/'+pack+'/analysis_data/',list(range(1,31)))
 
-    datagenerator=DataGenerator('pack_PPO_LunarLanderContinuous',list(range(1,31)),[40,20,10,5,2,1],already_generated_main_data=True)
-    datagenerator.add_test_cost_truth('0.15',1)
+    # Generar los datos de test cost con configuracion optima detectada (cada semilla en un CPU para hacerlo mas rapido)
+    datagenerator=DataGenerator(pack,seed,already_generated_main_data=True)
+    datagenerator.add_test_cost_truth(optimal_cost,optimal_freq,single_seed=seed)
+
+    # Juntar df con todas las semillas para bajar al PC
+    DataConverter.join_df_analysis_seed(library_dir+'/'+pack+'/analysis_data/',list(range(1,31)),only_test_with_cost_truth=True)
+
+
+
 

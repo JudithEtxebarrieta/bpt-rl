@@ -1,9 +1,12 @@
 '''
-Script para ejecutar job con Stable Baselines en bender
+Script para generar procesos con Stable Baselines en bender.
 
 NOTE: Para que el directorio en donde se guarde todo se identifique bien, definir 
 (outputs es la carpeta que hay que definir en bender por cada proyecto):
 os.path.join(os.path.dirname(os.path.abspath(__file__)), "outputs")
+
+NOTE: Cuando vec_env_type='parallel' , ya sea porque n_workers>1 o n_eval_envs>1, el OnPolicy_learn_process/OffPolicy_learn_process 
+hay que ejecutarlo dentro de esta linea porque habra ejecucion en paralelo: "if __name__ == "__main__":"
 
 NOTE: en el cluster ajustar el minimo numero de parametros necesario en OnPolicy_learn_process/OffPolicy_learn_process, para que el resto se definan por defecto. 
 
@@ -22,10 +25,7 @@ Valores concretos:
 - eval_freq=2048 # (=n_steps_per_env*n_workers) es para que valide todas las politicas NOTE: esto en PPO (OnPolicy), en SAC (OffPolicy) 1024 para que valide el doble que PPO (aunque se estara saltando la validacion de politicas) 
 - deterministic_eval=True # Para que la validacion sea pareada
 
-NOTE: Cuando vec_env_type='parallel' , ya sea porque n_workers>1 o n_eval_envs>1, el OnPolicy_learn_process/OffPolicy_learn_process 
-hay que ejecutarlo dentro de esta linea porque habra ejecucion en paralelo: "if __name__ == "__main__":"
-
-NOTE: caracteristicas en el sbatch
+NOTE: caracteristicas en el sbatch para metodos OnPolicy_learn_process/OffPolicy_learn_process
 Despues de un analisis he visto que para n_eval_ep=500, 32G, 16CPU, 1GPU son suficientes. 
 Parece que esta libreria no esta diseñada para aprovechar el uso de GPU.
 
@@ -91,7 +91,6 @@ class MyTimer:
     def get_time(self):
         return time.time() - self.start_t - self.pause_t
 
-
 def compress_decompress_list(my_list,compress=True):
     if compress:
         # Convertir la lista a una cadena JSON compacta
@@ -117,7 +116,6 @@ def compress_decompress_list(my_list,compress=True):
         return my_list
 
 class ModifiedFunctions_Common:
-        
     # Funcion que define la interaccion de validacion: se modifica para guardar los datos de validacion
     def _on_step(self) -> bool:
 
@@ -355,7 +353,9 @@ class ModifiedFunctions_Common:
             # Escribir datos de validacion de la nueva politica
             with open(join(process_dir, "df_val.csv"), 'a',newline='') as df_val_csv:
                 writer = csv.writer(df_val_csv)
-                writer.writerow([n_policy,compress_decompress_list(episode_inits_truth+episode_inits),compress_decompress_list(episode_rewards_truth+episode_rewards),compress_decompress_list([int(i) for i in episode_lengths_truth+episode_lengths]),compress_decompress_list([int(i) for i in num_episodes_truth+list(np.array(num_episodes)+num_episodes_truth[-1])]),compress_decompress_list([0]*len(times_per_episode_truth)+times_per_episode)])
+                #writer.writerow([n_policy,compress_decompress_list(episode_inits_truth+episode_inits),compress_decompress_list(episode_rewards_truth+episode_rewards),compress_decompress_list([int(i) for i in episode_lengths_truth+episode_lengths]),compress_decompress_list([int(i) for i in num_episodes_truth+list(np.array(num_episodes)+num_episodes_truth[-1])]),compress_decompress_list([0]*len(times_per_episode_truth)+times_per_episode)])
+                writer.writerow([n_policy,None,compress_decompress_list(episode_rewards_truth+episode_rewards),compress_decompress_list([int(i) for i in episode_lengths_truth+episode_lengths]),compress_decompress_list([int(i) for i in num_episodes_truth+list(np.array(num_episodes)+num_episodes_truth[-1])]),compress_decompress_list([0]*len(times_per_episode_truth)+times_per_episode)])
+
             #######################################
 
             if self.log_path is not None:
@@ -629,8 +629,10 @@ class ModifiedFunctions_OnPolicy:
         total_time_seconds.pause()
         with open(join(process_dir, "df_traj.csv"), 'a',newline='') as df_traj_csv:
             writer = csv.writer(df_traj_csv)
-            writer.writerow([n_policy,self.num_timesteps,total_time_seconds.get_time(),compress_decompress_list(policy_traj_rewards),compress_decompress_list(policy_traj_ep_end),compress_decompress_list(policy_traj_ep_inits),
-                             compress_decompress_list(rollout_buffer.advantages.tolist()),compress_decompress_list(rollout_buffer.values.tolist()),compress_decompress_list(rollout_buffer.returns.tolist()),None,None,None,None])
+            # writer.writerow([n_policy,self.num_timesteps,total_time_seconds.get_time(),compress_decompress_list(policy_traj_rewards),compress_decompress_list(policy_traj_ep_end),compress_decompress_list(policy_traj_ep_inits),
+            #                  compress_decompress_list(rollout_buffer.advantages.tolist()),compress_decompress_list(rollout_buffer.values.tolist()),compress_decompress_list(rollout_buffer.returns.tolist()),None,None,None,None])
+            writer.writerow([n_policy,self.num_timesteps,total_time_seconds.get_time(),compress_decompress_list(policy_traj_rewards),compress_decompress_list(policy_traj_ep_end),None,
+                    compress_decompress_list(rollout_buffer.advantages.tolist()),compress_decompress_list(rollout_buffer.values.tolist()),compress_decompress_list(rollout_buffer.returns.tolist()),None,None,None,None])
 
             # writer.writerow([n_policy,self.num_timesteps,total_time_seconds.get_time(),None,None,None,
             #         None,None,None,None,None,None,None])
@@ -1504,87 +1506,80 @@ class PackOptions:
             callback=True, n_eval_ep=500, eval_freq=512, n_eval_envs=1, deterministic_eval=True # selection criteria
             )
         
+    def PPO_Ant(seed,experiment_name,library_dir):
+        '''
+        Ant-v4: &mujoco-defaults
+            normalize: true
+            n_timesteps: !!float 1e6
+            policy: 'MlpPolicy'
+        '''
 
+        Options.OnPolicy_learn_process(
+            'PPO','Ant-v4', # pack
+            seed,1e6+.5*1e6,experiment_name,library_dir,save_policies=False, # learning process
+            truth_n_workers=32, # learning interaction
+            device='auto', vec_env_type='sequential', # execution type
+            policy='MlpPolicy',normalize_advantage=True, # learning process parameters
+            callback=True, n_eval_ep=500, eval_freq=2048, deterministic_eval=True # selection criteria
+            )
 
 #==================================================================================================
 # Pruebas de funcionamiento en PC (tambien sirve como ejemplo para el cluster, se especifica
-# que clases usar para cada algoritmo y deiferencia de ejecucion en secuencial/paralelo)
+# que clases usar para cada algoritmo y diferencia de ejecucion en secuencial/paralelo)
 #==================================================================================================
+experiments_OnPolicy=False
+experiments_OffPolicy=False
+experiments_pack=False
+
 env='Ant-v4'
 seed=1
 total_timesteps=2048*3
 library_dir='_bender/project_SB3/outputs'
 
 # Experimentos con OnPolicy
-# Options.OnPolicy_learn_process('PPO',env,seed,total_timesteps,'execution8',library_dir,
-#                       n_workers=1,
-#                       device='cpu',
-#                       callback=True,n_eval_ep=1,eval_freq=2048,n_eval_envs=2,deterministic_eval=True)
+if experiments_OnPolicy:
+    Options.OnPolicy_learn_process('PPO',env,seed,total_timesteps,'execution8',library_dir,
+                        n_workers=1,
+                        device='cpu',
+                        callback=True,n_eval_ep=1,eval_freq=2048,n_eval_envs=2,deterministic_eval=True)
 
-# Options.OnPolicylearn_process('PPO',env,seed,total_timesteps,'execution2',library_dir,
-#                       n_workers=2,
-#                       device='cpu',
-#                       callback=True,n_eval_ep=2,eval_freq=2048,n_eval_envs=2,deterministic_eval=True)
-
-
-# if __name__ == "__main__": 
-#     Options.OnPolicylearn_process('PPO',env,seed,total_timesteps,'execution3',library_dir,
-#                         n_workers=2,vec_env_type='parallel',
-#                         device='cpu',
-#                         callback=True,n_eval_ep=2,eval_freq=2048,n_eval_envs=2,deterministic_eval=True)
-
-# if __name__ == "__main__": 
-#     Options.OnPolicylearn_process('PPO',env,seed,total_timesteps,'execution4',library_dir,
-#                         n_workers=1,vec_env_type='parallel',
-#                         device='cpu',
-#                         callback=True,n_eval_ep=2,eval_freq=2048,n_eval_envs=2,deterministic_eval=True)
-
-# Experimentos con OnPolicy
-# Options.OffPolicy_learn_process('SAC',env,seed,total_timesteps,'execution5',library_dir,
-#                       device='cpu',
-#                       callback=True,n_eval_ep=2,eval_freq=1024,n_eval_envs=1,deterministic_eval=True)
-
-# if __name__ == "__main__": 
-#     Options.OffPolicy_learn_process('SAC',env,seed,total_timesteps,'execution6',library_dir,save_policies=False,
-#                         n_workers=2,vec_env_type='parallel',
-#                         device='cpu',
-#                         callback=True,n_eval_ep=2,eval_freq=1024,n_eval_envs=2,deterministic_eval=True)
-
-# if __name__ == "__main__": 
-#     PackOptions.PPO_Walker2d(seed,'execution10',library_dir)
+    Options.OnPolicy_learn_process('PPO',env,seed,total_timesteps,'execution2',library_dir,
+                        n_workers=2,
+                        device='cpu',
+                        callback=True,n_eval_ep=2,eval_freq=2048,n_eval_envs=2,deterministic_eval=True)
 
 
+    if __name__ == "__main__": 
+        Options.OnPolicy_learn_process('PPO',env,seed,total_timesteps,'execution3',library_dir,
+                            n_workers=2,vec_env_type='parallel',
+                            device='cpu',
+                            callback=True,n_eval_ep=2,eval_freq=2048,n_eval_envs=2,deterministic_eval=True)
 
-# Comprobar que los estados iniciales de validacion son los mismos
-# df_val=pd.read_csv('_bender/project_SB3/outputs/execution3/process_info/df_val.csv')
-# df_traj=pd.read_csv('_bender/project_SB3/outputs/execution3/process_info/df_traj.csv')
-# print([np.array(compress_decompress_list(i,compress=False)) for i in np.array(compress_decompress_list(df_val['ep_inits'][0],compress=False))])
-# print([np.array(compress_decompress_list(i,compress=False)) for i in np.array(compress_decompress_list(df_val['ep_inits'][1],compress=False))])
+    if __name__ == "__main__": 
+        Options.OnPolicy_learn_process('PPO',env,seed,total_timesteps,'execution4',library_dir,
+                            n_workers=1,vec_env_type='parallel',
+                            device='cpu',
+                            callback=True,n_eval_ep=2,eval_freq=2048,n_eval_envs=2,deterministic_eval=True)
+
+# Experimentos con OffPolicy
+if experiments_OffPolicy:
+    Options.OffPolicy_learn_process('SAC',env,seed,total_timesteps,'execution5',library_dir,
+                        device='cpu',
+                        callback=True,n_eval_ep=2,eval_freq=1024,n_eval_envs=1,deterministic_eval=True)
+
+    if __name__ == "__main__": 
+        Options.OffPolicy_learn_process('SAC',env,seed,total_timesteps,'execution6',library_dir,save_policies=False,
+                            n_workers=2,vec_env_type='parallel',
+                            device='cpu',
+                            callback=True,n_eval_ep=2,eval_freq=1024,n_eval_envs=2,deterministic_eval=True)
+
+# Experimentos con packs
+if experiments_pack:
+    if __name__ == "__main__": 
+        PackOptions.PPO_Walker2d(seed,'execution10',library_dir)
 
 
 
-# Dimensiones de trajectorias 
-# print(np.array(compress_decompress_list(df_traj['traj_rewards'][0],compress=False)).shape)
-# print(np.array(compress_decompress_list(df_traj['traj_ep_end'][0],compress=False)).shape)
-
-# print([np.count_nonzero(np.array(i)) for i in compress_decompress_list(df_traj['traj_ep_end'][0],compress=False)])
-# print([len(i) for i in compress_decompress_list(df_traj['traj_inits'][0],compress=False)])
-
-# Comprobar que se guardan bien los datos relacionados con la actualizacion de politica
-# print(np.array(compress_decompress_list(df_traj['traj_rewards'][0],compress=False)).shape)
-# print(np.array(compress_decompress_list(df_traj['traj_advantages'][0],compress=False)).shape)
-# print(np.array(compress_decompress_list(df_traj['traj_advantages'][0],compress=False)))
-# print(np.array(compress_decompress_list(df_traj['traj_values'][0],compress=False)).shape)
-# print(np.array(compress_decompress_list(df_traj['traj_values'][0],compress=False)))
-# print(np.array(compress_decompress_list(df_traj['traj_returns'][0],compress=False)).shape)
-# print(np.array(compress_decompress_list(df_traj['traj_returns'][0],compress=False)))
-
-# Comprobar que para env train (secuencial) y test (paralelo/vectorial) diferentes se guardan bien todos los datos
-# df_val=pd.read_csv('_bender/project_SB3/outputs/execution4/process_info/df_val.csv')
-# df_traj=pd.read_csv('_bender/project_SB3/outputs/execution4/process_info/df_traj.csv')
-# print(np.array(compress_decompress_list(df_val['ep_rewards'][1],compress=False)))
-# print(np.array(compress_decompress_list(df_val['n_val_ep'][1],compress=False)))
-# print(np.array(compress_decompress_list(df_val['elapsed_val_time'][1],compress=False)))
 
 
 
