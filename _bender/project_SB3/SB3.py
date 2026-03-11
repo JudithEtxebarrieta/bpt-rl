@@ -1523,6 +1523,47 @@ class PackOptions:
             callback=True, n_eval_ep=500, eval_freq=2048, deterministic_eval=True # selection criteria
             )
 
+    def PPO_HalfCheetah(seed,experiment_name,library_dir):
+        '''
+        HalfCheetah-v4:
+            normalize: true
+            n_envs: 1
+            policy: 'MlpPolicy'
+            n_timesteps: !!float 1e6
+            batch_size: 64
+            n_steps: 512
+            gamma: 0.98
+            learning_rate: 2.0633e-05
+            ent_coef: 0.000401762
+            clip_range: 0.1
+            n_epochs: 20
+            gae_lambda: 0.92
+            max_grad_norm: 0.8
+            vf_coef: 0.58096
+            policy_kwargs: "dict(
+                                log_std_init=-2,
+                                ortho_init=False,
+                                activation_fn=nn.ReLU,
+                                net_arch=dict(pi=[256, 256], vf=[256, 256])
+                            )"
+        '''
+
+        Options.OnPolicy_learn_process(
+            'PPO','HalfCheetah-v4', # pack
+            seed,1e6+.5*1e6,experiment_name,library_dir,save_policies=False, # learning process
+            truth_n_workers=16, batch_size=64,n_epoch=20,n_steps_per_env=512,# learning interaction
+            device='auto', vec_env_type='sequential', # execution type
+            policy='MlpPolicy',normalize_advantage=True,gamma=0.98,learning_rate=2.0633e-05,ent_coef=0.000401762,
+            clip_range=0.1,gae_lambda=0.92, max_grad_norm=0.8,vf_coef=0.58096,
+            policy_kwargs=dict(
+                                log_std_init=-2,
+                                ortho_init=False,
+                                activation_fn=nn.ReLU,
+                                net_arch=dict(pi=[256, 256], vf=[256, 256])
+                            ), # learning process parameters
+            callback=True, n_eval_ep=500, eval_freq=512, deterministic_eval=True # selection criteria
+            )
+
 #==================================================================================================
 # Pruebas de funcionamiento en PC (tambien sirve como ejemplo para el cluster, se especifica
 # que clases usar para cada algoritmo y diferencia de ejecucion en secuencial/paralelo)
