@@ -27,7 +27,7 @@ class DataGenerator:
     '''
 
     def __init__(self,library,pack,seeds,
-                list_freq,list_n_ep=[500,250,100,50,25,5], list_cost_perc=[0.05,0.1,0.15,0.2,0.25], # la lista de frecuanzias depende del numero de iteraciones con que se ejecute cada pack
+                list_freq=[20,15,10,5,2,1],list_n_ep=[500,250,100,50,25,5], list_cost_perc=[0.05,0.1,0.15,0.2], # la lista de frecuanzias depende del numero de iteraciones con que se ejecute cada pack
                 global_deg_metric='norm_from_mean_worsening_to_improvement',local_deg_metric='reward_diff',prec_metric='relative_perc_criteria_best', limit_metric='from_first_last',
                 last_estimates_conf=100,
                 data_common_path='experiments/results/data',
@@ -1323,7 +1323,7 @@ class Grapher:
         '''
         Estudio de magnitud de la degradacion junto a etapa de aprendizaje donde aparece.
 
-        NOTE: esta pensado para hacerlo con 20 semillas
+        NOTE: esta pensado para hacerlo con 30 semillas
         '''
 
         def plot_deg_truth_with_regions(ax1,ax2,title,seed,
@@ -1338,9 +1338,8 @@ class Grapher:
 
             # Evolucion de degradacion
             deg=pd.read_csv(self.data_path+'deg_evolution.csv')[pack+str(seed)+'_'+global_deg_metric+'_'+local_deg_metric].tolist()
-
+            
             ax1.imshow(np.array(deg)[np.newaxis, :], cmap='gray_r', vmin=0, vmax=1,aspect='auto', interpolation='nearest')
-            ax1.set_aspect(5)
             ax1.set_xticks([])
             ax1.set_yticks([])
             
@@ -1354,6 +1353,7 @@ class Grapher:
 
             ax2.axvline(x=a, color='red', linestyle='-', linewidth=2,label='start learning')
             ax2.axvline(x=b, color='black', linestyle='-', linewidth=2,label='end learning')
+            ax2.axvline(x=int(len(truth_last)/1.5), color='black', linestyle='--', linewidth=2,label='default end')
             ax2.set_xlim(0,len(truth_last))
 
             if last_row:
@@ -1366,8 +1366,8 @@ class Grapher:
                 ax1.set_title(title)
             ax2.grid(True)
 
-        fig, axs = plt.subplots(6*2,5, figsize=(5*8,6*5),height_ratios=[0.25,1]*6)
-        plt.subplots_adjust(top=0.95,bottom=0.08,left=0.1,right=0.95, hspace=0.1,wspace=0.2)
+        fig, axs = plt.subplots(6*2,5, figsize=(5*8,6*5),height_ratios=[0.1,1]*6)
+        plt.subplots_adjust(top=0.95,bottom=0.08,left=0.1,right=0.95, hspace=0.15,wspace=0.2)
 
         for i in tqdm(range(len(seeds))):
             first_graph,first_row,last_row,first_column=[False]*4
@@ -1385,6 +1385,12 @@ class Grapher:
                                                                 limit_metric=limit_metric,
                                                                 first_graph=first_graph,first_row=first_row,first_column=first_column,last_row=last_row)
 
+        # Poner todos los ejec OY con los mismos valores
+        filas_pares = axs[1::2, :]  
+        y_min = min(ax.get_ylim()[0] for ax in filas_pares.flatten())
+        y_max = max(ax.get_ylim()[1] for ax in filas_pares.flatten())
+        for ax in filas_pares.flatten():
+            ax.set_ylim(y_min, y_max)
 
         plt.savefig(self.graph_path+'/internal_deg_truth_with_regions_'+global_deg_metric+'_'+local_deg_metric+'.pdf')
 
@@ -1465,6 +1471,7 @@ class Grapher:
          prec_metric='relative_perc_criteria_best',
          limit_metric='from_first_last',n_ep_type='constant',
          ):
+        
 
         '''
         Genera primera grafica principal a partir de los datos transformados a formato apropiado para ello.
@@ -1474,7 +1481,10 @@ class Grapher:
         '''
 
         # Cuadricula de grafica
-        fig,axs=plt.subplots(5,3, figsize=(10,8),height_ratios=[0.02,0.03,0.01,0.05,0.3])
+        if n_ep_type=='constant':
+            fig,axs=plt.subplots(5,3, figsize=(10,8),height_ratios=[0.02,0.03,0.01,0.05,0.05*6])
+        else:
+            fig,axs=plt.subplots(5,3, figsize=(10,8),height_ratios=[0.02,0.03,0.01,0.05,0.05*4])
         plt.subplots_adjust(top=0.95,bottom=0.15,left=0.1,right=0.95, hspace=0.03,wspace=0.02)
 
         # 1) Distribucion de degradacion
@@ -1547,14 +1557,13 @@ class Grapher:
 
 
         # 3) Train conf_prec
-        def train_conf_precCI(ax,listas,n_ep_list,nombres=None,optimal_conf=None,initialization_also=True):
+        def train_conf_precCI(ax,listas,n_ep_list,nombres=None,optimal_conf=None):
 
             for y, data in zip(range(len(listas)), listas):
                 if optimal_conf!=None:
-                    if initialization_also:
-                        if int(optimal_conf)==int(n_ep_list[len(listas)-1-y]) :
-                            ax.axhline(y, color='yellow', linewidth=10,alpha=0.3)
-                if default_train_n_ep==int(n_ep_list[y]):
+                    if int(optimal_conf)==int(n_ep_list[::-1][len(listas)-1-y]) :
+                        ax.axhline(y, color='yellow', linewidth=10,alpha=0.3)
+                if default_train_n_ep==int(n_ep_list[::-1][y]):
                     ax.axhline(y, color='black', linewidth=10,alpha=0.05)
 
                 ax.hlines(y, np.percentile(data, 5), np.percentile(data, 95), color='black')
@@ -1564,53 +1573,40 @@ class Grapher:
 
             ax.set_xlim(-0.1,1.1)
             ax.grid(axis='x', linestyle='--',alpha=0.4)
-            ax.axvspan(0.9, 1.0, color='black', alpha=0.05)
             if nombres!=None:
                 ax.set_yticks(range(len(n_ep_list)), n_ep_list)
                 ax.set_ylabel('train n_ep')
-                legend_elements = [Line2D([0], [0], color='yellow', lw=6, alpha=0.3, label='first in [0.9,1]'),
+                legend_elements = [Line2D([0], [0], color='yellow', lw=6, alpha=0.3, label='max p5 in learning with cost_perc<0.2'),
                                    Line2D([0], [0], color='grey', lw=6, alpha=0.3, label='by default')
                                 ]
 
-                ax.legend(handles=legend_elements,title='Selected conf',loc='upper center',bbox_to_anchor=(2.6, -6.6),ncol=1)
+                if n_ep_type=='constant':
+                    ax.legend(handles=legend_elements,title='Selected conf',loc='upper center',bbox_to_anchor=(2.63, -6.6),ncol=1)
+                else:
+                    ax.legend(handles=legend_elements,title='Selected conf',loc='upper center',bbox_to_anchor=(2.63, -4.4),ncol=1)
+
             else:
                 ax.set_yticks([])
             ax.set_xticklabels([])
             
-        def obtain_best_train_conf(prec1,prec2,prec3,n_ep_list,threshold=0.9,only_learning_stabilization=False):
+        def obtain_best_train_conf(prec2,n_ep_list):
 
-            for i, (x1,x2,x3) in enumerate(zip(prec1, prec2, prec3)):
-   
-                if only_learning_stabilization:
-                    if (np.percentile(x2, 5) > threshold and
-                        np.percentile(x3, 5) > threshold):
-
-                        return n_ep_list[i]
-                    
-                else:
-                    if (np.percentile(x1, 5) > threshold and
-                        np.percentile(x2, 5) > threshold and
-                        np.percentile(x3, 5) > threshold):
-
-                        return n_ep_list[i]
-    
-
+            q5_learning=[np.percentile(i, 5) for i in prec2]
+            return n_ep_list[q5_learning.index(max(q5_learning))]
         
         prec1,prec2,prec3,conf_list=DataConverter.from_df_data_to_graph_data(
             [self.data_path+'learning_regions.csv',self.data_path+'df_train_prec.csv'],pack,which_graph='train_conf_prec',
             prec_metric=prec_metric,limit_metric=limit_metric
         )
  
-        best_conf=obtain_best_train_conf(prec1[::-1],prec2[::-1],prec3[::-1],conf_list)
-        n_ep_train=[obtain_best_train_conf(prec1[::-1],prec2[::-1],prec3[::-1],conf_list,only_learning_stabilization=True) if best_conf==None else best_conf][0]
-        initialization_also=[False if best_conf==None else True][0]
-        train_conf_precCI(axs[3,0],prec1,conf_list,nombres=True,optimal_conf=n_ep_train,initialization_also=initialization_also)
+        n_ep_train=obtain_best_train_conf(prec2,conf_list)
+        train_conf_precCI(axs[3,0],prec1,conf_list,nombres=True,optimal_conf=n_ep_train)
         train_conf_precCI(axs[3,1],prec2,conf_list,optimal_conf=n_ep_train)
         train_conf_precCI(axs[3,2],prec3,conf_list,optimal_conf=n_ep_train)
 
 
         # 4) Test conf_prec_cost
-        def test_conf_precCI_costColor(ax,prec_matrix,cost_matrix,n_ep_list,freq_list,nombres=None,optimal_conf=[None,None],initialization_also=True):
+        def test_conf_precCI_costColor(ax,prec_matrix,cost_matrix,n_ep_list,freq_list,nombres=None,optimal_conf=[None,None]):
             # Fijar colores y marcadores
             def obtain_color_and_marker(value):
                 if 0 <= value < 0.05:
@@ -1662,20 +1658,23 @@ class Grapher:
                 region_start = current_height
                 for j in range(len(freq_list)):
 
-                    if initialization_also:
-                        if float(optimal_conf[0])==float(n_ep_list[i]) and int(optimal_conf[1])==int(freq_list[j]):
-                            ax.axhline(current_height, color='yellow', linewidth=10,alpha=0.3)
+                    if float(optimal_conf[0])==float(n_ep_list[i]) and int(optimal_conf[1])==int(freq_list[j]):
+                        ax.axhline(current_height, color='yellow', linewidth=10,alpha=0.3)
                     if default_test_n_ep==float(n_ep_list[i]) and default_test_freq==float(freq_list[j]) and n_ep_type=='constant':
                         ax.axhline(current_height, color='black', linewidth=10,alpha=0.05)
 
                     datos = prec_matrix[i][j]
                     datos_color = cost_matrix[i][j]
                             
-                    color, marcador, tamaño = obtain_color_and_marker(np.mean(datos_color))
-
-                    ax.hlines(current_height, np.percentile(datos, 5), np.percentile(datos, 95), color=color)
-                    ax.vlines([np.percentile(datos, 5), np.percentile(datos, 95)], current_height-0.2, current_height+0.2, color=color)
-                    ax.scatter(np.median(datos), current_height, color=color, marker=marcador, s=tamaño, zorder=3)
+                    if n_ep_type=='constant':
+                        color, marcador, tamaño = obtain_color_and_marker(max(datos_color))
+                        ax.hlines(current_height, np.percentile(datos, 5), np.percentile(datos, 95), color=color)
+                        ax.vlines([np.percentile(datos, 5), np.percentile(datos, 95)], current_height-0.2, current_height+0.2, color=color)
+                        ax.scatter(np.median(datos), current_height, color=color, marker=marcador, s=tamaño, zorder=3)
+                    else:
+                        ax.hlines(current_height, np.percentile(datos, 5), np.percentile(datos, 95), color='black')
+                        ax.vlines([np.percentile(datos, 5), np.percentile(datos, 95)], current_height-0.2, current_height+0.2, color='black')
+                        ax.scatter(np.median(datos), current_height, color='black', marker='o', zorder=3)
                     
                     segment_labels.append(freq_list[j])
                     current_height += 1
@@ -1685,12 +1684,12 @@ class Grapher:
                 
                 if i < len(n_ep_list)-1: # Linea separadora de regiones
                     ax.axhline(current_height-0.5, color='black', linewidth=1)
-            ax.axvspan(0.9, 1.0, color='black', alpha=0.05)
             ax.grid(axis='x', linestyle='--', alpha=0.5)
             ax.set_yticks(range(len(segment_labels)), segment_labels)
 
             if nombres!=None:
-                ax.legend(handles=legend_elements,title="Mean val_cost_perc",loc='upper center',bbox_to_anchor=(1, -0.1), ncol=len(legend_elements),frameon=True)
+                if n_ep_type=='constant':
+                    ax.legend(handles=legend_elements,title="Max val_cost_perc",loc='upper center',bbox_to_anchor=(0.9, -0.1), ncol=len(legend_elements),frameon=True)
                 for center, name in zip(region_centers, n_ep_list):
                     ax.text(-0.15, center, name,transform=ax.get_yaxis_transform(),ha='right', va='center')
                 ax.set_ylabel('test (n_ep,freq)',labelpad=35)
@@ -1702,25 +1701,37 @@ class Grapher:
             ax.set_title("")
             ax.invert_yaxis()
 
-        def obtain_best_test_conf(prec1,prec2,prec3,n_ep_list,freq_list,threshold=0.9,only_learning_stabilization=False):
+        def obtain_best_test_conf(prec2,cost2,n_ep_list,freq_list,threshold=0.2):
 
-            for i, (x1, x2, x3) in enumerate(zip(prec1, prec2, prec3)):
-                for j, (y1, y2, y3) in enumerate(zip(x1, x2, x3)):
+            q5_learning=[]
+            for i in prec2:
+                q5_sublist=[]
+                for j in i:
+                    q5_sublist.append(np.percentile(j, 5))
+                q5_learning.append(q5_sublist)
 
-                    if only_learning_stabilization:
+            max_cost_learning=[]
+            for i in cost2:
+                max_sublist=[]
+                for j in i:
+                    max_sublist.append(max(j))
+                max_cost_learning.append(max_sublist)
 
-                        if (np.percentile(y2, 5) > threshold and
-                            np.percentile(y3, 5) > threshold):
-
-                            return n_ep_list[i], int(freq_list[j])
-                    
-                    else:
-
-                        if (np.percentile(y1, 5) > threshold and
-                            np.percentile(y2, 5) > threshold and
-                            np.percentile(y3, 5) > threshold):
-
-                            return n_ep_list[i], int(freq_list[j])
+            if n_ep_type=='with_cost':                
+                i, j = max(((i, j) for i, sub in enumerate(q5_learning) for j, v in enumerate(sub)),key=lambda x: q5_learning[x[0]][x[1]])
+                return n_ep_list[i], int(freq_list[j])
+            
+            if n_ep_type=='constant':
+                i, j = max(
+                            (
+                                (i, j)
+                                for i in range(len(q5_learning))
+                                for j in range(len(q5_learning[i]))
+                                if max_cost_learning[i][j] < threshold
+                            ),
+                            key=lambda x: q5_learning[x[0]][x[1]]
+                        )
+                return n_ep_list[i], int(freq_list[j])
 
 
         prec1,prec2,prec3,n_ep_list,freq_list=DataConverter.from_df_data_to_graph_data(
@@ -1732,10 +1743,8 @@ class Grapher:
             prec_metric=prec_metric,limit_metric=limit_metric,n_ep_type=n_ep_type
         )
 
-        best_conf=obtain_best_test_conf(prec1,prec2,prec3,n_ep_list,freq_list)
-        n_ep_test,freq_test=[obtain_best_test_conf(prec1,prec2,prec3,n_ep_list,freq_list,only_learning_stabilization=True) if best_conf==None else best_conf][0]
-        initialization_also=[False if best_conf==None else True][0]
-        test_conf_precCI_costColor(axs[4,0],prec1,cost1,n_ep_list,freq_list,nombres=True,optimal_conf=[n_ep_test,freq_test],initialization_also=initialization_also)
+        n_ep_test,freq_test=obtain_best_test_conf(prec2,cost2,n_ep_list,freq_list)
+        test_conf_precCI_costColor(axs[4,0],prec1,cost1,n_ep_list,freq_list,nombres=True,optimal_conf=[n_ep_test,freq_test])
         test_conf_precCI_costColor(axs[4,1],prec2,cost2,n_ep_list,freq_list,optimal_conf=[n_ep_test,freq_test])
         test_conf_precCI_costColor(axs[4,2],prec3,cost3,n_ep_list,freq_list,optimal_conf=[n_ep_test,freq_test])
 
@@ -1777,9 +1786,11 @@ class Grapher:
                 ax.barh(y=i,width=right_val,left=1 - right_val,color=color_right,height=1)
 
                 marker_left = color_marker_map.get(color_left, 'o')
-                marker_right = color_marker_map.get(color_right, 'o')         
-                ax.plot(left_val, i,marker=marker_left,color='black',markersize=6) # Punta izquierda
-                ax.plot(1 - right_val, i,marker=marker_right,color='black',markersize=6) # Punta derecha
+                marker_right = color_marker_map.get(color_right, 'o')  
+                if left_val>0:       
+                    ax.plot(left_val, i,marker=marker_left,color='black',markersize=6) # Punta izquierda
+                if right_val>0:
+                    ax.plot(1 - right_val, i,marker=marker_right,color='black',markersize=6) # Punta derecha
 
             ax.set_xlim(-0.05, 1.05)
             ax.set_ylim(-0.5, len(data)-0.5)
@@ -1827,35 +1838,35 @@ class Grapher:
                 bar_height = hist_height / len(pair_colors) # Para que las barras de un mismo bin no se solapen, dividimos verticalmente
 
                 for j, (sublist, color) in enumerate(zip(pair, pair_colors)):
+                    if len(sublist)>0:
+                        sublist = np.asarray(sublist)
 
-                    sublist = np.asarray(sublist)
+                        # Histograma normalizado a porcentaje
+                        hist, bin_edges = np.histogram(sublist, bins=bins, range=(0,1), density=False)
+                        percentages = hist / hist.sum()  # entre 0 y 1
 
-                    # Histograma normalizado a porcentaje
-                    hist, bin_edges = np.histogram(sublist, bins=bins, range=(0,1), density=False)
-                    percentages = hist / hist.sum()  # entre 0 y 1
+                        bin_width = bin_edges[1] - bin_edges[0]
 
-                    bin_width = bin_edges[1] - bin_edges[0]
+                        # Color proporcional al porcentaje 
+                        base_rgb = np.array(mcolors.to_rgb(color))
+                        colors_scaled = [tuple(base_rgb * p + (1-p)) for p in percentages]  # mezcla con blanco
 
-                    # Color proporcional al porcentaje 
-                    base_rgb = np.array(mcolors.to_rgb(color))
-                    colors_scaled = [tuple(base_rgb * p + (1-p)) for p in percentages]  # mezcla con blanco
+                        # Dibujar barras
+                        for left, col in zip(bin_edges[:-1], colors_scaled):
+                            ax.bar(left, bar_height, width=bin_width,
+                                bottom=i*y_spacing + j*bar_height,
+                                align='edge', color=col, edgecolor=None)
 
-                    # Dibujar barras
-                    for left, col in zip(bin_edges[:-1], colors_scaled):
-                        ax.bar(left, bar_height, width=bin_width,
-                            bottom=i*y_spacing + j*bar_height,
-                            align='edge', color=col, edgecolor=None)
+                        # Mediana 
+                        median_val = np.median(sublist)
+                        bottom_y = i*y_spacing + j*bar_height
+                        top_y = bottom_y + bar_height
 
-                    # Mediana 
-                    median_val = np.median(sublist)
-                    bottom_y = i*y_spacing + j*bar_height
-                    top_y = bottom_y + bar_height
+                        ax.vlines(median_val, bottom_y, top_y, color='black')
+                        mid_y = bottom_y + bar_height/2
 
-                    ax.vlines(median_val, bottom_y, top_y, color='black')
-                    mid_y = bottom_y + bar_height/2
-
-                    marker = color_marker_map.get(color, 'o')
-                    ax.plot(median_val, mid_y, marker=marker, color='black', markersize=5)
+                        marker = color_marker_map.get(color, 'o')
+                        ax.plot(median_val, mid_y, marker=marker, color='black', markersize=5)
 
             if nombre:
                 ax.set_ylabel("Degradation when best", fontsize=8)
@@ -1904,9 +1915,13 @@ class Grapher:
                     for k, (subsubdata, color) in enumerate(zip(sublist, sub_colors)):
                         offset = inner_offset if k == 0 else -inner_offset
                         y_pos = base_level_y + offset
-                        ax.hlines(y_pos, np.percentile(subsubdata, 5), np.percentile(subsubdata, 95), color=color)
-                        ax.vlines(np.percentile(subsubdata, 5),  y_pos - cap_height, y_pos + cap_height, color=color)
-                        ax.vlines(np.percentile(subsubdata, 95), y_pos - cap_height, y_pos + cap_height, color=color)
+      
+                        if len(subsubdata)>0:
+                            ax.hlines(y_pos, np.percentile(subsubdata, 5), np.percentile(subsubdata, 95), color=color)
+                            ax.vlines(np.percentile(subsubdata, 5),  y_pos - cap_height, y_pos + cap_height, color=color)
+                            ax.vlines(np.percentile(subsubdata, 95), y_pos - cap_height, y_pos + cap_height, color=color)
+                        else:
+                            subsubdata=[2] # para que cuando los dos criterios estan completamente empatados, en la grafica no aparezca ningun CI dibujado pero se mantengan los margenes
 
                         marker = color_marker_map.get(color, 'o')  # default circulo si color no mapeado
                         ax.plot(np.median(subsubdata), y_pos, marker=marker, color=color, markersize=5)
@@ -1936,7 +1951,6 @@ class Grapher:
         with_what_prec_diff_best(axs[2,0],matrix1,nombre=True)
         with_what_prec_diff_best(axs[2,1],matrix2)
         with_what_prec_diff_best(axs[2,2],matrix3)
-
         plt.savefig(self.graph_path+'/main_analysis2.pdf')
 
     def graph_pack_learning_curves_with_criteria(self,pack,
@@ -2002,16 +2016,17 @@ class Grapher:
         axs[0,2].set_title('Truth vs default Test')
 
         # Truth vs recomended test
-        if curves=='truth':
-            plot_mediana_ci(axs[0,3], df_truth_pack, color='black', label='Truth best')
-            df_test_pack_conf=df_test_pack.loc[:, df_test_pack.columns.str.endswith('_'+optimal_conf)]
-            plot_mediana_ci(axs[0,3], df_test_pack_conf, color="green", label='Test best')
+        # if curves=='truth':
+        #     plot_mediana_ci(axs[0,3], df_truth_pack, color='black', label='Truth best')
+        #     df_test_pack_conf=df_test_pack.loc[:, df_test_pack.columns.str.endswith('_'+optimal_conf)]
+        #     plot_mediana_ci(axs[0,3], df_test_pack_conf, color="green", label='Test best')
 
-            axs[0,3].set_xlabel('Learning iteration')
-            axs[0,3].set_title('Truth vs Test '+optimal_conf)
-        else:
-            axs[0,3].axis('off')
+        #     axs[0,3].set_xlabel('Learning iteration')
+        #     axs[0,3].set_title('Truth vs Test '+optimal_conf)
+        # else:
+        #     axs[0,3].axis('off')
 
+        axs[1,3].axis('off')
         if also_train_test_grid:
             # Truth vs train
             plot_mediana_ci(axs[1,0], df_truth_pack, color='black', label='Truth best')
@@ -2054,14 +2069,14 @@ class Grapher:
 
             axs[1,2].set_xlabel('Learning iteration')
             axs[1,2].set_title('Truth vs Test with n_ep=5')
+
+            plt.savefig(self.graph_path+'/main_learning_curves_'+curves+'.pdf')
         else:
             axs[1,0].axis('off')
             axs[1,1].axis('off')
             axs[1,2].axis('off')
 
-        axs[1,3].axis('off')
-
-        plt.savefig(self.graph_path+'/main_learning_curves_'+curves+'.pdf')
+            plt.savefig(self.graph_path+'/main_simple_learning_curves_'+curves+'.pdf')
 
     def graph_pack_learning_curves_error(self,pack,
                                          default_conf=[None,None,None],optimal_conf=None,diff='estimate_truth'):
@@ -2180,9 +2195,8 @@ class Grapher:
             plt.savefig(self.graph_path+'/main_cummulative_paired_diff_learning_curves_'+diff+'_all.pdf')
 
 
-
     # Graficas de discusion
-    def graph_test_with_cost_n_ep(self,list_freq,list_cost=[0.05,0.1,0.15,0.2,0.25]):
+    def graph_test_with_cost_n_ep(self,list_freq=[20, 15, 10, 5, 2, 1],list_cost=[0.05,0.1,0.15,0.2]):
 
         # Leer bases de datos que se van ha usar
         df_test_cost=pd.read_csv(self.data_path+'df_test_cost.csv')
@@ -2202,7 +2216,7 @@ class Grapher:
                 ax.set_xlabel('Numer of iterations')
                 
         fig, axs = plt.subplots(2,len(list_cost), figsize=(20, 6))
-        plt.subplots_adjust(top=0.96,bottom=0.12,left=0.09,right=0.98, hspace=0.13,wspace=0.39)
+        plt.subplots_adjust(top=0.96,bottom=0.12,left=0.12,right=0.98, hspace=0.13,wspace=0.39)
 
         # Por cada coste posible dibujaremos dos graficas con todas las semillas
         for i,perc in enumerate(list_cost):
@@ -2211,7 +2225,6 @@ class Grapher:
                 # Solo seleccionar columnas con esa prec y freq
                 df_cost_perc_freq = df_test_cost.loc[:, df_test_cost.columns.str.contains('_'+str(perc)+'cost_'+str(freq)+'_')]
                 df_n_ep_perc_freq = df_test_n_ep.loc[:, df_test_n_ep.columns.str.contains('_'+str(perc)+'cost_'+str(freq)+'_')]
-
 
                 plot_perc_n_ep_evolution(axs[0,i],df_cost_perc_freq,freq,perc,plot_title=True)
                 plot_perc_n_ep_evolution(axs[1,i],df_n_ep_perc_freq,freq,perc)
