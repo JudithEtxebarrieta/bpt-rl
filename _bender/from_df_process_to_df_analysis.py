@@ -26,7 +26,7 @@ class DataGenerator:
 
     def __init__(self,pack,seeds,
                 list_freq=[20,15,10,5,2,1],list_n_ep=[500,250,100,50,25,5], list_cost_perc=[0.05,0.1,0.15,0.2], # la lista de frecuanzias depende del numero de iteraciones con que se ejecute cada pack
-                global_deg_metric='norm_from_mean_worsening_to_improvement',local_deg_metric='reward_diff',prec_metric='relative_perc_criteria_best', limit_metric='from_first_last',
+                global_deg_metric='norm_from_mean_worsening_to_improvement',local_deg_metric='reward_diff',prec_metric='relative_perc_criteria_best', 
                 last_estimates_conf=100,default_test_conf=[None,None],
                 data_common_path=os.path.join(os.path.dirname(os.path.abspath(__file__)), "outputs"),
                 already_generated_main_data=False):
@@ -49,7 +49,7 @@ class DataGenerator:
                     ProcessEstimator.compute_estimates(init+'_'+algo,env,seeds[i],'',n_ep,'test')
                 
                 # Generales
-                self.add_learning_limits_to_csv(data_path+'learning_regions'+str(seeds[i])+'.csv',pack,seeds[i],limit_metric=limit_metric)
+                self.add_learning_limits_to_csv(data_path+'learning_regions'+str(seeds[i])+'.csv',pack,seeds[i])
                 
                 self.add_deg_to_csv(data_path+'deg_evolution'+str(seeds[i])+'.csv',pack,seeds[i],global_deg_metric=global_deg_metric,local_deg_metric=local_deg_metric)
 
@@ -71,16 +71,21 @@ class DataGenerator:
                 print('test default completed')
 
                 # Todos los test
-                # for freq in tqdm(list_freq,desc='completing test'):
-                #     for n_ep in list_n_ep:
-                #         self.add_truth_to_csv(data_path+'df_test_truth'+str(seeds[i])+'.csv',pack,seeds[i],conf=[n_ep,freq],criteria='best_val')
-                #         self.add_criteria_prec_cost_to_csv([data_path+'df_test_prec'+str(seeds[i])+'.csv',data_path+'df_test_cost'+str(seeds[i])+'.csv'],pack,seeds[i],conf=[n_ep,freq,None],criteria='best_val')
+                for freq in tqdm(list_freq,desc='completing test'):
+                    for n_ep in list_n_ep:
+                        self.add_truth_to_csv(data_path+'df_test_truth'+str(seeds[i])+'.csv',pack,seeds[i],conf=[n_ep,freq],criteria='best_val')
+                        self.add_criteria_prec_cost_to_csv([data_path+'df_test_prec'+str(seeds[i])+'.csv',data_path+'df_test_cost'+str(seeds[i])+'.csv'],pack,seeds[i],conf=[n_ep,freq,None],criteria='best_val')
                     
-                # Test with cost
-                for freq in tqdm(list_freq,'completing test with cost'):
+                # Test with cost para n_ep
+                for freq in tqdm(list_freq,desc='completing test with cost para n_ep'):
                     for cost_perc in tqdm(list_cost_perc,desc='completing prec_cost of test for seed'):
-                        self.add_criteria_prec_cost_to_csv([data_path+'df_test_prec'+str(seeds[i])+'.csv',data_path+'df_test_cost'+str(seeds[i])+'.csv',data_path+'df_test_n_ep'+str(seeds[i])+'.csv'],pack,seeds[i],conf= [None,freq,cost_perc],criteria='best_val_with_cost')
-                    
+                        self.add_criteria_prec_cost_to_csv([data_path+'df_test_prec'+str(seeds[i])+'.csv',data_path+'df_test_cost'+str(seeds[i])+'.csv',data_path+'df_test_n_ep'+str(seeds[i])+'.csv'],pack,seeds[i],conf= [None,freq,cost_perc],criteria='best_val_with_cost_n_ep')
+                # Test with cost para freq
+                for n_ep in tqdm(list_n_ep,desc='completing test with cost para freq'):
+                    for cost_perc in list_cost_perc:
+                        self.add_criteria_prec_cost_to_csv([data_path+'df_test_prec'+str(seeds[i])+'.csv',data_path+'df_test_cost'+str(seeds[i])+'.csv',data_path+'df_test_n_ep'+str(seeds[i])+'.csv'],pack,seeds[i],conf= [n_ep,None,cost_perc],criteria='best_val_with_cost_freq')
+                
+                
         # Guardar variable
         self.data_path=data_path
         self.data_source_path=data_common_path+'/'+pack+'/'
@@ -114,11 +119,13 @@ class DataGenerator:
             conf='_'+str(n_ep)
         if n_ep!=None and freq!=None:
             conf='_'+str(n_ep)+'_'+str(freq)
-        if criteria=='best_val_with_cost':
-            conf='_'+str(cost_perc)+'cost'+'_'+str(conf[1])
+        if criteria=='best_val_with_cost_n_ep':
+            conf='_'+str(cost_perc)+'cost'+'_'+str(freq)
+        if criteria=='best_val_with_cost_freq':
+            conf='_'+str(n_ep)+'_'+str(cost_perc)+'cost'
 
         # Inicializar clase que permite calcular las evoluciones de truth
-        generator=EvolutionGenerator(pack,seed) # TODO: aqui si perc_time_start=0 da error, por eso hay que forzarlo despues de inicializar
+        generator=EvolutionGenerator(pack,seed) 
         x_times=generator.estimator.df_train['time_seconds'].tolist()
         
         # Leer/generar csv para almacenar la nueva evolucion de truth si no esta ya almacenada
@@ -195,8 +202,10 @@ class DataGenerator:
             conf='_'+str(n_ep)
         if n_ep!=None and freq!=None:
             conf='_'+str(n_ep)+'_'+str(freq)
-        if criteria=='best_val_with_cost':
-            conf='_'+str(cost_perc)+'cost_'+str(conf[1])
+        if criteria=='best_val_with_cost_n_ep':
+            conf='_'+str(cost_perc)+'cost_'+str(freq)
+        if criteria=='best_val_with_cost_freq':
+            conf='_'+str(n_ep)+'_'+str(cost_perc)+'cost'
 
         # Inicializar clase que permite calcular las evoluciones 
         generator=EvolutionGenerator(pack,seed)
@@ -214,7 +223,7 @@ class DataGenerator:
                 df_prec.to_csv(path_prec,index=False)
                 df_cost.to_csv(path_cost,index=False)
 
-        if criteria in ['best_val_with_cost']:
+        if criteria in ['best_val_with_cost_n_ep','best_val_with_cost_freq']:
             path_prec,path_cost,path_n_ep=path
             df_prec=ProcessEstimator.read_create_estimates_csv(path_prec,generator.estimator.df_train.shape[0])
             df_cost=ProcessEstimator.read_create_estimates_csv(path_cost,generator.estimator.df_train.shape[0])
@@ -252,7 +261,7 @@ class DataGenerator:
             df[pack+str(seed)+'_'+global_deg_metric+'_'+local_deg_metric]=deg
             df.to_csv(path,index=False)
 
-    def add_learning_limits_to_csv(self,path,pack,seed,limit_metric):
+    def add_learning_limits_to_csv(self,path,pack,seed):
 
         '''
         Obtener/añadir limites de regiones de aprendizaje.
@@ -261,18 +270,18 @@ class DataGenerator:
 
         # Inicializar clase que permite calcular los limites 
         estimator=PointEstimator(pack,seed)
-        a,b= estimator.learning_region_limits(limit_metric)
+        a,b= estimator.learning_region_limits()
 
         # Leer/generar csv para almacenar los nuevos limites si no esta ya almacenada
         if not os.path.exists(path):
-            df = pd.DataFrame(columns=['pack_seed','limit_metric','a','b','T'])
+            df = pd.DataFrame(columns=['pack_seed','a','b','T'])
             os.makedirs(os.path.dirname(path), exist_ok=True)
             df.to_csv(path, index=False)
         else:
             df=pd.read_csv(path)
 
-        if not ((df['pack_seed'] == pack+str(seed)) & (df['limit_metric'] == limit_metric)).any():
-            df.loc[len(df)]=[pack+str(seed),limit_metric,a,b,estimator.df_test.shape[0]]
+        if not ((df['pack_seed'] == pack+str(seed))).any():
+            df.loc[len(df)]=[pack+str(seed),a,b,estimator.df_test.shape[0]]
             df.to_csv(path,index=False)
 
     def read_generate_df(self,path_csv,column_names):
@@ -540,34 +549,23 @@ class PointEstimator:
 
 
     # Relacionado con calculo puntual
-    def learning_region_limits(self,limit_metric='from_first_last'):
+    def learning_region_limits(self):
 
         truth_last=self.df_test_estimates['truth'].tolist()
 
         a,b=None,None
         for i in range(len(truth_last)):
 
-            if limit_metric=='from_mean':
-                if abs(truth_last[i]-np.mean(truth_last[:i+1]))<=np.std(truth_last[:i+1]):
-                    if a==None or i-a<int(len(truth_last)*0.1):
-                        a=i
-                if abs(np.mean(truth_last[-i-1:])-truth_last[-1-i])<=np.std(truth_last[-i-1:]) :
-                    if b==None or b-len(truth_last)+i<int(len(truth_last)*0.1):
-                        b=len(truth_last)-i
+            if truth_last[i]-min(truth_last[:i+1])<=np.std(truth_last[:i+1]) :
+                if a==None or i-a<int(len(truth_last)*0.1): # La condicion tiene que cumplirse con una cierta continuidad (no vale que se vuelva a cumprir mucho despues otra vez)
+                    a=i
+            if max(truth_last[-i-1:])-truth_last[-1-i]<=np.std(truth_last[-i-1:]) :
+                if b==None or b-len(truth_last)+i<int(len(truth_last)*0.1):
+                    b=len(truth_last)-i
 
-            if limit_metric=='from_first_last':
-                if abs(truth_last[i]-truth_last[0])<=np.std(truth_last[:i+1]) :
-                    if a==None or i-a<int(len(truth_last)*0.1):
-                        a=i
-                if abs(truth_last[-1]-truth_last[-1-i])<=np.std(truth_last[-i-1:]) :
-                    if b==None or b-len(truth_last)+i<int(len(truth_last)*0.1):
-                        b=len(truth_last)-i
-
-        # Para que siempre haya un minimo de datos en los intervalos [0,a] y [b,T]
-        if a in list(range(int(0.1*len(truth_last)))):
-            a=int(0.1*len(truth_last))
-        if b in list(range(len(truth_last)-int(0.1*len(truth_last)),len(truth_last)+1)):
-            b=len(truth_last)-int(0.1*len(truth_last))
+        # Para que siempre haya un minimo de datos en los intervalos [0,a], [a,b] y [b,T]
+        a=min([max([a,int(0.1*len(truth_last))]),int(2*len(truth_last)/3)-int(0.1*len(truth_last))])
+        b=max([min([b,len(truth_last)-int(0.1*len(truth_last))]),a+int(0.1*len(truth_last))])
 
         return a,b
 
@@ -894,44 +892,83 @@ class Selector:
         # Politica seleccionada y tiempo extra total invertido en su seleccion
         return current_val_policies[indx_subseq], sum(times_seq)
     
-    def best_policy_validation_with_cost(self,elapsed_time,cost_perc,freq):
+    def best_policy_validation_with_cost(self,elapsed_time,cost_perc,n_ep_or_freq,with_cost='n_ep'):
 
-        # Descomprimir columnas necesarias de df_test
-        df_test_ep_rewards=self.df_test['ep_rewards']#[DataConverter.compress_decompress_list(i,compress=False) for i in self.df_test['ep_rewards']]
-        df_test_elapsed_val_times=self.df_test['elapsed_val_time']#[DataConverter.compress_decompress_list(i,compress=False) for i in self.df_test['elapsed_val_time']]
-        df_test_n_val_ep=self.df_test['n_val_ep']#[DataConverter.compress_decompress_list(i,compress=False) for i in self.df_test['n_val_ep']]
+        if with_cost=='n_ep':
+            # Descomprimir columnas necesarias de df_test
+            df_test_ep_rewards=self.df_test['ep_rewards']
+            df_test_elapsed_val_times=self.df_test['elapsed_val_time']
+            df_test_n_val_ep=self.df_test['n_val_ep']
 
-        # Seleccionar unicamente los datos asociados a los episodios reservados para test
-        df_test_ep_rewards=[ep_rewards[500:] for ep_rewards in df_test_ep_rewards]
+            # Seleccionar unicamente los datos asociados a los episodios reservados para test
+            df_test_ep_rewards=[ep_rewards[500:] for ep_rewards in df_test_ep_rewards]
 
-        # Tiempos de validacion con frecuencia constante indicada
-        current_val_times=[i for i in freq if i<=elapsed_time]
+            # Tiempos de validacion con frecuencia constante indicada
+            current_val_times=[i for i in n_ep_or_freq if i<=elapsed_time]
 
-        # Indices de las politicas asociadas a esos tiempos, sus estimaciones de EER y el tiempo adicional consumido para su calculo
-        current_val_policies=[]
-        esti_time_seq=[]
-        val_n_ep=[0]*self.df_test.shape[0]# inicializamos con 0, porque solo tendran un n_ep>0 las politicas que toque validar
-        validation_time=0 # lo necesito ir almacenando para calcular el n_ep de validacion que consume el coste que queremos
-        for time in current_val_times:
-            policy_id=self.df_train.loc[(self.df_train['time_seconds']<=time)].index.max()
-            
+            # Indices de las politicas asociadas a esos tiempos, sus estimaciones de EER y el tiempo adicional consumido para su calculo
+            current_val_policies=[]
+            esti_time_seq=[]
+            val_n_ep=[0]*self.df_test.shape[0]# inicializamos con 0, porque solo tendran un n_ep>0 las politicas que toque validar
+            validation_time=0 # lo necesito ir almacenando para calcular el n_ep de validacion que consume el coste que queremos
+            for time in current_val_times:
+                policy_id=self.df_train.loc[(self.df_train['time_seconds']<=time)].index.max()
+                
+                val_time_until_truth=df_test_elapsed_val_times[policy_id][df_test_n_val_ep[policy_id].index(500)] 
+                current_times=list(np.array(df_test_elapsed_val_times[policy_id])-val_time_until_truth)[500:]
 
-            val_time_until_truth=df_test_elapsed_val_times[policy_id][df_test_n_val_ep[policy_id].index(500)] 
-            current_times=list(np.array(df_test_elapsed_val_times[policy_id])-val_time_until_truth)[500:]
+                percentage=(np.array(current_times)+validation_time)/time
+                index_best=next((i for i, val in reversed(list(enumerate(percentage))) if val < float(cost_perc)), None)# NOTE: hay veces que hasta con 1 ep ya nos pasamos del porcentage de coste de validacion indicado
 
-            percentage=(np.array(current_times)+validation_time)/time
-            index_best=next((i for i, val in reversed(list(enumerate(percentage))) if val < float(cost_perc)), None)# NOTE: hay veces que hasta con 1 ep ya nos pasamos del porcentage de coste de validacion indicado
+                if index_best!=None:
+                    current_val_policies.append(policy_id) 
 
-            if index_best!=None:
-                current_val_policies.append(policy_id) 
+                    esti_time_seq.append([np.mean(df_test_ep_rewards[policy_id][:index_best+1]),current_times[index_best]])
+                    val_n_ep[policy_id]=index_best+1
 
-                esti_time_seq.append([np.mean(df_test_ep_rewards[policy_id][:index_best+1]),current_times[index_best]])
-                val_n_ep[policy_id]=index_best+1
-
-                validation_time+=current_times[index_best]
+                    validation_time+=current_times[index_best]
 
 
-        if len(current_val_policies)>0:
+            if len(current_val_policies)>0:
+                # Dividir estimaciones de tiempos adicionales
+                estimated_EER_seq=[]
+                times_seq=[]
+                for estimation, time in esti_time_seq:
+                    estimated_EER_seq.append(estimation)
+                    times_seq.append(time)
+
+                # Indice de la politica (en la subsecuencia de las politicas asociadas a las frecuencias) con mayor mean ER en validacion
+                indx_subseq=estimated_EER_seq.index(max(estimated_EER_seq))
+
+
+                # Politica seleccionada y tiempo extra total invertido en su seleccion
+                return current_val_policies[indx_subseq], sum(times_seq),val_n_ep
+            else:
+                return self.df_train.loc[(self.df_train['time_seconds']<=elapsed_time)].index.max(),validation_time,val_n_ep
+
+        if with_cost=='freq':
+
+            # Tiempos por interaccion hasta el limite de elapsed_time actual
+            current_times = self.df_train.loc[self.df_train['time_seconds'] <= elapsed_time, 'time_seconds'].tolist()
+
+            # Indices de las politicas evaluadas, sus estimaciones de EER y el tiempo adicional consumido para su calculo
+            current_val_policies=[]
+            esti_time_seq=[]
+            time_val_n_ep=0 # Estimacion del coste de validar la politica con n_ep
+            total_time_val=0 # Aqui se va acumulando el tiempo total en validacion
+            val_n_ep=[0]*self.df_test.shape[0]# inicializamos con 0, porque solo tendran un n_ep=n_ep_or_freq las politicas que toque validar
+            for time in current_times:
+
+                if time_val_n_ep==0 or (total_time_val+time_val_n_ep)/time<=cost_perc: # La primera politica siempre la validamos
+                    policy_id=self.df_train.loc[(self.df_train['time_seconds']<=time) ].index.max()
+                    current_val_policies.append(policy_id) 
+
+                    time_val_n_ep,val_time=DataConverter.compress_decompress_list(self.df_test_estimates[self.df_test_estimates['n_policy']==policy_id][str(n_ep_or_freq)+'_val_ep'].values[0],compress=False)
+                    esti_time_seq.append([time_val_n_ep,val_time])
+                    total_time_val+=time_val_n_ep
+
+                    val_n_ep[policy_id]=n_ep_or_freq
+                    
             # Dividir estimaciones de tiempos adicionales
             estimated_EER_seq=[]
             times_seq=[]
@@ -939,15 +976,12 @@ class Selector:
                 estimated_EER_seq.append(estimation)
                 times_seq.append(time)
 
-            # Indice de la politica (en la subsecuencia de las politicas asociadas a las frecuencias) con mayor mean ER en validacion
+            # Indice de la politica (en la subsecuencia de las politicas validadas) con mayor mean ER en validacion
             indx_subseq=estimated_EER_seq.index(max(estimated_EER_seq))
 
 
             # Politica seleccionada y tiempo extra total invertido en su seleccion
             return current_val_policies[indx_subseq], sum(times_seq),val_n_ep
-        else:
-            return self.df_train.loc[(self.df_train['time_seconds']<=elapsed_time)].index.max(),validation_time,val_n_ep
-
 
 class EvolutionGenerator:
     '''
@@ -984,8 +1018,11 @@ class EvolutionGenerator:
             if criteria=='best_val':
                 policy_id,val_time=self.selector.best_policy_validation(time,n_ep,freq)
                 x_extras.append(val_time)
-            if criteria=='best_val_with_cost':
-                policy_id,val_time,val_n_ep=self.selector.best_policy_validation_with_cost(time,cost_perc,freq)
+            if criteria =='best_val_with_cost_n_ep':
+                policy_id,val_time,val_n_ep=self.selector.best_policy_validation_with_cost(time,cost_perc,freq,with_cost='n_ep')
+                x_extras.append(val_time)
+            if criteria =='best_val_with_cost_freq':
+                policy_id,val_time,val_n_ep=self.selector.best_policy_validation_with_cost(time,cost_perc,n_ep,with_cost='freq')
                 x_extras.append(val_time)
 
             if for_analyzer:
@@ -997,9 +1034,9 @@ class EvolutionGenerator:
 
         if criteria in ['best_val']:
             return y_eff, x_extras
-        if criteria in ['best_val_with_cost']:
+        if criteria in ['best_val_with_cost_n_ep','best_val_with_cost_freq']:
             return y_eff, x_extras, val_n_ep # para el ultimo elapsed_time es cuando se almacenan lod n_ep de todas las politicas validadas
-        if criteria not in ['best_val','best_val_with_cost']:
+        if criteria not in ['best_val','best_val_with_cost_n_ep','best_val_with_cost_freq']:
             return y_eff
         
     def truth_evolution(self,x_times,n_ep=None,freq=None,criteria='last',cost_perc=0.1):
@@ -1023,8 +1060,10 @@ class EvolutionGenerator:
                 policy_id=self.selector.best_policy_training(time,n_ep)
             if criteria=='best_val':
                 policy_id,_=self.selector.best_policy_validation(time,n_ep,freq)
-            if criteria=='best_val_with_cost':
-                policy_id,_,_=self.selector.best_policy_validation_with_cost(time,cost_perc,freq)
+            if criteria =='best_val_with_cost_n_ep':
+                policy_id,_,_=self.selector.best_policy_validation_with_cost(time,cost_perc,freq,with_cost='n_ep')
+            if criteria =='best_val_with_cost_freq':
+                policy_id,_,_=self.selector.best_policy_validation_with_cost(time,cost_perc,n_ep,with_cost='freq')
             
             y_truth.append(self.selector.df_test_estimates[self.selector.df_test_estimates['n_policy']==policy_id]['truth'].values[0])
         

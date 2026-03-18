@@ -1564,6 +1564,47 @@ class PackOptions:
             callback=True, n_eval_ep=500, eval_freq=512, deterministic_eval=True # selection criteria
             )
 
+    def PPO_Hopper(seed,experiment_name,library_dir):
+        '''
+        Hopper-v4:
+            normalize: true
+            n_envs: 1
+            policy: 'MlpPolicy'
+            n_timesteps: !!float 1e6
+            batch_size: 32
+            n_steps: 512
+            gamma: 0.999
+            learning_rate: 9.80828e-05
+            ent_coef: 0.00229519
+            clip_range: 0.2
+            n_epochs: 5
+            gae_lambda: 0.99
+            max_grad_norm: 0.7
+            vf_coef: 0.835671
+            policy_kwargs: "dict(
+                                log_std_init=-2,
+                                ortho_init=False,
+                                activation_fn=nn.ReLU,
+                                net_arch=dict(pi=[256, 256], vf=[256, 256])
+                            )"
+        '''
+
+        Options.OnPolicy_learn_process(
+            'PPO','Hopper-v4', # pack
+            seed,1e6+.5*1e6,experiment_name,library_dir,save_policies=False, # learning process
+            truth_n_workers=16, batch_size=32,n_epoch=5,n_steps_per_env=512,# learning interaction
+            device='auto', vec_env_type='sequential', # execution type
+            policy='MlpPolicy',normalize_advantage=True,gamma=0.999,learning_rate=9.80828e-05,ent_coef=0.00229519,
+            clip_range=0.2,gae_lambda=0.99, max_grad_norm=0.7,vf_coef=0.835671,
+            policy_kwargs=dict(
+                                log_std_init=-2,
+                                ortho_init=False,
+                                activation_fn=nn.ReLU,
+                                net_arch=dict(pi=[256, 256], vf=[256, 256])
+                            ), # learning process parameters
+            callback=True, n_eval_ep=500, eval_freq=512, deterministic_eval=True # selection criteria
+            )
+
 #==================================================================================================
 # Pruebas de funcionamiento en PC (tambien sirve como ejemplo para el cluster, se especifica
 # que clases usar para cada algoritmo y diferencia de ejecucion en secuencial/paralelo)
@@ -1618,11 +1659,6 @@ if experiments_OffPolicy:
 if experiments_pack:
     if __name__ == "__main__": 
         PackOptions.PPO_Walker2d(seed,'execution10',library_dir)
-
-
-
-
-
 
 
 
