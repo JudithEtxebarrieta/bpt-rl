@@ -894,14 +894,15 @@ class Selector:
     
     def best_policy_validation_with_cost(self,elapsed_time,cost_perc,n_ep_or_freq,with_cost='n_ep'):
 
-        if with_cost=='n_ep':
-            # Descomprimir columnas necesarias de df_test
-            df_test_ep_rewards=self.df_test['ep_rewards']
-            df_test_elapsed_val_times=self.df_test['elapsed_val_time']
-            df_test_n_val_ep=self.df_test['n_val_ep']
+        # Descomprimir columnas necesarias de df_test
+        df_test_ep_rewards=self.df_test['ep_rewards']
+        df_test_elapsed_val_times=self.df_test['elapsed_val_time']
+        df_test_n_val_ep=self.df_test['n_val_ep']
 
-            # Seleccionar unicamente los datos asociados a los episodios reservados para test
-            df_test_ep_rewards=[ep_rewards[500:] for ep_rewards in df_test_ep_rewards]
+        # Seleccionar unicamente los datos asociados a los episodios reservados para test
+        df_test_ep_rewards=[ep_rewards[500:] for ep_rewards in df_test_ep_rewards]
+
+        if with_cost=='n_ep':
 
             # Tiempos de validacion con frecuencia constante indicada
             current_val_times=[i for i in n_ep_or_freq if i<=elapsed_time]
@@ -910,25 +911,39 @@ class Selector:
             current_val_policies=[]
             esti_time_seq=[]
             val_n_ep=[0]*self.df_test.shape[0]# inicializamos con 0, porque solo tendran un n_ep>0 las politicas que toque validar
-            validation_time=0 # lo necesito ir almacenando para calcular el n_ep de validacion que consume el coste que queremos
+            validation_time=0 # para ir almacenando el tiempo total que hemos gastado en validar
+            time_one_ep=0 # guardar la estimacion de coste de validar un episodio (lo suyo es guardar lo maximo observado, estimacion pesimista)
             for time in current_val_times:
                 policy_id=self.df_train.loc[(self.df_train['time_seconds']<=time)].index.max()
-                
+
                 val_time_until_truth=df_test_elapsed_val_times[policy_id][df_test_n_val_ep[policy_id].index(500)] 
                 current_times=list(np.array(df_test_elapsed_val_times[policy_id])-val_time_until_truth)[500:]
+                times_per_ep=[current_times[0]]+[current_times[i]-current_times[i-1] for i in range(1,len(current_times))]
 
-                percentage=(np.array(current_times)+validation_time)/time
-                index_best=next((i for i, val in reversed(list(enumerate(percentage))) if val < float(cost_perc)), None)# NOTE: hay veces que hasta con 1 ep ya nos pasamos del porcentage de coste de validacion indicado
+                index=0
+                if (time_one_ep+validation_time)/time <=float(cost_perc): # Estimar si solo con un episodio ya nos pasamos
+                    continue_val=True
+                    while continue_val:
+                        # Actualizar estimacion pesimista de coste de evaluar un episodio
+                        if times_per_ep[index]>time_one_ep:
+                            time_one_ep=times_per_ep[index]
+                        # Comprobar si vamos a seguir validando otro episodio mas o no
+                        if (current_times[index]+time_one_ep+validation_time)/time<=float(cost_perc):
+                            continue_val=True
+                            index=[499 if index+1>499 else index+1][0] # puede haber casos en los que podemos evaluar mas episodios que los guardados, para que no de error ponemos el tope en 500
+                        else:
+                            continue_val=False
+                else:
+                    index=None
 
-                if index_best!=None:
+                if index!=None:
                     current_val_policies.append(policy_id) 
 
-                    esti_time_seq.append([np.mean(df_test_ep_rewards[policy_id][:index_best+1]),current_times[index_best]])
-                    val_n_ep[policy_id]=index_best+1
+                    esti_time_seq.append([np.mean(df_test_ep_rewards[policy_id][:index+1]),current_times[index]])
+                    val_n_ep[policy_id]=index+1
 
-                    validation_time+=current_times[index_best]
-
-
+                    validation_time+=current_times[index]
+            
             if len(current_val_policies)>0:
                 # Dividir estimaciones de tiempos adicionales
                 estimated_EER_seq=[]
@@ -955,17 +970,28 @@ class Selector:
             current_val_policies=[]
             esti_time_seq=[]
             time_val_n_ep=0 # Estimacion del coste de validar la politica con n_ep
+            time_one_ep=0 # para almacenar lo maximo observado hasta el momento (una estimacion pesimista de evaluar un solo episodio)
             total_time_val=0 # Aqui se va acumulando el tiempo total en validacion
             val_n_ep=[0]*self.df_test.shape[0]# inicializamos con 0, porque solo tendran un n_ep=n_ep_or_freq las politicas que toque validar
             for time in current_times:
 
                 if time_val_n_ep==0 or (total_time_val+time_val_n_ep)/time<=cost_perc: # La primera politica siempre la validamos
+
                     policy_id=self.df_train.loc[(self.df_train['time_seconds']<=time) ].index.max()
                     current_val_policies.append(policy_id) 
 
-                    time_val_n_ep,val_time=DataConverter.compress_decompress_list(self.df_test_estimates[self.df_test_estimates['n_policy']==policy_id][str(n_ep_or_freq)+'_val_ep'].values[0],compress=False)
-                    esti_time_seq.append([time_val_n_ep,val_time])
-                    total_time_val+=time_val_n_ep
+                    val_time_until_truth=df_test_elapsed_val_times[policy_id][df_test_n_val_ep[policy_id].index(500)] 
+                    current_times=list(np.array(df_test_elapsed_val_times[policy_id])-val_time_until_truth)[500:]
+                    times_per_ep=[current_times[0]]+[current_times[i]-current_times[i-1] for i in range(1,len(current_times))]
+
+                    estimation=np.mean(df_test_ep_rewards[policy_id][:n_ep_or_freq])
+                    time_val=sum(times_per_ep[:n_ep_or_freq])
+                    if max(times_per_ep[:n_ep_or_freq])>time_one_ep:
+                        time_one_ep=max(times_per_ep[:n_ep_or_freq])
+                    time_val_n_ep=time_one_ep*n_ep_or_freq # estimacion pesimista, asumiendo que la validacion de cada episodio va ha costar lo maximo observado hasta ahora
+
+                    esti_time_seq.append([estimation,time_val])
+                    total_time_val+=time_val
 
                     val_n_ep[policy_id]=n_ep_or_freq
                     
