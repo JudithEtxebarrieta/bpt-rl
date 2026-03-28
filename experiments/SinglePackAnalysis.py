@@ -2,14 +2,15 @@ from Main import *
 
 class ComputeCommonData():
     def __init__(self,library,
-                 all_seeds=[list(range(1,31)),
-                            list(range(1,31)),
-                            [1,2,3,4,5,6,7,8,9,16,17,18,21,25,27,28,29,30],
-                            [2,9,10,11,12,13,14,15,17,18,19,20,21,22,23,24,25,28,29]],
-                 all_packs=['pack_PPO_BipedalWalker',
+                 all_seeds=[list(range(1,31))]*4,
+                 all_packs=[
+                            'pack_PPO_BipedalWalker',
                             'pack_PPO_LunarLanderContinuous',
                             'pack_PPO_Ant',
-                            'pack_PPO_Walker2d']
+                            'pack_PPO_Walker2d'
+                            # 'pack_PPO_HalfCheetah',
+                            # 'pack_PPO_Hopper'
+                            ]
                  ):
         
         for pack,seeds in zip(all_packs,all_seeds):
@@ -46,58 +47,27 @@ class ExecutePackAnalysis():
         
     #Graficas principales
     def main_analysis1(self):
-        general_train_conf, general_test_conf = (self.df_conf.loc[self.df_conf['pack'] == 'all', ['train_opt', 'test_cost_opt']].iloc[0])
-        general_test_cost,general_test_freq=general_test_conf.split('_')
-
-
-        # Generar las graficas para test con n_ep constante y test con n_ep regulado por el coste de validacion
-        n_ep_train,n_ep_test1,freq_test1=self.grapher.graph_deg_criteria_conf_by_regions(self.pack,self.train_default_n_ep,self.test_default_n_ep,self.test_default_freq,global_deg_metric=self.global_deg_metric,local_deg_metric=self.local_deg_metric)
-        n_ep_train,n_ep_test2,freq_test2=self.grapher.graph_deg_criteria_conf_by_regions(self.pack,self.train_default_n_ep,self.test_default_n_ep,self.test_default_freq,
-                                                                                         global_deg_metric=self.global_deg_metric,local_deg_metric=self.local_deg_metric,
-                                                                                         n_ep_type='with_cost_n_ep',general_train_n_ep=int(general_train_conf),general_test_n_ep=float(general_test_cost),general_test_freq=int(general_test_freq))
-        # Guardar configuraciones optimas
-        # self.df_conf.loc[len(self.df_conf)] = [self.pack, self.train_default_n_ep, int(n_ep_train), str(self.test_default_n_ep)+'_'+str(self.test_default_freq), str(n_ep_test1)+'_'+str(freq_test1), str(n_ep_test2)+'_'+str(freq_test2)]
-        # self.df_conf.to_csv(self.datagenerator.data_common_path+'/configurations.csv', index=False)
-
-        # Los datos truth del criterio test con coste optimo debemos almacenarlos antes de ejecutar el main_analysis2 
-        # Ahora esto lo hago en el cluster tras ejecutar aqui main_analysis1 y conseguir la configuracion optima)
-        #self.datagenerator.add_test_cost_truth(n_ep_test2,freq_test2)
-
-        #----- Para ciertos packs tambien esta ejecutado
-        # n_ep_train,n_ep_test2,freq_test2=self.grapher.graph_deg_criteria_conf_by_regions(self.pack,self.train_default_n_ep,self.test_default_n_ep,self.test_default_freq,
-        #                                                                                  global_deg_metric=self.global_deg_metric,local_deg_metric=self.local_deg_metric,
-        #                                                                                  n_ep_type='with_cost_freq',general_train_n_ep=int(general_train_conf),general_test_n_ep=float(general_test_cost),general_test_freq=int(general_test_freq))
-        
-
+        ''' Generar las graficas para test con n_ep constante y test con n_ep regulado por el coste de validacion'''
+        self.grapher.graph_deg_criteria_conf_by_regions(self.pack,self.train_default_n_ep,self.test_default_n_ep,self.test_default_freq,global_deg_metric=self.global_deg_metric,local_deg_metric=self.local_deg_metric)
+        self.grapher.graph_deg_criteria_conf_by_regions(self.pack,self.train_default_n_ep,self.test_default_n_ep,self.test_default_freq,
+                                                        global_deg_metric=self.global_deg_metric,local_deg_metric=self.local_deg_metric,n_ep_type='with_cost_n_ep')
+        self.grapher.graph_deg_criteria_conf_by_regions(self.pack,self.train_default_n_ep,self.test_default_n_ep,self.test_default_freq,
+                                                        global_deg_metric=self.global_deg_metric,local_deg_metric=self.local_deg_metric,n_ep_type='with_cost_freq')
+                
     def main_analysis2(self):
-
-        # Leer configuraciones optimas almacenadas
-        n_ep_train,test_cost_opt = self.df_conf.loc[self.df_conf['pack'] == self.pack,['train_opt', 'test_cost_opt']].iloc[0]
-        n_ep_test,freq_test=test_cost_opt.split('_')
-
-        # Generar analisis comparativo de mejores versiones de los criterios
+        ''' Generar analisis comparativo de mejores versiones de los criterios'''
         self.grapher.graph_criteria_comparison_by_regions(self.pack,global_deg_metric=self.global_deg_metric,local_deg_metric=self.local_deg_metric,
-                                                    prec_metric=self.prec_metric,
-                                                    train_conf=int(n_ep_train),test_conf=str(n_ep_test)+'cost_'+str(freq_test))
+                                                    prec_metric=self.prec_metric)
         
     def main_motivation_recommendation(self):
-
-        # Leer configuraciones optimas almacenadas
-        n_ep_train,test_cost_opt = self.df_conf.loc[self.df_conf['pack'] == self.pack,['train_opt', 'test_cost_opt']].iloc[0]
-        n_ep_test,freq_test=test_cost_opt.split('_')
-
-        # Recomendacion
-        self.grapher.graph_pack_learning_curves_with_criteria(self.pack,default_conf=[self.train_default_n_ep,self.test_default_n_ep,self.test_default_freq],optimal_conf=str(n_ep_test)+'cost_'+str(freq_test),also_train_test_grid=False) #default_test_n_ep=eval_freq/n_steps
+        '''Recomendacion'''
+        self.grapher.graph_pack_learning_curves_with_criteria(self.pack) 
+        self.grapher.graph_pack_learning_curves_error(self.pack)
         
-        #----- Para ciertor packs tambien estan ejecutados
-        # self.grapher.graph_pack_learning_curves_with_criteria(self.pack,default_conf=[self.train_default_n_ep,self.test_default_n_ep,self.test_default_freq],optimal_conf=str(n_ep_test)+'cost_'+str(freq_test))
-        # self.grapher.graph_pack_learning_curves_with_criteria(self.pack,default_conf=[self.train_default_n_ep,self.test_default_n_ep,self.test_default_freq],optimal_conf=str(n_ep_test)+'cost_'+str(freq_test),curves='estimate_truth')
-        # self.grapher.graph_pack_learning_curves_error(self.pack,default_conf=[self.train_default_n_ep,self.test_default_n_ep,self.test_default_freq],diff='truth',optimal_conf=str(n_ep_test)+'cost_'+str(freq_test))
-        # self.grapher.graph_pack_learning_curves_error(self.pack,default_conf=[self.train_default_n_ep,self.test_default_n_ep,self.test_default_freq],optimal_conf=str(n_ep_test)+'cost_'+str(freq_test))
 
     # Graficas secundarias
     def internal_analysis(self):
-        # Para mostrar como la degradacion y los limites definen lo que decimos
+        ''' Para mostrar como la degradacion y los limites definen lo que decimos'''
         self.grapher.graph_pack_all_truth_with_regions(self.pack,self.seeds,
                                                 global_deg_metric='norm_from_mean_worsening_to_improvement')
         
@@ -112,19 +82,22 @@ class ExecutePackAnalysis():
         # self.grapher.graph_pack_all_stability_truth_estimator(self.pack,self.seeds,stability_metric='mean_diff')
         # self.grapher.graph_pack_all_stability_truth_estimator(self.pack,self.seeds,stability_metric='CI_width')
 
+
     # Graficas para discusion
     def discussion_analysis(self):
-        self.grapher.graph_test_with_cost_n_ep()
+        self.grapher.graph_test_with_cost()
 
 
 # Programa principal
-#ComputeCommonData('SB3')
+# ComputeCommonData('SB3')
 
 
-analyzer=ExecutePackAnalysis('SB3','pack_PPO_BipedalWalker',list(range(1,31)),100,5,5)
+# analyzer=ExecutePackAnalysis('SB3','pack_PPO_BipedalWalker',list(range(1,31)),100,5,5)
 # analyzer=ExecutePackAnalysis('SB3','pack_PPO_LunarLanderContinuous',list(range(1,31)),100,5,10)
-# analyzer=ExecutePackAnalysis('SB3','pack_PPO_Walker2d',[2,9,10,11,12,13,14,15,17,18,19,20,21,22,23,24,25,28,29],100,5,20)
-# analyzer=ExecutePackAnalysis('SB3','pack_PPO_Ant',[1,2,3,4,5,6,7,8,9,16,17,18,21,25,27,28,29,30],100,5,5)
+# analyzer=ExecutePackAnalysis('SB3','pack_PPO_Walker2d',list(range(1,31)),100,5,20)
+analyzer=ExecutePackAnalysis('SB3','pack_PPO_Ant',list(range(1,31)),100,5,5)
+
+# analyzer=ExecutePackAnalysis('SB3','pack_PPO_HalfCheetah',[1,2,3,4,5,6,13,15,16,17,18,19,20,21,24,29],100,5,20)
 
 if __name__ == "__main__":
 
@@ -135,10 +108,53 @@ if __name__ == "__main__":
     analyzer.internal_analysis()
 
 
-# path='experiments/results/data/SB3_PPO_LunarLanderContinuous/'
-# seeds=list(range(1,31))
+path='experiments/results/data/SB3_PPO_Walker2d/'
+seeds=list(range(1,31))
 
-# # Borrar archivos usados
+
+def join_df_analysis_seed(path,seeds,only_test_with_cost_truth=False):
+    
+    if only_test_with_cost_truth:
+        df = pd.concat([pd.read_csv(path+'df_test_truth_with_cost'+str(i)+'.csv') for i in seeds],axis=1)
+        df = pd.concat([pd.read_csv(path+"df_test_truth.csv"),df ],axis=1)
+        df.to_csv(path+"df_test_truth.csv", index=False)
+
+        # Borrar archivos usados
+        for f in [path+'df_test_truth_with_cost'+str(i)+'.csv' for i in seeds]:
+            if os.path.exists(f):
+                os.remove(f)
+
+    else:
+        list_csv_names=['deg_evolution','learning_regions',
+            'df_best_truth','df_last_truth','df_train_truth','df_test_truth',
+            'df_last_prec','df_train_prec','df_test_prec',
+            'df_test_cost','df_test_n_ep'
+            ]
+        
+        
+        for csv_name in list_csv_names:
+            if csv_name!='learning_regions':
+                dfs = [pd.read_csv(path+csv_name+str(i)+".csv") for i in seeds]
+                for i in range(1,len(dfs)):
+                    dfs[i] = dfs[i].drop(columns=['n_policy'], errors='ignore') # Para que la columna 'n_policy' no salga repetida
+
+                df = pd.concat(dfs, axis=1)
+                df.to_csv(path+csv_name+".csv", index=False)
+
+            else:
+                df = pd.concat([pd.read_csv(path+csv_name+str(i)+".csv") for i in seeds],ignore_index=True)
+                df.to_csv(path+csv_name+".csv", index=False)
+
+            # Borrar archivos usados
+            for f in [path+csv_name+str(i)+".csv" for i in seeds]:
+                if os.path.exists(f):
+                    os.remove(f)
+
+# join_df_analysis_seed(path,seeds,only_test_with_cost_truth=True)
+
+
+
+# Borrar archivos usados
 # for f in [path+'df_test_truth_with_cost'+str(i)+'.csv' for i in seeds]:
 #     if os.path.exists(f):
 #         os.remove(f)
@@ -155,8 +171,5 @@ if __name__ == "__main__":
 #         for f in [path+csv_name+str(i)+".csv" for i in seeds]:
 #             if os.path.exists(f):
 #                 os.remove(f)
-
-
-
 
 

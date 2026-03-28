@@ -12,6 +12,7 @@ import matplotlib.cm as cm
 import numpy as np
 from scipy.stats import beta
 from matplotlib.lines import Line2D
+from matplotlib.colors import ListedColormap
 
 
 
@@ -52,7 +53,7 @@ class DataGenerator:
             # Necesitamos: limites de regiones de aprendizaje por proceso.
             # Necesitamos evoluciones de: degradacion, truth, truth de criterios por defecto, truth de criterio test con coste,
             # precision de criterios, coste de criterio test.
-
+            
             for i in tqdm(range(len(seeds))):
 
                 self.add_learning_limits_to_csv(data_path+'learning_regions.csv',pack,seeds[i])
@@ -78,9 +79,9 @@ class DataGenerator:
                         self.add_criteria_prec_cost_to_csv([data_path+'df_test_prec.csv',data_path+'df_test_cost.csv'],pack,seeds[i],conf=[n_ep,freq,None],criteria='best_val')
                     for cost_perc in list_cost_perc:
                         self.add_criteria_prec_cost_to_csv([data_path+'df_test_prec.csv',data_path+'df_test_cost.csv',data_path+'df_test_n_ep.csv'],pack,seeds[i],conf= [None,freq,cost_perc],criteria='best_val_with_cost_n_ep')
-                # for n_ep in list_n_ep:
-                #     for cost_perc in list_cost_perc:
-                #         self.add_criteria_prec_cost_to_csv([data_path+'df_test_prec.csv',data_path+'df_test_cost.csv',data_path+'df_test_n_ep.csv'],pack,seeds[i],conf= [n_ep,None,cost_perc],criteria='best_val_with_cost_freq')
+                for n_ep in list_n_ep:
+                    for cost_perc in list_cost_perc:
+                        self.add_criteria_prec_cost_to_csv([data_path+'df_test_prec.csv',data_path+'df_test_cost.csv',data_path+'df_test_n_ep.csv'],pack,seeds[i],conf= [n_ep,None,cost_perc],criteria='best_val_with_cost_freq')
                 
 
         # Guardar variable
@@ -276,7 +277,7 @@ class DataGenerator:
             df=pd.read_csv(path)
 
         if not ((df['pack_seed'] == pack+str(seed))).any():
-            df.loc[len(df)]=[pack+str(seed),a,b,estimator.df_test.shape[0]]
+            df.loc[len(df)]=[pack+str(seed),a,b,T]#estimator.df_test.shape[0]]
             df.to_csv(path,index=False)
 
     def read_generate_df(self,path_csv,column_names):
@@ -312,29 +313,38 @@ class DataGenerator:
         else:
             df=pd.read_csv(self.data_common_path+'/train_pack_conf_p5prec.csv')
 
-        if not df['pack_conf'].str.contains(pack, na=False).any():
+        if not df['pack_conf'].str.contains(pack.replace('pack_',''), na=False).any():
             for conf,i,j,k in zip(conf_list,prec1,prec2,prec3):
                 df.loc[len(df)]=[self.library+pack.replace('pack','')+'_'+str(conf),np.percentile(i, 5),np.percentile(j, 5),np.percentile(k, 5)]
                 df.to_csv(self.data_common_path+'/train_pack_conf_p5prec.csv',index=False)
 
         # Datos test
-        prec1,prec2,prec3,n_ep_list,freq_list=DataConverter.from_df_data_to_graph_data(
-            [self.data_path+'learning_regions.csv',self.data_path+'df_test_prec.csv'],pack,which_graph='test_conf_prec_cost',
-            prec_metric=prec_metric,n_ep_type='with_cost'
-        )
+        for cost_type in ['n_ep','freq']:
+            prec1,prec2,prec3,n_ep_list,freq_list=DataConverter.from_df_data_to_graph_data(
+                [self.data_path+'learning_regions.csv',self.data_path+'df_test_prec.csv'],pack,which_graph='test_conf_prec_cost',
+                prec_metric=prec_metric,n_ep_type='with_cost_'+cost_type
+            )
 
-        if not os.path.exists(self.data_common_path+'/test_pack_conf_p5prec.csv'):
-            df = pd.DataFrame(columns=['pack_conf','p5_initialization','p5_learning','p5_stabilization'])
-            os.makedirs(os.path.dirname(self.data_common_path+'/test_pack_conf_p5prec.csv'), exist_ok=True)
-            df.to_csv(self.data_common_path+'/test_pack_conf_p5prec.csv', index=False)
+            if not os.path.exists(self.data_common_path+'/test_cost_'+cost_type+'_pack_conf_p5prec.csv'):
+                df = pd.DataFrame(columns=['pack_conf','p5_initialization','p5_learning','p5_stabilization'])
+                os.makedirs(os.path.dirname(self.data_common_path+'/test_cost_'+cost_type+'_pack_conf_p5prec.csv'), exist_ok=True)
+                df.to_csv(self.data_common_path+'/test_cost_'+cost_type+'_pack_conf_p5prec.csv', index=False)
+            else:
+                df=pd.read_csv(self.data_common_path+'/test_cost_'+cost_type+'_pack_conf_p5prec.csv')
+
+            if not df['pack_conf'].str.contains(pack.replace('pack_',''), na=False).any():
+                for idx_cost in range(len(prec1)):
+                    for freq,i,j,k in zip(freq_list,prec1[idx_cost],prec2[idx_cost],prec3[idx_cost]):
+                        df.loc[len(df)]=[self.library+pack.replace('pack','')+'_'+str(n_ep_list[idx_cost])+'_'+str(freq),np.percentile(i, 5),np.percentile(j, 5),np.percentile(k, 5)]
+                        df.to_csv(self.data_common_path+'/test_cost_'+cost_type+'_pack_conf_p5prec.csv',index=False)
+
+        # Inicializar base de datos que almacenara las configuraciones
+        if not os.path.exists(self.data_common_path+'/configurations.csv'):
+                df = pd.DataFrame(columns=['pack','train_default','train_opt','test_default','test_opt','test_cost_n_ep_opt','test_cost_freq_opt'])
+                os.makedirs(os.path.dirname(self.data_common_path+'/configurations.csv'), exist_ok=True)
+                df.to_csv(self.data_common_path+'/configurations.csv', index=False)
         else:
-            df=pd.read_csv(self.data_common_path+'/test_pack_conf_p5prec.csv')
-
-        if not df['pack_conf'].str.contains(pack, na=False).any():
-            for idx_cost in range(len(prec1)):
-                for freq,i,j,k in zip(freq_list,prec1[idx_cost],prec2[idx_cost],prec3[idx_cost]):
-                    df.loc[len(df)]=[self.library+pack.replace('pack','')+'_'+str(n_ep_list[idx_cost])+'_'+str(freq),np.percentile(i, 5),np.percentile(j, 5),np.percentile(k, 5)]
-                    df.to_csv(self.data_common_path+'/test_pack_conf_p5prec.csv',index=False)
+            df=pd.read_csv(self.data_common_path+'/configurations.csv')
 
 class DataConverter:
 
@@ -700,9 +710,13 @@ class DataConverter:
 
         # Leer bases de datos
         train_p5=pd.read_csv('experiments/results/data/train_pack_conf_p5prec.csv')
-        test_p5=pd.read_csv('experiments/results/data/test_pack_conf_p5prec.csv')
+        test_n_ep_p5=pd.read_csv('experiments/results/data/test_cost_n_ep_pack_conf_p5prec.csv')
+        test_freq_p5=pd.read_csv('experiments/results/data/test_cost_freq_pack_conf_p5prec.csv')
         df_conf=pd.read_csv('experiments/results/data/configurations.csv')
 
+        all_row=['all']+[None]*(df_conf.shape[1]-1) #Inicializar el row de df_conf asociado a las configuraciones generales
+        
+        
         # Configuracion global optima de train
         list_conf = list(set(train_p5['pack_conf'].str.split('_').str[-1].tolist()))
         list_sum_p5=[]
@@ -711,21 +725,28 @@ class DataConverter:
             list_sum_p5.append(df.iloc[:, -3:].sum().sum())
             
         idx_max = list_sum_p5.index(max(list_sum_p5))
-        opt_train_conf = list_conf[idx_max]
+        all_row[2]=list_conf[idx_max]
 
         # Configuracion global optima de test
-        list_conf = list(set(test_p5['pack_conf'].str.split('_').str[-2:].str.join('_').tolist()))
-        print(list_conf)
-        list_sum_p5=[]
-        for conf in list_conf:
-            df = test_p5[test_p5['pack_conf'].str.endswith('_'+conf, na=False)]
-            list_sum_p5.append(df.iloc[:, -3:].sum().sum())
-            
-        idx_max = list_sum_p5.index(max(list_sum_p5))
-        opt_test_conf = list_conf[idx_max]
+        for i,test_p5 in enumerate([test_n_ep_p5,test_freq_p5]):
+            list_conf = list(set(test_p5['pack_conf'].str.split('_').str[-2:].str.join('_').tolist()))
+            list_sum_p5=[]
+            for conf in list_conf:
+                df = test_p5[test_p5['pack_conf'].str.endswith('_'+conf, na=False)]
+                list_sum_p5.append(df.iloc[:, -3:].sum().sum())
+                
+            idx_max = list_sum_p5.index(max(list_sum_p5))
+            if i==0:
+                all_row[5]=list_conf[idx_max]
+            if i==1:
+                all_row[6]=list_conf[idx_max]
+        
+        # Agregar configuraciones optimas globales a la base de datos de las configuraciones, e inicializ el resto de rows con el nombre del setup
+        df_conf.loc[len(df_conf)] = all_row
+        setups = list(set(df["pack_conf"].str.split("_").str[:3].str.join("_").tolist()))
+        for setup in setups:
+            df_conf.loc[len(df_conf)] = [setup.replace('SB3','pack')]+[None]*(df_conf.shape[1]-1)
 
-        # Agregar configuraciones optimas globales a la base de datos de las configuraciones
-        df_conf.loc[len(df_conf)] = ['all',None,opt_train_conf,None,None,opt_test_conf]
         df_conf.to_csv('experiments/results/data/configurations.csv',index=False)
         
 class ProcessEstimator:
@@ -886,22 +907,24 @@ class PointEstimator:
           
         # Leer bases de datos del proceso de interes
         current_path=parent_dir+'/_bender/project_SB3/data/'+pack+'_seed'+str(seed)+'_'
-        df_test=pd.read_csv(current_path+'/df_val.csv')
-        df_test_estimates=pd.read_csv(current_path+'/df_val_estimates.csv')
-        df_train=pd.read_csv(current_path+'/df_traj.csv')
-        df_train_estimates=pd.read_csv(current_path+'/df_traj_estimates.csv')
+        # df_test=pd.read_csv(current_path+'/df_val.csv')
+        # df_test_estimates=pd.read_csv(current_path+'/df_val_estimates.csv')
+        # df_train=pd.read_csv(current_path+'/df_traj.csv')
+        # df_train_estimates=pd.read_csv(current_path+'/df_traj_estimates.csv')
 
-        self.df_test=df_test
-        self.df_test_estimates=df_test_estimates
-        self.df_train=df_train
-        self.df_train_estimates=df_train_estimates
-        self.selector=Selector(pack,seed)
+        # self.df_test=df_test
+        # self.df_test_estimates=df_test_estimates
+        # self.df_train=df_train
+        # self.df_train_estimates=df_train_estimates
+        # self.selector=Selector(pack,seed)
 
 
     # Relacionado con calculo puntual
     def learning_region_limits(self,pack,seed):
 
-        truth_last=self.df_test_estimates['truth'].tolist()
+        #truth_last=self.df_test_estimates['truth'].tolist()
+        truth_last=pd.read_csv('experiments/results/data/SB3_'+pack.replace('pack_','')+'/df_last_truth.csv')
+        truth_last=truth_last[[c for c in truth_last.columns if pack.replace('pack_','')+str(seed) in c][0]].tolist()
 
         a,b=None,None
         for i in range(len(truth_last)):
@@ -1244,14 +1267,15 @@ class Selector:
     
     def best_policy_validation_with_cost(self,elapsed_time,cost_perc,n_ep_or_freq,with_cost='n_ep'):
 
-        if with_cost=='n_ep':
-            # Descomprimir columnas necesarias de df_test
-            df_test_ep_rewards=[DataConverter.compress_decompress_list(i,compress=False) for i in self.df_test['ep_rewards']]
-            df_test_elapsed_val_times=[DataConverter.compress_decompress_list(i,compress=False) for i in self.df_test['elapsed_val_time']]
-            df_test_n_val_ep=[DataConverter.compress_decompress_list(i,compress=False) for i in self.df_test['n_val_ep']]
+        # Descomprimir columnas necesarias de df_test
+        df_test_ep_rewards=[DataConverter.compress_decompress_list(i,compress=False) for i in self.df_test['ep_rewards']]
+        df_test_elapsed_val_times=[DataConverter.compress_decompress_list(i,compress=False) for i in self.df_test['elapsed_val_time']]
+        df_test_n_val_ep=[DataConverter.compress_decompress_list(i,compress=False) for i in self.df_test['n_val_ep']]
 
-            # Seleccionar unicamente los datos asociados a los episodios reservados para test
-            df_test_ep_rewards=[ep_rewards[500:] for ep_rewards in df_test_ep_rewards]
+        # Seleccionar unicamente los datos asociados a los episodios reservados para test
+        df_test_ep_rewards=[ep_rewards[500:] for ep_rewards in df_test_ep_rewards]
+
+        if with_cost=='n_ep':
 
             # Tiempos de validacion con frecuencia constante indicada
             current_val_times=[i for i in n_ep_or_freq if i<=elapsed_time]
@@ -1260,23 +1284,38 @@ class Selector:
             current_val_policies=[]
             esti_time_seq=[]
             val_n_ep=[0]*self.df_test.shape[0]# inicializamos con 0, porque solo tendran un n_ep>0 las politicas que toque validar
-            validation_time=0 # lo necesito ir almacenando para calcular el n_ep de validacion que consume el coste que queremos
+            validation_time=0 # para ir almacenando el tiempo total que hemos gastado en validar
+            time_one_ep=0 # guardar la estimacion de coste de validar un episodio (lo suyo es guardar lo maximo observado, estimacion pesimista)
             for time in current_val_times:
                 policy_id=self.df_train.loc[(self.df_train['time_seconds']<=time)].index.max()
 
                 val_time_until_truth=df_test_elapsed_val_times[policy_id][df_test_n_val_ep[policy_id].index(500)] 
                 current_times=list(np.array(df_test_elapsed_val_times[policy_id])-val_time_until_truth)[500:]
+                times_per_ep=[current_times[0]]+[current_times[i]-current_times[i-1] for i in range(1,len(current_times))]
 
-                percentage=(np.array(current_times)+validation_time)/time
-                index_best=next((i for i, val in reversed(list(enumerate(percentage))) if val < float(cost_perc)), None)
+                index=0
+                if (time_one_ep+validation_time)/time <=float(cost_perc): # Estimar si solo con un episodio ya nos pasamos
+                    continue_val=True
+                    while continue_val and index<499:
+                        # Actualizar estimacion pesimista de coste de evaluar un episodio
+                        if times_per_ep[index]>time_one_ep:
+                            time_one_ep=times_per_ep[index]
+                        # Comprobar si vamos a seguir validando otro episodio mas o no
+                        if (current_times[index]+time_one_ep+validation_time)/time<=float(cost_perc):
+                            continue_val=True
+                            index+=1
+                        else:
+                            continue_val=False
+                else:
+                    index=None
 
-                if index_best!=None:
+                if index!=None:
                     current_val_policies.append(policy_id) 
 
-                    esti_time_seq.append([np.mean(df_test_ep_rewards[policy_id][:index_best+1]),current_times[index_best]])
-                    val_n_ep[policy_id]=index_best+1
+                    esti_time_seq.append([np.mean(df_test_ep_rewards[policy_id][:index+1]),current_times[index]])
+                    val_n_ep[policy_id]=index+1
 
-                    validation_time+=current_times[index_best]
+                    validation_time+=current_times[index]
             
             if len(current_val_policies)>0:
                 # Dividir estimaciones de tiempos adicionales
@@ -1304,17 +1343,28 @@ class Selector:
             current_val_policies=[]
             esti_time_seq=[]
             time_val_n_ep=0 # Estimacion del coste de validar la politica con n_ep
+            time_one_ep=0 # para almacenar lo maximo observado hasta el momento (una estimacion pesimista de evaluar un solo episodio)
             total_time_val=0 # Aqui se va acumulando el tiempo total en validacion
             val_n_ep=[0]*self.df_test.shape[0]# inicializamos con 0, porque solo tendran un n_ep=n_ep_or_freq las politicas que toque validar
             for time in current_times:
 
                 if time_val_n_ep==0 or (total_time_val+time_val_n_ep)/time<=cost_perc: # La primera politica siempre la validamos
+
                     policy_id=self.df_train.loc[(self.df_train['time_seconds']<=time) ].index.max()
                     current_val_policies.append(policy_id) 
 
-                    time_val_n_ep,val_time=DataConverter.compress_decompress_list(self.df_test_estimates[self.df_test_estimates['n_policy']==policy_id][str(n_ep_or_freq)+'_val_ep'].values[0],compress=False)
-                    esti_time_seq.append([time_val_n_ep,val_time])
-                    total_time_val+=time_val_n_ep
+                    val_time_until_truth=df_test_elapsed_val_times[policy_id][df_test_n_val_ep[policy_id].index(500)] 
+                    current_times=list(np.array(df_test_elapsed_val_times[policy_id])-val_time_until_truth)[500:]
+                    times_per_ep=[current_times[0]]+[current_times[i]-current_times[i-1] for i in range(1,len(current_times))]
+
+                    estimation=np.mean(df_test_ep_rewards[policy_id][:n_ep_or_freq])
+                    time_val=sum(times_per_ep[:n_ep_or_freq])
+                    if max(times_per_ep[:n_ep_or_freq])>time_one_ep:
+                        time_one_ep=max(times_per_ep[:n_ep_or_freq])
+                    time_val_n_ep=time_one_ep*n_ep_or_freq # estimacion pesimista, asumiendo que la validacion de cada episodio va ha costar lo maximo observado hasta ahora
+
+                    esti_time_seq.append([estimation,time_val])
+                    total_time_val+=time_val
 
                     val_n_ep[policy_id]=n_ep_or_freq
                     
@@ -1492,8 +1542,6 @@ class Grapher:
                 ax2.set_ylabel("Truth reward")
             if first_graph:
                 ax2.legend(loc="center left", bbox_to_anchor=(-0.5, 0.5))
-            if first_row:
-                ax1.set_title(title)
             ax2.grid(True)
 
         fig, axs = plt.subplots(6*2,5, figsize=(5*8,6*5),height_ratios=[0.1,1]*6)
@@ -1598,27 +1646,40 @@ class Grapher:
     def graph_deg_criteria_conf_by_regions(self,pack,default_train_n_ep,default_test_n_ep,default_test_freq,
          global_deg_metric='norm_worsening_to_improvement',local_deg_metric='reward_diff',
          prec_metric='relative_perc_criteria_best',
-         n_ep_type='constant',
-         general_train_n_ep=None,general_test_n_ep=None,general_test_freq=None
-         ):
+         n_ep_type='constant'):
         
-
         '''
         Genera primera grafica principal a partir de los datos transformados a formato apropiado para ello.
         - Distribuciones de degradacion por region de aprendizaje
         - Precision y coste de seleccion para diferentes configuraciones de los criterios train y test
         (esto sirve como analisis de sensibilidad y configuracion optima)
         '''
+        # Leer configuraciones generales optimas para poder las marcar en las graficas
+        df_conf=pd.read_csv(self.data_common_path+'configurations.csv')
+        general_train_n_ep=df_conf.loc[df_conf["pack"] == 'all', "train_opt"].iloc[0]
 
-        # Cuadricula de grafica
+        if n_ep_type=='constant':
+            general_test_n_ep,general_test_freq=None,None
+        if n_ep_type=='with_cost_n_ep':
+            conf_str=df_conf.loc[df_conf["pack"] == 'all', "test_cost_n_ep_opt"].iloc[0]
+            general_test_n_ep=float(conf_str.split('_')[0])
+            general_test_freq=int(conf_str.split('_')[1])
+        if n_ep_type=='with_cost_freq':
+            conf_str=df_conf.loc[df_conf["pack"] == 'all', "test_cost_freq_opt"].iloc[0]
+            general_test_n_ep=int(conf_str.split('_')[0])
+            general_test_freq=float(conf_str.split('_')[1])
+
+        #----- Cuadricula de grafica interna
         if n_ep_type=='constant':
             fig,axs=plt.subplots(5,3, figsize=(10,8),height_ratios=[0.02,0.03,0.01,0.05,0.05*6])
         else:
             fig,axs=plt.subplots(5,3, figsize=(10,8),height_ratios=[0.02,0.03,0.01,0.05,0.05*4])
-        plt.subplots_adjust(top=0.95,bottom=0.15,left=0.1,right=0.95, hspace=0.03,wspace=0.02)
+        plt.subplots_adjust(top=0.95,bottom=0.15,left=0.15,right=0.95, hspace=0.03,wspace=0.02)
+
+        prec1_simple,prec2_simple,prec3_simple=[],[],[]
 
         # 1) Distribucion de degradacion
-        def desgradation_distribution(ax,title,deg_list,nombre=None):
+        def desgradation_distribution(ax,title,deg_list,nombre=None,simple=False):
 
             data = np.array(deg_list)
 
@@ -1642,7 +1703,13 @@ class Grapher:
 
             ax.set_xlim(-0.05, 1.05)
             ax.set_title(title+' ('+str(len(data))+')')
-            ax.set_xlabel('degradation')
+
+            if not simple:
+                ax.set_xlabel('degradation')
+            else:
+                if nombre:
+                    ax.set_ylabel('deg')
+                ax.set_xticks([])
 
             if nombre is None:
                 ax.set_yticklabels([])
@@ -1668,12 +1735,11 @@ class Grapher:
             ax.set_xlim(-0.1,1.1)
             ax.grid(axis='x', linestyle='--',alpha=0.4)
             if nombres!=None:
-                ax.set_ylabel('Last', rotation=0,labelpad=15)
+                ax.set_ylabel('last', rotation=0,labelpad=15)
             ax.set_ylim(-0.35,0.35)
             ax.set_yticks([])
             ax.set_xticklabels([])
             
-        
         prec1,prec2,prec3=DataConverter.from_df_data_to_graph_data(
             [self.data_path+'learning_regions.csv',self.data_path+'df_last_prec.csv'],pack,'last_prec',
             prec_metric=prec_metric
@@ -1681,6 +1747,11 @@ class Grapher:
         last_conf_precCI(axs[2,0],prec1,nombres=True)
         last_conf_precCI(axs[2,1],prec2)
         last_conf_precCI(axs[2,2],prec3)
+
+        if n_ep_type=='with_cost_freq':
+            prec1_simple.append(prec1)
+            prec2_simple.append(prec2)
+            prec3_simple.append(prec3)
 
 
         # 3) Train conf_prec
@@ -1690,10 +1761,10 @@ class Grapher:
                 if optimal_conf!=None:
                     if int(optimal_conf)==int(n_ep_list[::-1][len(listas)-1-y]) :
                         ax.axhline(y, color='yellow', linewidth=10,alpha=0.3)
-                if default_train_n_ep==int(n_ep_list[::-1][y]):
+                if default_train_n_ep==int(n_ep_list[y]):
                     ax.axhline(y, color='black', linewidth=10,alpha=0.05)
-                if general_train_n_ep==int(n_ep_list[::-1][len(listas)-1-y])  and n_ep_type=='with_cost':
-                    ax.axhline(y, color="red", linewidth=10,alpha=0.05)
+                if general_train_n_ep==int(n_ep_list[::-1][len(listas)-1-y])  and n_ep_type in ['with_cost_n_ep','with_cost_freq']:
+                    ax.axhline(y, color="red", linewidth=10,alpha=0.3)
 
                 ax.hlines(y, np.percentile(data, 5), np.percentile(data, 95), color='black')
                 ax.vlines(np.percentile(data, 5), y - 0.2, y + 0.2, color='black')
@@ -1736,6 +1807,12 @@ class Grapher:
         train_conf_precCI(axs[3,0],prec1,conf_list,nombres=True,optimal_conf=n_ep_train)
         train_conf_precCI(axs[3,1],prec2,conf_list,optimal_conf=n_ep_train)
         train_conf_precCI(axs[3,2],prec3,conf_list,optimal_conf=n_ep_train)
+
+        if n_ep_type=='with_cost_freq':
+            conf_list=[int(n_ep) for n_ep in conf_list]
+            prec1_simple.append(prec1[conf_list.index(int(general_train_n_ep))])
+            prec2_simple.append(prec2[conf_list.index(int(general_train_n_ep))])
+            prec3_simple.append(prec3[conf_list.index(int(general_train_n_ep))])
 
         # 4) Test conf_prec_cost
         def test_conf_precCI_costColor(ax,prec_matrix,cost_matrix,n_ep_list,freq_list,nombres=None,optimal_conf=[None,None]):
@@ -1797,7 +1874,7 @@ class Grapher:
                             ax.axhline(current_height, color='yellow', linewidth=10,alpha=0.3)
                     if default_test_n_ep==float(n_ep_list[i]) and default_test_freq==float(freq_list[j]) and n_ep_type=='constant':
                         ax.axhline(current_height, color='black', linewidth=10,alpha=0.05)
-                    if general_test_n_ep==float(n_ep_list[i]) and general_test_freq==float(freq_list[j]) and n_ep_type=='with_cost_n_ep':
+                    if general_test_n_ep==float(n_ep_list[i]) and general_test_freq==float(freq_list[j]) and n_ep_type in ['with_cost_n_ep','with_cost_freq']:
                         ax.axhline(current_height, color="red", linewidth=10,alpha=0.3)
 
                     datos = prec_matrix[i][j]
@@ -1887,23 +1964,79 @@ class Grapher:
             prec_metric=prec_metric,n_ep_type=n_ep_type
         )
 
-        n_ep_test,freq_test=obtain_best_test_conf(prec1,prec3,prec2,cost1,cost2,cost3,n_ep_list,freq_list)
+        n_ep_test,freq_test=obtain_best_test_conf(prec1,prec2,prec3,cost1,cost2,cost3,n_ep_list,freq_list)
         test_conf_precCI_costColor(axs[4,0],prec1,cost1,n_ep_list,freq_list,nombres=True,optimal_conf=[n_ep_test,freq_test])
         test_conf_precCI_costColor(axs[4,1],prec2,cost2,n_ep_list,freq_list,optimal_conf=[n_ep_test,freq_test])
         test_conf_precCI_costColor(axs[4,2],prec3,cost3,n_ep_list,freq_list,optimal_conf=[n_ep_test,freq_test])
+
+        if n_ep_type=='with_cost_freq':
+            n_ep_list=[int(n_ep) for n_ep in n_ep_list]
+            freq_list=[float(freq) for freq in freq_list]
+            prec1_simple.append(prec1[n_ep_list.index(general_test_n_ep)][freq_list.index(general_test_freq)])
+            prec2_simple.append(prec2[n_ep_list.index(general_test_n_ep)][freq_list.index(general_test_freq)])
+            prec3_simple.append(prec3[n_ep_list.index(general_test_n_ep)][freq_list.index(general_test_freq)])
 
         axs[1, 0].axis('off')
         axs[1, 1].axis('off')
         axs[1, 2].axis('off')
 
-        plt.savefig(self.graph_path+'/main_analysis1_'+n_ep_type+'.pdf')
+        plt.savefig(self.graph_path+'/internal_analysis1_'+n_ep_type+'.pdf')
 
-        return n_ep_train,n_ep_test,freq_test
+        #----- Cuadricula de grafica principal simple
+
+        def last_train_test_precCI(ax,listas,nombres=False):
+            colors=['green','orange','blue']
+            color_marker_map = {'green': 's','orange': '^','blue': 'o'}
+            for y, data,color in zip(range(len(listas)), listas,colors):
+
+                ax.hlines(y, np.percentile(data, 5), np.percentile(data, 95), color=color)
+                ax.vlines(np.percentile(data, 5), y - 0.2, y + 0.2, color=color)
+                ax.vlines(np.percentile(data, 95), y - 0.2, y + 0.2, color=color)
+                ax.plot(np.median(data), y, color_marker_map[color], color=color)
+
+            ax.set_xlim(-0.05,1.05)
+            ax.grid(axis='x', linestyle='--',alpha=0.4)
+
+            ax.set_yticks([])
+            if nombres:
+                ax.set_ylabel('prec')
+
+                legend_elements = [
+                    Line2D([0], [0], marker='o', color='blue', label='Last', markersize=6, linestyle=''),
+                    Line2D([0], [0], marker='^', color='orange', label='Train', markersize=6, linestyle=''),
+                    Line2D([0], [0], marker='s', color='green', label='Test', markersize=6, linestyle='')
+                ]
+                ax.legend(handles=legend_elements, loc='upper center',bbox_to_anchor=(0.5, -0.2), ncol=3, frameon=False)
+      
+        if n_ep_type=='with_cost_freq':
+            fig,axs=plt.subplots(2,3, figsize=(10,2),height_ratios=[0.02,0.04])
+            plt.subplots_adjust(top=0.8,bottom=0.2,left=0.15,right=0.95, hspace=0.03,wspace=0.02)
+
+            desgradation_distribution(axs[0,0],'Initialization',deg1,nombre=True,simple=True)
+            desgradation_distribution(axs[0,1],'Learning',deg2,simple=True)
+            desgradation_distribution(axs[0,2],'Stabilization',deg3,simple=True)
+            
+            last_train_test_precCI(axs[1,0],prec1_simple[::-1],nombres=True)
+            last_train_test_precCI(axs[1,1],prec2_simple[::-1])
+            last_train_test_precCI(axs[1,2],prec3_simple[::-1])
+
+
+            plt.savefig(self.graph_path+'/main_analysis1.pdf')
+
+
+        # Guardar condiguraciones optimas 
+        if n_ep_type=='constant':
+            df_conf.loc[df_conf["pack"] == pack, ['train_default','test_default',"train_opt", "test_opt"]] = [default_train_n_ep,str(default_test_n_ep)+'_'+str(default_test_freq),n_ep_train, str(n_ep_test)+'_'+str(freq_test)]
+        if n_ep_type=='with_cost_n_ep':
+            df_conf.loc[df_conf["pack"] == pack, ['train_default','test_default',"train_opt", "test_cost_n_ep_opt"]] = [default_train_n_ep,str(default_test_n_ep)+'_'+str(default_test_freq),n_ep_train, str(n_ep_test)+'_'+str(freq_test)]
+        if n_ep_type=='with_cost_freq':
+            df_conf.loc[df_conf["pack"] == pack, ['train_default','test_default',"train_opt", "test_cost_freq_opt"]] = [default_train_n_ep,str(default_test_n_ep)+'_'+str(default_test_freq),n_ep_train, str(n_ep_test)+'_'+str(freq_test)]
+
+        df_conf.to_csv(self.data_common_path+'configurations.csv', index=False)
 
     def graph_criteria_comparison_by_regions(self,pack,
          global_deg_metric='norm_worsening_to_improvement',local_deg_metric='reward_diff',
-         prec_metric='relative_perc_criteria_best',
-         train_conf=100,test_conf='0.2cost'):
+         prec_metric='relative_perc_criteria_best'):
 
         '''
         Genera la segunda grafica principal a partir de los datos transformados a formato apropiado para ello.
@@ -1912,6 +2045,10 @@ class Grapher:
         - Distribucion de degradacion en que cada criterio es mejor
         - Precision de seleccion cuando cada criterio es el mejor y con que diferencia al otro es mejor
         '''
+
+        df_conf=pd.read_csv(self.data_common_path+'configurations.csv')
+        train_conf=int(df_conf.loc[df_conf["pack"] == 'all', "train_opt"].iloc[0])
+        test_conf=df_conf.loc[df_conf["pack"] == 'all', "test_cost_freq_opt"].iloc[0]+'cost'
  
         # Cuadricula de grafica
         fig,axs=plt.subplots(3,3, figsize=(10,5),height_ratios=[0.03,0.07,0.1])
@@ -1931,9 +2068,9 @@ class Grapher:
                 marker_left = color_marker_map.get(color_left, 'o')
                 marker_right = color_marker_map.get(color_right, 'o')  
                 if left_val>0:       
-                    ax.plot(left_val, i,marker=marker_left,color='black',markersize=6) # Punta izquierda
+                    ax.plot(0, i,marker=marker_left,color='black',markersize=6) # Punta izquierda
                 if right_val>0:
-                    ax.plot(1 - right_val, i,marker=marker_right,color='black',markersize=6) # Punta derecha
+                    ax.plot(1 , i,marker=marker_right,color='black',markersize=6) # Punta derecha
 
             ax.set_xlim(-0.05, 1.05)
             ax.set_ylim(-0.5, len(data)-0.5)
@@ -2093,137 +2230,94 @@ class Grapher:
         with_what_prec_diff_best(axs[2,2],matrix3)
         plt.savefig(self.graph_path+'/main_analysis2.pdf')
 
-    def graph_pack_learning_curves_with_criteria(self,pack,
-                                                    default_conf=[None,None,None],
-                                                    list_n_ep=[500,250,100,50,25,5],list_freq=[50,25,10,5,2,1],
-                                                    optimal_conf=None,
-                                                    curves='truth',also_train_test_grid=True):
+    def graph_pack_learning_curves_with_criteria(self,pack):
 
         '''
         :param default_conf: [default_train_n_ep,default_test_n_ep,default_test_freq]
         '''
 
-        # Leer bases de datos ya generadas
-        df_truth=pd.read_csv(self.data_path+'df_best_truth.csv')
-        if curves=='truth':
-            df_train=pd.read_csv(self.data_path+'df_train_truth.csv')
-            df_test=pd.read_csv(self.data_path+'df_test_truth.csv')
-            df_last=pd.read_csv(self.data_path+'df_last_truth.csv')
+        # Leer configuraciones generales optimas para poder las marcar en las graficas
+        df_conf=pd.read_csv(self.data_common_path+'configurations.csv')
+        train_default=int(df_conf.loc[df_conf["pack"] == pack, "train_default"].iloc[0])
+        test_default=df_conf.loc[df_conf["pack"] == pack, "test_default"].iloc[0]
 
-        if curves=='estimate_truth':
-            df_last=pd.read_csv(self.data_path+'df_last_est.csv')
-            df_train=pd.read_csv(self.data_path+'df_train_est.csv')
-            df_test=pd.read_csv(self.data_path+'df_test_est.csv')
+        test_cost=df_conf.loc[df_conf["pack"] == 'all', "test_cost_n_ep_opt"].iloc[0]
+        test_cost_n_ep,test_cost_freq=test_cost.split('_')
+        test_cost_n_ep=test_cost_n_ep+'cost_'+test_cost_freq
 
-        def plot_mediana_ci(ax, df, color, label=None, alpha_fill=0.2):
-            ax.plot(df.index , df.median(axis=1), color=color, linewidth=2, label=label)
-            ax.fill_between(df.index, df.quantile(0.05, axis=1), df.quantile(0.95, axis=1), color=color, alpha=alpha_fill)
-            ax.legend()
+        test_cost_freq=df_conf.loc[df_conf["pack"] == 'all', "test_cost_freq_opt"].iloc[0]+'cost'
 
-        fig, axs = plt.subplots(2,4, figsize=(20, 8),sharey=True)
-        plt.subplots_adjust(top=0.96,bottom=0.06,left=0.06,right=0.98, hspace=0.24,wspace=0.22)
+        # Leer bases de datos ya generadas y reducirlas al pack de interes
+        df_truth_pack=pd.read_csv(self.data_path+'df_best_truth.csv').filter(like=pack)
+        df_train_pack=pd.read_csv(self.data_path+'df_train_truth.csv').filter(like=pack)
+        df_test_pack=pd.read_csv(self.data_path+'df_test_truth.csv').filter(like=pack)
+        df_last_pack=pd.read_csv(self.data_path+'df_last_truth.csv').filter(like=pack)
 
-        # Reducir bases de datos al pack de interes
-        df_truth_pack=df_truth.filter(like=pack)
-        df_last_pack=df_last.filter(like=pack)
-        df_train_pack=df_train.filter(like=pack)
-        df_test_pack=df_test.filter(like=pack)
+        # Dibujar graficas
+        fig, axs = plt.subplots(2,3, figsize=(10, 5),sharey=True)
+        plt.subplots_adjust(top=0.97,bottom=0.09,left=0.08,right=0.98, hspace=0.13,wspace=0.03)
 
-        # Truth vs last
-        plot_mediana_ci(axs[0,0], df_truth_pack, color='black', label='Truth best')
-        plot_mediana_ci(axs[0,0], df_last_pack, color='blue', label='Last')
-        axs[0,0].set_xlabel('Learning iteration')
-        if curves=='truth':
-            axs[0,0].set_ylabel('Truth of selected as best')
-        if curves=='estimate_truth':
-            axs[0,0].set_ylabel('Truth vs estimate of selected as best')
-        axs[0,0].set_title('Truth vs Last')
+        def plot_mediana_ci(ax, df, color, marker=None):
+            ax.plot(df.index , df.median(axis=1), color=color, marker=marker,markevery=int(len(df.index)/10),linewidth=1)
+            ax.fill_between(df.index, df.quantile(0.05, axis=1), df.quantile(0.95, axis=1), color=color, alpha=0.2)
 
-        # Truth vs default train
-        plot_mediana_ci(axs[0,1], df_truth_pack, color='black', label='Truth best')
-        df_train_pack_conf=df_train_pack.loc[:, df_train_pack.columns.str.endswith('_'+str(default_conf[0]))]
-        plot_mediana_ci(axs[0,1], df_train_pack_conf, color='orange', label='Train best')
+        #---- Truth vs last
+        plot_mediana_ci(axs[0,0], df_truth_pack, color='black')
+        plot_mediana_ci(axs[0,0], df_last_pack, color='blue', marker='o')
+        axs[0,0].set_ylabel('Truth of selected as best')
+
+        #---- Truth vs default train
+        plot_mediana_ci(axs[0,1], df_truth_pack, color='black')
+        df_train_pack_conf=df_train_pack.loc[:, df_train_pack.columns.str.endswith('_'+str(train_default))]
+        plot_mediana_ci(axs[0,1], df_train_pack_conf, color='orange', marker='^')
         
-        axs[0,1].set_xlabel('Learning iteration')
-        axs[0,1].set_title('Truth vs default Train')
-
-        # Truth vs default test
-        plot_mediana_ci(axs[0,2], df_truth_pack, color='black', label='Truth best')
-        df_test_pack_conf=df_test_pack.loc[:, df_test_pack.columns.str.endswith('_'+str(default_conf[1])+'_'+str(default_conf[2]))]
-        plot_mediana_ci(axs[0,2], df_test_pack_conf, color="#A52D81", label='Test best')
-
+        #---- Truth vs default test
+        plot_mediana_ci(axs[0,2], df_truth_pack, color='black')
+        df_test_pack_conf=df_test_pack.loc[:, df_test_pack.columns.str.endswith('_'+test_default)]
+        plot_mediana_ci(axs[0,2], df_test_pack_conf, color="#A52D81",marker='D')
         axs[0,2].set_xlabel('Learning iteration')
-        axs[0,2].set_title('Truth vs default Test')
 
-        # Truth vs recomended test
-        if curves=='truth':
-            plot_mediana_ci(axs[0,3], df_truth_pack, color='black', label='Truth best')
-            df_test_pack_conf=df_test_pack.loc[:, df_test_pack.columns.str.endswith('_'+optimal_conf)]
-            plot_mediana_ci(axs[0,3], df_test_pack_conf, color="green", label='Test best')
+        #---- Truth vs recomended test
+        plot_mediana_ci(axs[1,0], df_truth_pack, color='black')
+        df_test_pack_conf=df_test_pack.loc[:, df_test_pack.columns.str.endswith('_'+test_cost_n_ep)]
+        plot_mediana_ci(axs[1,0], df_test_pack_conf, color="green", marker='d')
+        axs[1,0].set_xlabel('Learning iteration')
+        axs[1,0].set_ylabel('Truth of selected as best')
 
-            axs[0,3].set_xlabel('Learning iteration')
-            axs[0,3].set_title('Truth vs Test '+optimal_conf)
-        else:
-            axs[0,3].axis('off')
+        plot_mediana_ci(axs[1,1], df_truth_pack, color='black')
+        df_test_pack_conf=df_test_pack.loc[:, df_test_pack.columns.str.endswith('_'+test_cost_freq)]
+        plot_mediana_ci(axs[1,1], df_test_pack_conf, color="green", marker='s')
+        axs[1,1].set_xlabel('Learning iteration')
 
-        axs[1,3].axis('off')
-        if also_train_test_grid:
-            # Truth vs train
-            plot_mediana_ci(axs[1,0], df_truth_pack, color='black', label='Truth best')
+        #---- Leyenda
+        axs[1,2].axis('off')
+        legend_elements = [
+            Line2D([0], [0], color='black', lw=2, label='best'),
+            Line2D([0], [0], color='blue', marker='o', lw=2, label='last'),
+            Line2D([0], [0], color='orange', marker='^', lw=2, label='train default'),
+            Line2D([0], [0], color="#A52D81", marker='D', lw=2, label='test default'),
+            Line2D([0], [0], color='green', marker='d', lw=2,label='test with cost 0.2 freq 1'),
+            Line2D([0], [0], color='green', marker='s', lw=2,label='test with cost 0.2 n_ep 5'),
+        ]
+        axs[1,1].legend(title='criterion',handles=legend_elements,loc='center right', bbox_to_anchor=(2, 0.5)) 
 
-            cmap = cm.get_cmap("Oranges")
-            levels = np.linspace(0.4, 0.9, 6)
-            all_n_ep=list_n_ep[::-1]
-            for i in range(len(all_n_ep)):
-                df_train_pack_conf=df_train_pack.loc[:, df_train_pack.columns.str.endswith('_'+str(all_n_ep[i]))]
-                plot_mediana_ci(axs[1,0], df_train_pack_conf, color=cmap(levels[i]), label=f'n_ep {all_n_ep[i]}')
+        plt.savefig(self.graph_path+'/main_learning_curves.pdf')
+ 
+    def graph_pack_learning_curves_error(self,pack):
+        
+        # Leer configuraciones generales optimas para poder las marcar en las graficas
+        df_conf=pd.read_csv(self.data_common_path+'configurations.csv')
+        train_default=int(df_conf.loc[df_conf["pack"] == pack, "train_default"].iloc[0])
+        test_default=df_conf.loc[df_conf["pack"] == pack, "test_default"].iloc[0]
 
-            axs[1,0].set_xlabel('Learning iteration')
-            if curves=='truth':
-                axs[1,0].set_ylabel('Truth of selected as best')
-            if curves=='estimate_truth':
-                axs[1,0].set_ylabel('Truth vs estimate of selected as best')
-            axs[1,0].set_title('Truth vs Train')
+        test_cost=df_conf.loc[df_conf["pack"] == 'all', "test_cost_n_ep_opt"].iloc[0]
+        test_cost_n_ep,test_cost_freq=test_cost.split('_')
+        test_cost_n_ep=test_cost_n_ep+'cost_'+test_cost_freq
 
-            # Truth vs test freq=1
-            plot_mediana_ci(axs[1,1], df_truth_pack, color='black', label='Truth best')
-
-            cmap = cm.get_cmap("PuRd")
-            levels = np.linspace(0.4, 0.9, 6)
-            for i in range(len(all_n_ep)):
-                df_test_pack_conf=df_test_pack.loc[:, df_test_pack.columns.str.endswith('_'+str(all_n_ep[i])+'_1')]
-                plot_mediana_ci(axs[1,1], df_test_pack_conf, color=cmap(levels[i]), label=f'n_ep {all_n_ep[i]}')
-
-            axs[1,1].set_xlabel('Learning iteration')
-            axs[1,1].set_title('Truth vs Test with freq=1')
-
-            # Truth vs test n_ep=5
-            plot_mediana_ci(axs[1,2], df_truth_pack, color='black', label='Truth best')
-
-            cmap = cm.get_cmap("PuRd")
-            levels = np.linspace(0.4, 0.9, 6)
-            all_freq=list_freq[::-1]
-            for i in range(len(all_freq)):
-                df_test_pack_conf=df_test_pack.loc[:, df_test_pack.columns.str.endswith('_5_'+str(all_freq[i]))]
-                plot_mediana_ci(axs[1,2], df_test_pack_conf, color=cmap(levels[i]), label=f'freq {all_freq[i]}')
-
-            axs[1,2].set_xlabel('Learning iteration')
-            axs[1,2].set_title('Truth vs Test with n_ep=5')
-
-            plt.savefig(self.graph_path+'/main_learning_curves_'+curves+'.pdf')
-        else:
-            axs[1,0].axis('off')
-            axs[1,1].axis('off')
-            axs[1,2].axis('off')
-
-            plt.savefig(self.graph_path+'/main_simple_learning_curves_'+curves+'.pdf')
-
-    def graph_pack_learning_curves_error(self,pack,
-                                         default_conf=[None,None,None],optimal_conf=None,diff='estimate_truth'):
+        test_cost_freq=df_conf.loc[df_conf["pack"] == 'all', "test_cost_freq_opt"].iloc[0]+'cost'
 
         # Leer bases de datos ya generadas
         df_truth=pd.read_csv(self.data_path+'df_best_truth.csv')
-        df_worst=pd.read_csv(self.data_path+'df_worst_truth.csv')
         df_last_truth=pd.read_csv(self.data_path+'df_last_truth.csv')
         df_train_truth=pd.read_csv(self.data_path+'df_train_truth.csv')
         df_test_truth=pd.read_csv(self.data_path+'df_test_truth.csv')
@@ -2232,161 +2326,172 @@ class Grapher:
         df_truth_pack=df_truth.filter(like=pack)
 
         # Obtener listas con diferencia pareada de evolucion de estimaciones de las politicas seleccionadas
-        last_paired_diff=[]
-        train_paired_diff=[]
-        test_paired_diff=[]
-        cost_paired_diff=[]
-        worst_paired_diff=[]
+        last_paired_diff,train_paired_diff,test_paired_diff,cost_n_ep_paired_diff,cost_freq_paired_diff=[],[],[],[],[]
+
         for pack_seed in list(df_truth_pack.columns):
 
             truth=np.array(df_truth_pack[pack_seed].tolist())
+            last=np.array(df_last_truth[pack_seed].tolist())
+            train=np.array(df_train_truth[pack_seed+'_'+str(train_default)].tolist())
+            test=np.array(df_test_truth[pack_seed+'_'+test_default].tolist())
+            test_with_cost_n_ep=np.array(df_test_truth[pack_seed+'_'+test_cost_n_ep].tolist())
+            test_with_cost_freq=np.array(df_test_truth[pack_seed+'_'+test_cost_freq].tolist())
 
-            if diff=='estimate_truth':      
-                df_last_est=pd.read_csv(self.data_path+'df_last_est.csv')
-                df_train_est=pd.read_csv(self.data_path+'df_train_est.csv')
-                df_test_est=pd.read_csv(self.data_path+'df_test_est.csv')
-    
-                last=np.array(df_last_est[pack_seed+'_'+str(default_conf[0])].tolist())
-                train=np.array(df_train_est[pack_seed+'_'+str(default_conf[0])].tolist())
-                test=np.array(df_test_est[pack_seed+'_'+str(default_conf[1])+'_'+str(default_conf[2])].tolist())
-            
-            if diff=='truth':
-                worst= np.array(df_worst[pack_seed].tolist())  
-                last=np.array(df_last_truth[pack_seed].tolist())
-                train=np.array(df_train_truth[pack_seed+'_'+str(default_conf[0])].tolist())
-                test=np.array(df_test_truth[pack_seed+'_'+str(default_conf[1])+'_'+str(default_conf[2])].tolist())
-                test_cost=np.array(df_test_truth[pack_seed+'_'+optimal_conf].tolist())
-
-                worst_paired_diff.append(abs(truth-worst))
-                cost_paired_diff.append(abs(truth-test_cost))
-
-            
+            cost_n_ep_paired_diff.append(abs(truth-test_with_cost_n_ep))
+            cost_freq_paired_diff.append(abs(truth-test_with_cost_freq))
             last_paired_diff.append(abs(truth-last))
             train_paired_diff.append(abs(truth-train))
             test_paired_diff.append(abs(truth-test))
             
-
         # Graficas de error acumulado pareado entre curvas de aprendizaje truth vs estimadas
-        def plot_cumulative_learning_curve_paired_diff(ax,data,title,color,nombre=None,with_curves=True):
+        def plot_cumulative_learning_curve_paired_diff(ax,data,color,title,nombre=None):
             data = np.array(data)
             accumulated = np.zeros(data.shape[1])
             
             for seed in data:
                 new_accumulated = accumulated + seed
-                if with_curves:
-                    ax.fill_between(np.arange(data.shape[1]),accumulated,new_accumulated,color=color,alpha=0.6,edgecolor='none') # area entre la curva anterior y la nueva
-                    ax.plot(np.arange(data.shape[1]),new_accumulated,color=color,linewidth=0.8) # Curva superior de esta capa
+                ax.fill_between(np.arange(data.shape[1]),accumulated,new_accumulated,color=color,alpha=0.6,edgecolor='none') # area entre la curva anterior y la nueva
+                ax.plot(np.arange(data.shape[1]),new_accumulated,color=color,linewidth=0.8) # Curva superior de esta capa
                 accumulated = new_accumulated
 
-            if not with_curves:
-                ax.fill_between(np.arange(data.shape[1]),np.zeros(data.shape[1]),new_accumulated,color=color,alpha=0.8,edgecolor='none') # area entre la curva anterior y la nueva
-
-            if with_curves:
-                ax.set_title(title)
-                ax.grid(axis='y', linestyle='--', alpha=0.5)
             if nombre!=None:
-                ax.set_ylabel("Cumulative paired difference between\ntruth and criteria learning curve",fontsize=9)
+                ax.set_ylabel("Cumulative paired difference between\ntruth and criteria learning curve",fontsize=8)
             
             ax.set_xlabel("Number of iterations")
-            
+            ax.text(0.95, 0.95, title,transform=ax.transAxes,ha='right', va='top')
 
             return sum(new_accumulated)
             
-        fig, axs = plt.subplots(1,5, figsize=(15, 3),sharey=True)
-        plt.subplots_adjust(top=0.92,bottom=0.14,left=0.09,right=0.97, hspace=0.3,wspace=0.1)
+        fig, axs = plt.subplots(2,3, figsize=(10, 5),sharey=True)
+        plt.subplots_adjust(top=0.97,bottom=0.09,left=0.1,right=0.98, hspace=0.13,wspace=0.03)
 
-        if diff=='truth':
-            plot_cumulative_learning_curve_paired_diff(axs[0],worst_paired_diff,'truth vs worst','grey',nombre=True)
-            plot_cumulative_learning_curve_paired_diff(axs[1],last_paired_diff,'truth vs last','blue')
-            plot_cumulative_learning_curve_paired_diff(axs[2],train_paired_diff,'truth vs train default','orange')
-            plot_cumulative_learning_curve_paired_diff(axs[3],test_paired_diff,'truth vs test default','#A52D81')
-            plot_cumulative_learning_curve_paired_diff(axs[4],cost_paired_diff,'truth vs test '+optimal_conf,"green")
-        if diff=='estimate_truth':
-            axs[0].axis('off')
-            plot_cumulative_learning_curve_paired_diff(axs[1],last_paired_diff,'truth vs last','blue',nombre=True)
-            plot_cumulative_learning_curve_paired_diff(axs[2],train_paired_diff,'truth vs train default','orange')
-            plot_cumulative_learning_curve_paired_diff(axs[3],test_paired_diff,'truth vs test default','#A52D81')
-            axs[4].axis('off')
+        plot_cumulative_learning_curve_paired_diff(axs[0,0],last_paired_diff,'blue','last',nombre=True)
+        plot_cumulative_learning_curve_paired_diff(axs[0,1],train_paired_diff,'orange','train default')
+        plot_cumulative_learning_curve_paired_diff(axs[0,2],test_paired_diff,'#A52D81','test default')
+        plot_cumulative_learning_curve_paired_diff(axs[1,0],cost_n_ep_paired_diff,"green",'test with cost 0.2 freq 1',nombre=True)
+        plot_cumulative_learning_curve_paired_diff(axs[1,1],cost_freq_paired_diff,"green",'test with cost 0.2 n_ep 5')
+
+        axs[1,2].axis('off')
+
+        plt.savefig(self.graph_path+'/main_cummulative_paired_diff_learning_curves.pdf')
 
 
-        plt.savefig(self.graph_path+'/main_cummulative_paired_diff_learning_curves_'+diff+'.pdf')
+        
+            # fig, axs = plt.subplots(1,1, figsize=(4,4),sharey=True)
+            # plt.subplots_adjust(top=0.92,bottom=0.14,left=0.2,right=0.97, hspace=0.3,wspace=0.05)
 
+            # last_accumulated=plot_cumulative_learning_curve_paired_diff(axs,last_paired_diff,'truth vs last','blue',with_curves=False)
+            # train_accumulated=plot_cumulative_learning_curve_paired_diff(axs,train_paired_diff,'truth vs train default','orange',with_curves=False)
+            # test_accumulated=plot_cumulative_learning_curve_paired_diff(axs,test_paired_diff,'truth vs test default','#A52D81',with_curves=False)
+            # optimal_accumulated=plot_cumulative_learning_curve_paired_diff(axs,cost_paired_diff,'truth vs test '+optimal_conf,'green',with_curves=False)
 
-        if diff=='truth':
-            fig, axs = plt.subplots(1,1, figsize=(4,4),sharey=True)
-            plt.subplots_adjust(top=0.92,bottom=0.14,left=0.2,right=0.97, hspace=0.3,wspace=0.05)
+            # legend_elements = [
+            #     Line2D([0], [0], color='grey',   lw=2, label=f'Worst: {1}'),
+            #     Line2D([0], [0], color='blue',   lw=2, label=f'Last: {last_accumulated/worst_accumulated:.2f}'),
+            #     Line2D([0], [0], color='orange', lw=2, label=f'Train default: {train_accumulated/worst_accumulated:.2f}'),
+            #     Line2D([0], [0], color='#A52D81',  lw=2, label=f'Test default: {test_accumulated/worst_accumulated:.2f}'),
+            #     Line2D([0], [0], color="green",    lw=2, label=f'Recommendation: {optimal_accumulated/worst_accumulated:.2f}')
+            # ]
 
-            worst_accumulated=plot_cumulative_learning_curve_paired_diff(axs,worst_paired_diff,'truth vs worst','grey',nombre=True,with_curves=False)
-            last_accumulated=plot_cumulative_learning_curve_paired_diff(axs,last_paired_diff,'truth vs last','blue',with_curves=False)
-            train_accumulated=plot_cumulative_learning_curve_paired_diff(axs,train_paired_diff,'truth vs train default','orange',with_curves=False)
-            test_accumulated=plot_cumulative_learning_curve_paired_diff(axs,test_paired_diff,'truth vs test default','#A52D81',with_curves=False)
-            optimal_accumulated=plot_cumulative_learning_curve_paired_diff(axs,cost_paired_diff,'truth vs test '+optimal_conf,'green',with_curves=False)
+            # axs.legend(handles=legend_elements,loc='upper left',fontsize=8)
 
-            legend_elements = [
-                Line2D([0], [0], color='grey',   lw=2, label=f'Worst: {1}'),
-                Line2D([0], [0], color='blue',   lw=2, label=f'Last: {last_accumulated/worst_accumulated:.2f}'),
-                Line2D([0], [0], color='orange', lw=2, label=f'Train default: {train_accumulated/worst_accumulated:.2f}'),
-                Line2D([0], [0], color='#A52D81',  lw=2, label=f'Test default: {test_accumulated/worst_accumulated:.2f}'),
-                Line2D([0], [0], color="green",    lw=2, label=f'Recommendation: {optimal_accumulated/worst_accumulated:.2f}')
-            ]
-
-            axs.legend(handles=legend_elements,loc='upper left',fontsize=8)
-
-            plt.savefig(self.graph_path+'/main_cummulative_paired_diff_learning_curves_'+diff+'_all.pdf')
+            # plt.savefig(self.graph_path+'/main_cummulative_paired_diff_learning_curves_'+diff+'_all.pdf')
 
     # Graficas de discusion
-    def graph_test_with_cost_n_ep(self,list_n_ep=[500,250,100,50,25,5],list_freq=[20, 15, 10, 5, 2, 1],list_cost=[0.05,0.1,0.15,0.2]):
+    def graph_test_with_cost(self,list_n_ep=[500,250,100,50,25,5],list_freq=[20, 15, 10, 5, 2, 1],list_cost=[0.05,0.1,0.15,0.2]):
 
         # Leer bases de datos que se van ha usar
         df_test_cost=pd.read_csv(self.data_path+'df_test_cost.csv')
         df_test_n_ep=pd.read_csv(self.data_path+'df_test_n_ep.csv')
 
-        # Funcion para plotear curvas de perc y n_ep por seed
-        def plot_perc_n_ep_evolution(ax,df,freq,perc,plot_title=False):
+        # Funcion para plotear curvas de perc y n_ep/freq por seed
+        def plot_perc_n_ep_evolution(ax,df,freq,first_column=False,first_row=False,all_or_CI='CI',dfs=None):
 
-            ax.plot(list(range(df.shape[0])), df.median(axis=1), label=str(freq))
-            ax.fill_between(list(range(df.shape[0])), df.quantile(0.05, axis=1), df.quantile(0.95, axis=1), alpha=0.3)
+            if all_or_CI=='CI':
+                ax.plot(list(range(df.shape[0])), df.median(axis=1), label=str(freq))
+                ax.fill_between(list(range(df.shape[0])), df.quantile(0.05, axis=1), df.quantile(0.95, axis=1), alpha=0.3)
 
-            if plot_title:
-                ax.set_title('Test with validation cost '+str(perc))
-                ax.set_ylabel('Percentage of validation cost')
-            else:
-                ax.set_ylabel('n_ep used for validation')
+                if first_column:
+                    if first_row:
+                        ax.set_ylabel('val_cost')
+                    else:
+                        ax.set_ylabel('n_ep')
+
+            if all_or_CI=='all':
+                # Transpose para que columnas = filas visuales
+                per_n_ep = [ (df.values != 0).astype(int).T for df in dfs ]
+                matrix = np.vstack(per_n_ep)       
+
+                # Crear matriz de colores por bloque
+                default_colors = plt.rcParams['axes.prop_cycle'].by_key()['color']
+                colors = ['white'] + default_colors[:6]
+                cmap = ListedColormap(colors)
+                matrix_color = np.zeros_like(matrix)
+
+                init = 0
+                for i, bloque in enumerate(per_n_ep):
+                    matrix_color[init:init+bloque.shape[0]] = bloque * (i+1)
+                    init += bloque.shape[0]
+
+                ax.imshow(matrix_color, aspect='auto', interpolation='none',cmap=cmap)
+                ax.set_yticks([])
+
+                if first_column:
+                    if first_row:
+                        ax.set_ylabel('val_cost')
+                    else:
+                        ax.set_ylabel('freq')
+
+            if not first_row:
                 ax.set_xlabel('Numer of iterations')
 
         # Por cada coste posible dibujaremos dos graficas con todas las semillas
-        fig, axs = plt.subplots(2,len(list_cost), figsize=(20, 6))
-        plt.subplots_adjust(top=0.96,bottom=0.12,left=0.12,right=0.98, hspace=0.13,wspace=0.39)
+        fig, axs = plt.subplots(3,len(list_cost), figsize=(20, 6),height_ratios=[0.1,0.6,0.6])
+        plt.subplots_adjust(top=0.96,bottom=0.12,left=0.08,right=0.98, hspace=0.17,wspace=0.15)
         
         for i,perc in enumerate(list_cost):
+            first_column=[True if i==0 else False][0]
             for j,freq in enumerate(list_freq):
 
+
                 # Solo seleccionar columnas con esa prec y freq
-                df_cost_perc_freq = df_test_cost.loc[:, df_test_cost.columns.str.contains('_'+str(perc)+'cost_'+str(freq)+'_')]
-                df_n_ep_perc_freq = df_test_n_ep.loc[:, df_test_n_ep.columns.str.contains('_'+str(perc)+'cost_'+str(freq)+'_')]
+                df_cost = df_test_cost.loc[:, df_test_cost.columns.str.contains('_'+str(perc)+'cost_'+str(freq)+'_')]
+                df_n_ep = df_test_n_ep.loc[:, df_test_n_ep.columns.str.contains('_'+str(perc)+'cost_'+str(freq)+'_')]
 
-                plot_perc_n_ep_evolution(axs[0,i],df_cost_perc_freq,freq,perc,plot_title=True)
-                plot_perc_n_ep_evolution(axs[1,i],df_n_ep_perc_freq,freq,perc)
+                plot_perc_n_ep_evolution(axs[0,i],df_cost,freq,first_column=first_column,first_row=True)
+                axs[0,i].set_ylim(bottom=perc)
+                axs[0,i].set_xticks([])
+                axs[0,i].set_title('Test with validation cost '+str(perc))
+                plot_perc_n_ep_evolution(axs[1,i],df_cost,freq,first_column=first_column,first_row=True)
+                axs[1,i].set_ylim([0,perc])
+                plot_perc_n_ep_evolution(axs[2,i],df_n_ep,freq,first_column=first_column)
 
-        axs[0,0].legend(title='freq',loc='upper left',bbox_to_anchor=(-.6, 1))
+        axs[0,0].legend(title='freq',loc='upper left',bbox_to_anchor=(-0.4, 1))
 
         plt.savefig(self.graph_path+'/discussion_test_cost_n_ep.pdf')
 
-        # Por cada coste posible dibujaremos dos graficas con todas las semillas
-        fig, axs = plt.subplots(2,len(list_cost), figsize=(20, 6))
-        plt.subplots_adjust(top=0.96,bottom=0.12,left=0.12,right=0.98, hspace=0.13,wspace=0.39)
+        
+        fig, axs = plt.subplots(3,len(list_cost), figsize=(20, 6),height_ratios=[0.1,0.6,0.6])
+        plt.subplots_adjust(top=0.96,bottom=0.12,left=0.08,right=0.98, hspace=0.17,wspace=0.15)
 
         for i,perc in enumerate(list_cost):
+            dfs=[]
+            first_column=[True if i==0 else False][0]
             for j,n_ep in enumerate(list_n_ep):
-
                 # Solo seleccionar columnas con esa prec y n_ep
-                df_cost_perc_n_ep = df_test_cost.loc[:, df_test_cost.columns.str.contains('_'+str(n_ep)+'_'+str(perc)+'cost_')]
-                df_n_ep_perc_n_ep = df_test_n_ep.loc[:, df_test_n_ep.columns.str.contains('_'+str(n_ep)+'_'+str(perc)+'cost_')]
+                df_cost = df_test_cost.loc[:, df_test_cost.columns.str.contains('_'+str(n_ep)+'_'+str(perc)+'cost_')]
+                df_n_ep = df_test_n_ep.loc[:, df_test_n_ep.columns.str.contains('_'+str(n_ep)+'_'+str(perc)+'cost_')]
 
-                plot_perc_n_ep_evolution(axs[0,i],df_cost_perc_n_ep,n_ep,perc,plot_title=True)
-                plot_perc_n_ep_evolution(axs[1,i],df_n_ep_perc_n_ep,n_ep,perc)
+                plot_perc_n_ep_evolution(axs[0,i],df_cost,n_ep,first_column=first_column,first_row=True)
+                axs[0,i].set_ylim(bottom=perc)
+                axs[0,i].set_xticks([])
+                axs[0,i].set_title('Test with validation cost '+str(perc))
+                plot_perc_n_ep_evolution(axs[1,i],df_cost,n_ep,first_column=first_column,first_row=True)
+                axs[1,i].set_ylim([0,perc])
+                dfs.append(df_n_ep)
+            plot_perc_n_ep_evolution(axs[2,i],df_n_ep,n_ep,all_or_CI='all',dfs=dfs,first_column=first_column)
 
-        axs[0,0].legend(title='n_ep',loc='upper left',bbox_to_anchor=(-.6, 1))
+        axs[0,0].legend(title='n_ep',loc='upper left',bbox_to_anchor=(-0.4, 1))
 
         plt.savefig(self.graph_path+'/discussion_test_cost_freq.pdf')
 
