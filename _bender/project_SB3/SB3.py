@@ -1217,12 +1217,9 @@ class Options:
                       truth_n_workers=1, # Para el truth podemos usar un numero de workers mas elevado diferente al de por defecto para validacion
                       n_epoch=10,batch_size=64, # Parametros que determinan la actualizacion de politica
                       device='auto', vec_env_type='sequential', # Parametros que determinan el tipo de ejecucion (cpu,gpu)
-
-                      policy='MlpPolicy',normalize_advantage=True,gae_lambda=0.95,gamma=0.99,ent_coef=0,learning_rate=0.0003,
+                      normalize=False, # Parametros relacionados con el entorno
+                      policy='MlpPolicy',gae_lambda=0.95,gamma=0.99,ent_coef=0,learning_rate=0.0003,
                       clip_range=0.2,max_grad_norm=0.5, vf_coef=0.5,sde_sample_freq=-1,use_sde=False, policy_kwargs=None,# Parametros del aprendizaje
-
-                      frameskip=4,obs_shape=None,obs_keep_dim=False,frame_stack=None,norm_obs=True,norm_reward=True, # Parametros del posible wrapper del entorno (por ahora solo para CarRacing-v3)
-
                       callback=None, n_eval_ep=5, eval_freq=10000, n_eval_envs=1, deterministic_eval=False,stats_window_size=100 # Parametros para criterios de rastreo
                       
                                             
@@ -1254,42 +1251,27 @@ class Options:
             EvalCallback._on_step= ModifiedFunctions_Common._on_step
 
         # Iniciar proceso de aprendizaje fijando el metodo, el env y la semilla.
-        if env_name=="CarRacing-v3":
-            def generate_env_with_wrapper(frameskip,obs_shape,obs_keep_dim,frame_stack,norm_obs,norm_reward):
-                env = gym.make(env_name)
-                env = FrameSkip(env, skip=frameskip)
-                env = YAMLCompatResizeObservation(env, obs_shape)
-                env = GrayscaleObservation(env, keep_dim=obs_keep_dim)
+        if n_workers==1:
+            env=gym.make(env_name)
+        else:
+            if vec_env_type=='sequential':# Por defecto es DummyVecEnv que se ejecuta en secuencial
                 env = make_vec_env(env_name, n_envs=n_workers)
-                env = VecFrameStack(env, n_stack=frame_stack)
-                env = VecNormalize(env, norm_obs=norm_obs, norm_reward=norm_reward)
-                return env
+            if vec_env_type=='parallel':
+                env = make_vec_env(env_name, n_envs=n_workers,vec_env_cls=SubprocVecEnv)
 
-            env=generate_env_with_wrapper(frameskip,obs_shape,obs_keep_dim,frame_stack,norm_obs,norm_reward)
-            eval_env=generate_env_with_wrapper(frameskip,obs_shape,obs_keep_dim,frame_stack,norm_obs,norm_reward)
-
-        if env_name not in ["CarRacing-v3"]:
-            if n_workers==1:
-                env=gym.make(env_name)
-            else:
-                if vec_env_type=='sequential':# Por defecto es DummyVecEnv que se ejecuta en secuencial
-                    env = make_vec_env(env_name, n_envs=n_workers)
-                if vec_env_type=='parallel':
-                    env = make_vec_env(env_name, n_envs=n_workers,vec_env_cls=SubprocVecEnv)
-
-            if n_eval_envs==1:
-                eval_env=gym.make(env_name)
-            else:
-                if vec_env_type=='sequential':
-                    eval_env = make_vec_env(env_name, n_envs=n_eval_envs)
-                if vec_env_type=='parallel':
-                    eval_env = make_vec_env(env_name, n_envs=n_eval_envs,vec_env_cls=SubprocVecEnv)
+        if n_eval_envs==1:
+            eval_env=gym.make(env_name)
+        else:
+            if vec_env_type=='sequential':
+                eval_env = make_vec_env(env_name, n_envs=n_eval_envs)
+            if vec_env_type=='parallel':
+                eval_env = make_vec_env(env_name, n_envs=n_eval_envs,vec_env_cls=SubprocVecEnv)
 
         if method=='PPO':
             model = PPO(policy,
                         env, seed=seed,
                         n_steps=n_steps_per_env,batch_size=batch_size,n_epochs=n_epoch,
-                        learning_rate=learning_rate,gamma=gamma,gae_lambda=gae_lambda,clip_range=clip_range,normalize_advantage=normalize_advantage,ent_coef=ent_coef,max_grad_norm=max_grad_norm,vf_coef=vf_coef,sde_sample_freq=sde_sample_freq,use_sde=use_sde,policy_kwargs=policy_kwargs,
+                        learning_rate=learning_rate,gamma=gamma,gae_lambda=gae_lambda,clip_range=clip_range,ent_coef=ent_coef,max_grad_norm=max_grad_norm,vf_coef=vf_coef,sde_sample_freq=sde_sample_freq,use_sde=use_sde,policy_kwargs=policy_kwargs,
                         stats_window_size=stats_window_size,
                         verbose=0,device=device)
 
@@ -1369,60 +1351,6 @@ class Options:
  
 class PackOptions:
 
-    def PPO_CarRacing(seed,experiment_name,library_dir):
-        '''Configuracion tomada de: https://github.com/DLR-RM/rl-baselines3-zoo/tree/master/hyperparams
-        CarRacing-v3:
-            env_wrapper:
-                - rl_zoo3.wrappers.FrameSkip:
-                    skip: 2
-                - rl_zoo3.wrappers.YAMLCompatResizeObservation:
-                    shape: [64, 64]
-                - gymnasium.wrappers.transform_observation.GrayscaleObservation:
-                    keep_dim: true
-            frame_stack: 2
-            normalize: "{'norm_obs': False, 'norm_reward': True}"
-            n_envs: 8
-            n_timesteps: !!float 4e6
-            policy: 'CnnPolicy'
-            batch_size: 128
-            n_steps: 512
-            gamma: 0.99
-            gae_lambda: 0.95
-            n_epochs: 10
-            ent_coef: 0.0
-            sde_sample_freq: 4
-            max_grad_norm: 0.5
-            vf_coef: 0.5
-            learning_rate: lin_1e-4
-            use_sde: True
-            clip_range: 0.2
-            policy_kwargs: "dict(log_std_init=-2,
-                                ortho_init=False,
-                                activation_fn=nn.GELU,
-                                net_arch=dict(pi=[256], vf=[256]),
-                                )"
-        '''
-
-        Options.OnPolicy_learn_process(
-            'PPO','CarRacing-v3', # pack
-            seed,4e6+.5*4e6,experiment_name,library_dir,save_policies=False, # learning process
-            n_steps_per_env=512,n_workers=8,truth_n_workers=8, # learning interaction
-            n_epoch=10,batch_size=128, # policy update
-            device='auto', vec_env_type='sequential', # execution type
-
-            policy='CnnPolicy',gae_lambda=0.95,gamma=0.99,ent_coef=0.00,max_grad_norm=0.5,vf_coef=0.5,learning_rate=0.0001,clip_range=0.2,
-            sde_sample_freq= 4, use_sde=True, 
-            policy_kwargs= dict(log_std_init=-2,
-                                ortho_init=False,
-                                activation_fn=nn.GELU,
-                                net_arch=dict(pi=[256], vf=[256]),
-                                ),  # learning process parameters
-
-            frameskip=2,obs_shape=(64, 64),obs_keep_dim=True,frame_stack=2,norm_obs=False,norm_reward=True, # env wrapper parameters
-
-            callback=True, n_eval_ep=500, eval_freq=512, n_eval_envs=16, deterministic_eval=True # selection criteria
-            )
-
     def PPO_LunarLanderContinuous(seed,experiment_name,library_dir):
 
         ''' Configuracion tomada de: https://github.com/DLR-RM/rl-baselines3-zoo/tree/master/hyperparams
@@ -1472,7 +1400,7 @@ class PackOptions:
             n_steps_per_env=2048,n_workers=32, truth_n_workers=32, # learning interaction
             n_epoch=10,batch_size=64, # policy update
             device='auto', vec_env_type='sequential', # execution type
-            policy='MlpPolicy',normalize_advantage=True,gae_lambda=0.95,gamma=0.999,ent_coef=0.0, learning_rate=3e-4, clip_range=0.18, # learning process parameters
+            policy='MlpPolicy',gae_lambda=0.95,gamma=0.999,ent_coef=0.0, learning_rate=3e-4, clip_range=0.18, # learning process parameters
             callback=True, n_eval_ep=500, eval_freq=2048, n_eval_envs=32, deterministic_eval=True # selection criteria
             )
 
@@ -1502,13 +1430,13 @@ class PackOptions:
             n_steps_per_env=512,n_workers=1,truth_n_workers=16, # learning interaction
             n_epoch=20,batch_size=32, # policy update
             device='auto', vec_env_type='sequential', # execution type
-            policy='MlpPolicy',normalize_advantage=True,gae_lambda=0.95,gamma=0.99,ent_coef=0.000585045, learning_rate=5.05041e-05, clip_range=0.1,max_grad_norm=1, vf_coef= 0.871923,# learning process parameters
+            policy='MlpPolicy',gae_lambda=0.95,gamma=0.99,ent_coef=0.000585045, learning_rate=5.05041e-05, clip_range=0.1,max_grad_norm=1, vf_coef= 0.871923,# learning process parameters
             callback=True, n_eval_ep=500, eval_freq=512, n_eval_envs=1, deterministic_eval=True # selection criteria
             )
         
     def PPO_Ant(seed,experiment_name,library_dir):
         '''
-        Ant-v4: &mujoco-defaults
+        Ant-v4: 
             normalize: true
             n_timesteps: !!float 1e6
             policy: 'MlpPolicy'
@@ -1519,7 +1447,7 @@ class PackOptions:
             seed,1e6+.5*1e6,experiment_name,library_dir,save_policies=False, # learning process
             truth_n_workers=32, # learning interaction
             device='auto', vec_env_type='sequential', # execution type
-            policy='MlpPolicy',normalize_advantage=True, # learning process parameters
+            policy='MlpPolicy', # learning process parameters
             callback=True, n_eval_ep=500, eval_freq=2048, deterministic_eval=True # selection criteria
             )
 
@@ -1553,7 +1481,7 @@ class PackOptions:
             seed,1e6+.5*1e6,experiment_name,library_dir,save_policies=False, # learning process
             truth_n_workers=16, batch_size=64,n_epoch=20,n_steps_per_env=512,# learning interaction
             device='auto', vec_env_type='sequential', # execution type
-            policy='MlpPolicy',normalize_advantage=True,gamma=0.98,learning_rate=2.0633e-05,ent_coef=0.000401762,
+            policy='MlpPolicy',gamma=0.98,learning_rate=2.0633e-05,ent_coef=0.000401762,
             clip_range=0.1,gae_lambda=0.92, max_grad_norm=0.8,vf_coef=0.58096,
             policy_kwargs=dict(
                                 log_std_init=-2,
@@ -1584,7 +1512,7 @@ class PackOptions:
             policy_kwargs: "dict(
                                 log_std_init=-2,
                                 ortho_init=False,
-                                activation_fn=nn.ReLU,
+                                activnn.ReLU,ation_fn=
                                 net_arch=dict(pi=[256, 256], vf=[256, 256])
                             )"
         '''
@@ -1594,7 +1522,7 @@ class PackOptions:
             seed,1e6+.5*1e6,experiment_name,library_dir,save_policies=False, # learning process
             truth_n_workers=16, batch_size=32,n_epoch=5,n_steps_per_env=512,# learning interaction
             device='auto', vec_env_type='sequential', # execution type
-            policy='MlpPolicy',normalize_advantage=True,gamma=0.999,learning_rate=9.80828e-05,ent_coef=0.00229519,
+            policy='MlpPolicy',gamma=0.999,learning_rate=9.80828e-05,ent_coef=0.00229519,
             clip_range=0.2,gae_lambda=0.99, max_grad_norm=0.7,vf_coef=0.835671,
             policy_kwargs=dict(
                                 log_std_init=-2,
@@ -1603,6 +1531,28 @@ class PackOptions:
                                 net_arch=dict(pi=[256, 256], vf=[256, 256])
                             ), # learning process parameters
             callback=True, n_eval_ep=500, eval_freq=512, deterministic_eval=True # selection criteria
+            )
+
+    def PPO_Swimmer(seed,experiment_name,library_dir):
+        '''
+        Swimmer-v4:
+            n_timesteps: !!float 1e6
+            policy: 'MlpPolicy'
+            gamma: 0.9999
+            n_envs: 4
+            n_steps: 1024
+            batch_size: 256
+            learning_rate: !!float 6e-4
+            gae_lambda: 0.98
+        '''
+
+        Options.OnPolicy_learn_process(
+            'PPO','Swimmer-v4', # pack
+            seed,1e6+.5*1e6,experiment_name,library_dir,save_policies=False, # learning process
+            n_workers=4,truth_n_workers=16, batch_size=256,n_steps_per_env=1024,# learning interaction
+            device='auto', vec_env_type='sequential', # execution type
+            policy='MlpPolicy',gamma=0.9999,learning_rate=6e-4,gae_lambda=0.98,
+            callback=True, n_eval_ep=500, eval_freq=1024, deterministic_eval=True # selection criteria
             )
 
 #==================================================================================================

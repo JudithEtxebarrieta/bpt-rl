@@ -92,14 +92,19 @@ class DataGenerator:
         self.seeds=seeds
         self.pack=pack
 
-    def add_test_cost_truth(self,optimal_cost,optimal_freq,single_seed=None):
-
+    def add_test_cost_truth(self,optimal_cost,optimal_n_ep_freq,single_seed=None):
+        n_ep,freq=optimal_n_ep_freq
         if single_seed==None:
             for i in tqdm(range(len(self.seeds))):
-                self.add_truth_to_csv(self.data_path+'df_test_truth.csv',self.pack,self.seeds[i],conf= [None,optimal_freq],criteria='best_val_with_cost',cost_perc=optimal_cost)
-            
+                if n_ep==None:
+                    self.add_truth_to_csv(self.data_path+'df_test_truth.csv',self.pack,self.seeds[i],conf= optimal_n_ep_freq,criteria='best_val_with_cost_n_ep',cost_perc=optimal_cost)
+                if freq==None:
+                    self.add_truth_to_csv(self.data_path+'df_test_truth.csv',self.pack,self.seeds[i],conf= optimal_n_ep_freq,criteria='best_val_with_cost_freq',cost_perc=optimal_cost)
         else:
-            self.add_truth_to_csv(self.data_path+'df_test_truth_with_cost'+str(single_seed)+'.csv',self.pack,single_seed,conf= [None,optimal_freq],criteria='best_val_with_cost',cost_perc=optimal_cost)
+            if n_ep==None:
+                self.add_truth_to_csv(self.data_path+'df_test_truth_with_cost'+str(single_seed)+'.csv',self.pack,single_seed,conf=optimal_n_ep_freq,criteria='best_val_with_cost_n_ep',cost_perc=optimal_cost)
+            if freq==None:
+                self.add_truth_to_csv(self.data_path+'df_test_truth_with_cost'+str(single_seed)+'.csv',self.pack,single_seed,conf=optimal_n_ep_freq,criteria='best_val_with_cost_freq',cost_perc=optimal_cost)
 
     def add_truth_to_csv(self,path,pack,seed,conf=[None,None],criteria='truth_best',cost_perc=0.1):
         '''
@@ -923,14 +928,14 @@ class Selector:
                 index=0
                 if (time_one_ep+validation_time)/time <=float(cost_perc): # Estimar si solo con un episodio ya nos pasamos
                     continue_val=True
-                    while continue_val:
+                    while continue_val and index<499:
                         # Actualizar estimacion pesimista de coste de evaluar un episodio
                         if times_per_ep[index]>time_one_ep:
                             time_one_ep=times_per_ep[index]
                         # Comprobar si vamos a seguir validando otro episodio mas o no
                         if (current_times[index]+time_one_ep+validation_time)/time<=float(cost_perc):
                             continue_val=True
-                            index=[499 if index+1>499 else index+1][0] # puede haber casos en los que podemos evaluar mas episodios que los guardados, para que no de error ponemos el tope en 500
+                            index+=1
                         else:
                             continue_val=False
                 else:

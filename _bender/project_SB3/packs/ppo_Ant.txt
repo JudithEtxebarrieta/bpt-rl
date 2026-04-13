@@ -1,4 +1,5 @@
-Ant-v4: &mujoco-defaults
+Ant-v4: 
+  &mujoco-defaults
   normalize: true
   n_timesteps: !!float 1e6
   policy: 'MlpPolicy'
