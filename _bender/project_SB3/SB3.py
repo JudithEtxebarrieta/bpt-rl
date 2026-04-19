@@ -67,6 +67,7 @@ from rl_zoo3.wrappers import FrameSkip, YAMLCompatResizeObservation
 from gymnasium.wrappers import GrayscaleObservation
 from stable_baselines3.common.vec_env import VecFrameStack, VecNormalize
 
+
 SelfOffPolicyAlgorithm = TypeVar("SelfOffPolicyAlgorithm", bound="OffPolicyAlgorithm")
 SelfOnPolicyAlgorithm = TypeVar("SelfOnPolicyAlgorithm", bound="OnPolicyAlgorithm")
 
@@ -120,7 +121,7 @@ class ModifiedFunctions_Common:
     def _on_step(self) -> bool:
 
         #####################################
-        global all_initial_states, eval_env_name, make_eval_deterministic,n_envs_for_truth_eval, n_policy, make_vec_env_type, make_eval_for_test
+        global all_initial_states, eval_env_name, make_eval_deterministic,make_normalize, n_envs_for_truth_eval, n_policy, make_vec_env_type, make_eval_for_test
 
         def my_evaluate_policy(
             model: "type_aliases.PolicyPredictor",
@@ -176,29 +177,25 @@ class ModifiedFunctions_Common:
 
                 if make_eval_for_test:
 
-                    if env.num_envs==1:
-                        env=gym.make(eval_env_name)
-                    else:
-                        if make_vec_env_type=='sequential':
-                            env = make_vec_env(eval_env_name, n_envs=env.num_envs)
-                        if make_vec_env_type=='parallel':
-                            env = make_vec_env(eval_env_name, n_envs=env.num_envs,vec_env_cls=SubprocVecEnv)
+                    if make_vec_env_type=='sequential':
+                        env = make_vec_env(eval_env_name, n_envs=env.num_envs)
+                    if make_vec_env_type=='parallel':
+                        env = make_vec_env(eval_env_name, n_envs=env.num_envs,vec_env_cls=SubprocVecEnv)
 
                 if not make_eval_for_test:
 
-                    if env.num_envs==1:
-                        env=gym.make(eval_env_name)
-                    else:
-                        if make_vec_env_type=='sequential':
-                            env = make_vec_env(eval_env_name, n_envs=n_envs_for_truth_eval)
-                        if make_vec_env_type=='parallel':
-                            env = make_vec_env(eval_env_name, n_envs=n_envs_for_truth_eval,vec_env_cls=SubprocVecEnv)
-
-
+                    if make_vec_env_type=='sequential':
+                        env = make_vec_env(eval_env_name, n_envs=n_envs_for_truth_eval)
+                    if make_vec_env_type=='parallel':
+                        env = make_vec_env(eval_env_name, n_envs=n_envs_for_truth_eval,vec_env_cls=SubprocVecEnv)
 
             if not isinstance(env, VecEnv):
-                print('ENTRE AQUI')
                 env = DummyVecEnv([lambda: env])  # type: ignore[list-item, return-value]
+
+            if make_normalize: #MODIFICACION: para cuando el parametro normalize=true
+                env = VecNormalize(env, training=False, norm_reward=False)
+                sync_envs_normalization(self.training_env, env)
+
 
             if make_eval_deterministic:# MODIFICADO: para que sea determinista y considerar diferentes estados iniciales para test y para truth
                 if make_eval_for_test: 
@@ -520,6 +517,7 @@ class ModifiedFunctions_OnPolicy:
 
         ########################MODIFICACION
         global total_time_seconds, process_dir
+
 
         total_time_seconds.pause()
         global n_policy,df_traj
@@ -1228,7 +1226,7 @@ class Options:
                         # ajustaremos solo aquellos que presenten una configuracion predefinida diferente segun SB3 Zoo.
         
         # Variables globales
-        global df_traj, process_dir,make_policy_saving, all_initial_states, eval_env_name, make_eval_deterministic, make_vec_env_type, n_envs_for_truth_eval
+        global df_traj, process_dir,make_policy_saving, all_initial_states, eval_env_name, make_eval_deterministic, make_vec_env_type, n_envs_for_truth_eval, make_normalize
         df_traj=[]
         make_policy_saving=save_policies
         process_dir=library_dir+'/'+experiment_name+'/process_info'
@@ -1237,6 +1235,7 @@ class Options:
         n_envs_for_truth_eval=truth_n_workers
         make_eval_deterministic=deterministic_eval
         make_vec_env_type=vec_env_type
+        make_normalize=normalize
 
         # Crear nuevos directorios.
         os.makedirs(process_dir)
@@ -1251,21 +1250,25 @@ class Options:
             EvalCallback._on_step= ModifiedFunctions_Common._on_step
 
         # Iniciar proceso de aprendizaje fijando el metodo, el env y la semilla.
-        if n_workers==1:
-            env=gym.make(env_name)
-        else:
-            if vec_env_type=='sequential':# Por defecto es DummyVecEnv que se ejecuta en secuencial
-                env = make_vec_env(env_name, n_envs=n_workers)
-            if vec_env_type=='parallel':
-                env = make_vec_env(env_name, n_envs=n_workers,vec_env_cls=SubprocVecEnv)
 
-        if n_eval_envs==1:
-            eval_env=gym.make(env_name)
-        else:
-            if vec_env_type=='sequential':
-                eval_env = make_vec_env(env_name, n_envs=n_eval_envs)
-            if vec_env_type=='parallel':
-                eval_env = make_vec_env(env_name, n_envs=n_eval_envs,vec_env_cls=SubprocVecEnv)
+        # ----- Entorno de entrenamiento
+
+        if vec_env_type=='sequential':# Por defecto es DummyVecEnv que se ejecuta en secuencial
+            env = make_vec_env(env_name, n_envs=n_workers)
+        if vec_env_type=='parallel':
+            env = make_vec_env(env_name, n_envs=n_workers,vec_env_cls=SubprocVecEnv)
+
+        # ----- Entorno de validacion
+        if vec_env_type=='sequential':
+            eval_env = make_vec_env(env_name, n_envs=n_eval_envs)
+        if vec_env_type=='parallel':
+            eval_env = make_vec_env(env_name, n_envs=n_eval_envs,vec_env_cls=SubprocVecEnv)
+
+        # ----- En caso de normalizacion
+        if normalize:
+            env = VecNormalize(env)
+            eval_env = VecNormalize(eval_env, training=False, norm_reward=False)
+
 
         if method=='PPO':
             model = PPO(policy,
@@ -1397,7 +1400,7 @@ class PackOptions:
         Options.OnPolicy_learn_process(
             'PPO','BipedalWalker-v3', # pack
             seed,5e6+.5*5e6,experiment_name,library_dir,save_policies=False, # learning process
-            n_steps_per_env=2048,n_workers=32, truth_n_workers=32, # learning interaction
+            n_steps_per_env=2048,n_workers=32, truth_n_workers=32, normalize=True, # learning interaction
             n_epoch=10,batch_size=64, # policy update
             device='auto', vec_env_type='sequential', # execution type
             policy='MlpPolicy',gae_lambda=0.95,gamma=0.999,ent_coef=0.0, learning_rate=3e-4, clip_range=0.18, # learning process parameters
@@ -1427,7 +1430,7 @@ class PackOptions:
         Options.OnPolicy_learn_process(
             'PPO','Walker2d-v4', # pack
             seed,1e6+.5*1e6,experiment_name,library_dir,save_policies=False, # learning process
-            n_steps_per_env=512,n_workers=1,truth_n_workers=16, # learning interaction
+            n_steps_per_env=512,n_workers=1,truth_n_workers=16, normalize=True, # learning interaction
             n_epoch=20,batch_size=32, # policy update
             device='auto', vec_env_type='sequential', # execution type
             policy='MlpPolicy',gae_lambda=0.95,gamma=0.99,ent_coef=0.000585045, learning_rate=5.05041e-05, clip_range=0.1,max_grad_norm=1, vf_coef= 0.871923,# learning process parameters
@@ -1445,7 +1448,7 @@ class PackOptions:
         Options.OnPolicy_learn_process(
             'PPO','Ant-v4', # pack
             seed,1e6+.5*1e6,experiment_name,library_dir,save_policies=False, # learning process
-            truth_n_workers=32, # learning interaction
+            truth_n_workers=32,normalize=True, # learning interaction
             device='auto', vec_env_type='sequential', # execution type
             policy='MlpPolicy', # learning process parameters
             callback=True, n_eval_ep=500, eval_freq=2048, deterministic_eval=True # selection criteria
@@ -1479,7 +1482,7 @@ class PackOptions:
         Options.OnPolicy_learn_process(
             'PPO','HalfCheetah-v4', # pack
             seed,1e6+.5*1e6,experiment_name,library_dir,save_policies=False, # learning process
-            truth_n_workers=16, batch_size=64,n_epoch=20,n_steps_per_env=512,# learning interaction
+            truth_n_workers=16, batch_size=64,n_epoch=20,n_steps_per_env=512, normalize=True,# learning interaction
             device='auto', vec_env_type='sequential', # execution type
             policy='MlpPolicy',gamma=0.98,learning_rate=2.0633e-05,ent_coef=0.000401762,
             clip_range=0.1,gae_lambda=0.92, max_grad_norm=0.8,vf_coef=0.58096,
@@ -1519,7 +1522,7 @@ class PackOptions:
 
         Options.OnPolicy_learn_process(
             'PPO','Hopper-v4', # pack
-            seed,1e6+.5*1e6,experiment_name,library_dir,save_policies=False, # learning process
+            seed,1e6+.5*1e6,experiment_name,library_dir,save_policies=False, normalize=True, # learning process
             truth_n_workers=16, batch_size=32,n_epoch=5,n_steps_per_env=512,# learning interaction
             device='auto', vec_env_type='sequential', # execution type
             policy='MlpPolicy',gamma=0.999,learning_rate=9.80828e-05,ent_coef=0.00229519,
