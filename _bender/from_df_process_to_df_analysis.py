@@ -106,6 +106,19 @@ class DataGenerator:
             if freq==None:
                 self.add_truth_to_csv(self.data_path+'df_test_truth_with_cost'+str(single_seed)+'.csv',self.pack,single_seed,conf=optimal_n_ep_freq,criteria='best_val_with_cost_freq',cost_perc=optimal_cost)
 
+    def add_all_criteria_eff(self,optimal_train_n_ep,optimal_test_cost,optimal_test_n_ep,single_seed=None):
+        
+        if single_seed==None:
+            for i in tqdm(range(len(self.seeds))):
+                self.add_criteria_eff_to_csv(self.data_path+'df_last_eff.csv',self.pack,self.seeds[i],criteria='last')
+                self.add_criteria_eff_to_csv(self.data_path+'df_train_eff.csv',self.pack,self.seeds[i],conf=[optimal_train_n_ep,None,None],criteria='best_train')
+                self.add_criteria_eff_to_csv(self.data_path+'df_test_eff.csv',self.pack,self.seeds[i],conf=[optimal_test_n_ep,None,optimal_cost],criteria='best_val_with_cost_freq')
+
+        else:
+            self.add_criteria_eff_to_csv(self.data_path+'df_last_eff'+str(single_seed)+'.csv',self.pack,single_seed,criteria='last')
+            self.add_criteria_eff_to_csv(self.data_path+'df_train_eff'+str(single_seed)+'.csv',self.pack,single_seed,conf=[optimal_train_n_ep,None,None],criteria='best_train')
+            self.add_criteria_eff_to_csv(self.data_path+'df_test_eff'+str(single_seed)+'.csv',self.pack,single_seed,conf=[optimal_test_n_ep,None,optimal_test_cost],criteria='best_val_with_cost_freq')
+
     def add_truth_to_csv(self,path,pack,seed,conf=[None,None],criteria='truth_best',cost_perc=0.1):
         '''
         Añadir (si no existe) una columna con el truth de las politicas seleccionadas por los criterios.
@@ -222,7 +235,7 @@ class DataGenerator:
             df_prec=ProcessEstimator.read_create_estimates_csv(path_prec,generator.estimator.df_train.shape[0])
             df_cost=ProcessEstimator.read_create_estimates_csv(path_cost,generator.estimator.df_train.shape[0])
             if pack+str(seed)+str(conf)+'_'+metric not in df_prec.columns:
-                eff_evol,cost_evol=generator.effectiveness_evolution(x_times,n_ep=n_ep,freq=x_times[::freq],criteria=criteria,metric=metric,for_analyzer=True,cost_perc=cost_perc)
+                eff_evol,cost_evol=generator.precision_evolution(x_times,n_ep=n_ep,freq=x_times[::freq],criteria=criteria,metric=metric,for_analyzer=True,cost_perc=cost_perc)
                 df_prec[pack+str(seed)+str(conf)+'_'+metric]=eff_evol
                 df_cost[pack+str(seed)+str(conf)+'_'+metric]=np.array(cost_evol) / np.array(x_times)
                 df_prec.to_csv(path_prec,index=False)
@@ -234,7 +247,7 @@ class DataGenerator:
             df_cost=ProcessEstimator.read_create_estimates_csv(path_cost,generator.estimator.df_train.shape[0])
             df_n_ep=ProcessEstimator.read_create_estimates_csv(path_n_ep,generator.estimator.df_train.shape[0])
             if pack+str(seed)+str(conf)+'_'+metric not in df_prec.columns:
-                eff_evol,cost_evol,val_n_ep=generator.effectiveness_evolution(x_times,n_ep=n_ep,freq=x_times[::freq],criteria=criteria,metric=metric,for_analyzer=True,cost_perc=cost_perc)
+                eff_evol,cost_evol,val_n_ep=generator.precision_evolution(x_times,n_ep=n_ep,freq=x_times[::freq],criteria=criteria,metric=metric,for_analyzer=True,cost_perc=cost_perc)
                 df_prec[pack+str(seed)+str(conf)+'_'+metric]=eff_evol
                 df_cost[pack+str(seed)+str(conf)+'_'+metric]=np.array(cost_evol) / np.array(x_times)
                 df_n_ep[pack+str(seed)+str(conf)+'_'+metric]=val_n_ep
@@ -245,9 +258,44 @@ class DataGenerator:
         if criteria in ['last','best_train']: 
             df=ProcessEstimator.read_create_estimates_csv(path,generator.estimator.df_train.shape[0])
             if pack+str(seed)+str(conf)+'_'+metric not in df.columns:
-                eff_evol=generator.effectiveness_evolution(x_times,n_ep=n_ep,freq=None,criteria=criteria,metric=metric,for_analyzer=True,cost_perc=cost_perc)
+                eff_evol=generator.precision_evolution(x_times,n_ep=n_ep,freq=None,criteria=criteria,metric=metric,for_analyzer=True,cost_perc=cost_perc)
                 df[pack+str(seed)+str(conf)+'_'+metric]=eff_evol
                 df.to_csv(path,index=False)
+
+    def add_criteria_eff_to_csv(self,path,pack,seed,conf=[None,None,None],criteria='truth_best',metric='first_time_to_same_reward'):
+        
+        '''
+        Añadir (si no existe) una columna con la eficacia de las politicas seleccionadas por los criterios.
+
+        `path`: directorio asociado al .csv en donde queremos añadir una nueva evolucion de eficiencia asociada a un proceso.
+        `criteria`: puede ser 'truth_best', 'worst', 'last', 'best_train', 'best_val', 'best_val_with_cost'
+        '''
+        
+        # Extraer informacion de variables "comprimidas"
+        n_ep,freq,cost_perc=conf
+
+        # Determinar el label de la configuracion dependiendo del criterio que se usara para el nombre de la columna
+        if criteria=='last':
+            conf=''
+        if n_ep!=None and freq==None:
+            conf='_'+str(n_ep)
+        if n_ep!=None and freq!=None:
+            conf='_'+str(n_ep)+'_'+str(freq)
+        if criteria=='best_val_with_cost_n_ep':
+            conf='_'+str(cost_perc)+'cost_'+str(freq)
+        if criteria=='best_val_with_cost_freq':
+            conf='_'+str(n_ep)+'_'+str(cost_perc)+'cost'
+
+        # Inicializar clase que permite calcular las evoluciones 
+        generator=EvolutionGenerator(pack,seed)
+        x_times=generator.estimator.df_train['time_seconds'].tolist()
+        
+        # Leer/generar csv para almacenar la nueva evolucion si no esta ya almacenada
+        df=ProcessEstimator.read_create_estimates_csv(path,generator.estimator.df_train.shape[0])
+        if pack+str(seed)+str(conf)+'_'+metric not in df.columns:
+            eff_evol=generator.efficiency_evolution(x_times,n_ep=n_ep,freq=None,criteria=criteria,metric=metric,cost_perc=cost_perc)
+            df[pack+str(seed)+str(conf)+'_'+metric]=eff_evol
+            df.to_csv(path,index=False)
 
     def add_deg_to_csv(self,path,pack,seed,global_deg_metric='norm_worsening_to_improvement',local_deg_metric='reward_diff'):
         '''
@@ -453,7 +501,8 @@ class ProcessEstimator:
             ep_rw_sorted = [x for _, x in sorted(zip(ep_last_workers, ep_rw_workers))] # ordenar ep_rw segun ep_last
 
             if len(ep_rw_sorted)<n_traj_ep:
-                ep_rw_policy.append(np.mean(ep_rw_sorted))
+                ep_rw_policy.append(np.mean(ep_rw_sorted) if ep_rw_sorted else -np.inf) # habra casos en los que al inicio ni siquiera completamos un solo episodio
+
             else:
                 ep_rw_policy.append(np.mean(ep_rw_sorted[-n_traj_ep:]))
 
@@ -764,7 +813,7 @@ class PointEstimator:
 
         return degradation_level
     
-    def effectiveness(self,elapsed_time,n_policy,normalized,metric='relative_perc_criteria_best',val_time=0):
+    def precision(self,elapsed_time,n_policy,normalized,metric='relative_perc_criteria_best',val_time=0):
 
         '''
         Diferentes opciones para medir la precision de seleccion:  'relative_perc_criteria_best'
@@ -791,7 +840,30 @@ class PointEstimator:
             else:
                 return (EER_criteria_best-min(EER_list_without_val))/(EER_real_best-min(EER_list_without_val))
  
-    
+    def efficiency(self,elapsed_time,n_policy,normalized,metric='first_time_to_same_reward'):
+
+        '''
+        Medir la eficiencia de seleccion
+
+        Definida en [0,1], 1 es beuno (se necesita todo el tiempo de aprendizaje para alcanzar ese performance) y 
+        0 malo (se necesita 0% del tiempo total invertido para alcanzar ese performance).
+        '''
+            
+        if metric=='first_time_to_same_reward':
+
+            last_policy=self.selector.last_policy(elapsed_time)
+
+            if not normalized:
+                EER_list=self.df_test_estimates[(self.df_test['n_policy']<=last_policy) ]['truth'].tolist()
+            if normalized:
+                EER_list=self.df_test_estimates[(self.df_test['n_policy']<=last_policy) ]['truth_norm'].tolist()
+
+
+            EER_criteria_best=EER_list[n_policy]
+            indx_first_time = next((i for i, EER_now in enumerate(EER_list) if EER_now >= EER_criteria_best), None)
+
+            return (indx_first_time+1)/(n_policy+1)
+  
     def best_estimation_training(self,elapsed_time,n_traj_ep):
 
         # Lista de EER estimados con datos de train de la secunencia de politicas visitada hasta el momento
@@ -1031,7 +1103,7 @@ class EvolutionGenerator:
     def degradation_evolution(self,x_times,global_metric,local_metric):
         return [self.estimator.degradation_level(time,global_metric,local_metric) for time in x_times]
 
-    def effectiveness_evolution(self,x_times,n_ep=None,freq=None,criteria='last',normalized=False,for_analyzer=False,
+    def precision_evolution(self,x_times,n_ep=None,freq=None,criteria='last',normalized=False,for_analyzer=False,
                                 local_deg_metric=None,metric='perc_criteria_best',cost_perc=0.1):
         
         y_eff=[]
@@ -1060,7 +1132,7 @@ class EvolutionGenerator:
                 val_time=0
 
 
-            eff=self.estimator.effectiveness(time+val_time,policy_id,normalized=normalized,metric=metric,val_time=val_time)
+            eff=self.estimator.precision(time+val_time,policy_id,normalized=normalized,metric=metric,val_time=val_time)
             y_eff.append(eff)
 
         if criteria in ['best_val']:
@@ -1069,7 +1141,32 @@ class EvolutionGenerator:
             return y_eff, x_extras, val_n_ep # para el ultimo elapsed_time es cuando se almacenan lod n_ep de todas las politicas validadas
         if criteria not in ['best_val','best_val_with_cost_n_ep','best_val_with_cost_freq']:
             return y_eff
+    
+    def efficiency_evolution(self,x_times,n_ep=None,freq=None,criteria='last',normalized=False,metric='first_time_to_same_reward',cost_perc=0.1):
         
+        y_eff=[]
+        for time in x_times:
+            if criteria=='truth_best':
+                policy_id=self.selector.truth_best_policy(time)
+            if criteria=='worst':
+                policy_id=self.selector.worst_policy(time)
+            if criteria=='last':
+                policy_id=self.selector.last_policy(time)
+            if criteria=='best_train':
+                policy_id=self.selector.best_policy_training(time,n_ep)
+            if criteria=='best_val':
+                policy_id,_=self.selector.best_policy_validation(time,n_ep,freq)
+            if criteria =='best_val_with_cost_n_ep':
+                policy_id,_,_=self.selector.best_policy_validation_with_cost(time,cost_perc,freq,with_cost='n_ep')
+            if criteria =='best_val_with_cost_freq':
+                policy_id,_,_=self.selector.best_policy_validation_with_cost(time,cost_perc,n_ep,with_cost='freq')
+
+            eff=self.estimator.efficiency(time,policy_id,normalized=normalized,metric=metric)
+            y_eff.append(eff)
+
+
+        return y_eff
+    
     def truth_evolution(self,x_times,n_ep=None,freq=None,criteria='last',cost_perc=0.1):
 
         '''
@@ -1131,6 +1228,7 @@ pack='pack_PPO_Walker2d'
 default_test_conf=[5,20] 
 optimal_cost=0.2
 optimal_freq=1
+optimal_train_n_ep,optimal_test_cost,optimal_test_n_ep=5,0.2,5
 
 if __name__ == "__main__":
 
@@ -1143,6 +1241,10 @@ if __name__ == "__main__":
     # Generar los datos de test cost con configuracion optima detectada (cada semilla en un CPU para hacerlo mas rapido)
     datagenerator=DataGenerator(pack,seed,already_generated_main_data=True)
     datagenerator.add_test_cost_truth(optimal_cost,optimal_freq,single_seed=seed)
+
+    # Generar los datos de efficiencia para last,train y test seleccionados (cada semilla en un CPU para hacerlo mas rapido)
+    datagenerator=DataGenerator(pack,seed,already_generated_main_data=True)
+    datagenerator.add_all_criteria_eff(optimal_train_n_ep,optimal_test_cost,optimal_test_n_ep,single_seed=seed)
 
     # Juntar df con todas las semillas para bajar al PC
     DataConverter.join_df_analysis_seed(library_dir+'/'+pack+'/analysis_data/',list(range(1,31)),only_test_with_cost_truth=True)
