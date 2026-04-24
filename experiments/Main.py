@@ -574,6 +574,32 @@ class DataConverter:
                 stabilization+=df_pack_seed[b:]
 
             return initialization,learning,stabilization
+        
+        if which_graph in ['last_prec','train_prec','test_prec']:
+            df=pd.read_csv(path[1])
+            df = df.filter(like=pack) # Solo columnas del pack
+            df = df.filter(regex='_'+prec_metric+"$") # Solo columnas del pack con prec indicada
+
+            # Almacenar degradaciones por region
+            initialization,learning,stabilization=[],[],[]
+
+            if which_graph=='last_prec':
+                conf=''
+            if which_graph=='train_prec':
+                conf=train_conf
+            if which_graph=='test_prec':
+                conf=test_conf
+
+            for pack_seed in tqdm(df_limits['pack_seed'],desc="Data for deg graphs"):
+                a=int(df_limits.loc[df_limits['pack_seed'] == pack_seed, 'a'])
+                b=int(df_limits.loc[df_limits['pack_seed'] == pack_seed, 'b'])
+
+                df_pack_seed= df.filter(like=pack_seed+'_'+conf).iloc[:, 0].tolist()
+                initialization+=df_pack_seed[:a]
+                learning+=df_pack_seed[a:b]
+                stabilization+=df_pack_seed[b:]
+
+            return initialization,learning,stabilization
 
         if which_graph=='how_times_best':
             # Quedarnos unicamente con los datos necesarios
@@ -2687,68 +2713,45 @@ class Grapher:
         #---- Eficacia
         def plot_resource_allocation(ax, listas, colors):
 
-            offset = 0
-            separacion = 1.0
-
-            # 1. aplanar todo para obtener rango global
+            # 1. rango global
             all_data = [x for lista in listas for sub in lista for x in sub]
             min_val = min(all_data)
             max_val = max(all_data)
-
-            # bins comunes para todos
             bins = np.linspace(min_val, max_val, 4)
             width = bins[1] - bins[0]
+            n_groups = len(listas)
 
-            global_max = 0
+            # espacio interno dentro de cada bin
+            group_height = width / (n_groups + 1)
+
+            # 2. calcular histogramas
             histogramas = []
-
-            # 2. calcular histogramas con bins comunes
             for lista_de_listas in listas:
                 datos = [x for sub in lista_de_listas for x in sub]
                 counts, _ = np.histogram(datos, bins=bins)
                 histogramas.append(counts)
-                global_max = max(global_max, counts.max())
 
-            num_grid = 4
+            # 3. dibujar: bins apilados verticalmente
+            for b in range(len(bins) - 1):
+                y_base = bins[b]
+                for i, counts in enumerate(histogramas):
+                    y = y_base + (i + 1) * group_height
+                    ax.barh(y,counts[b],height=group_height * 0.8,left=0,color=colors[i],align='center')
 
-            # 3. dibujar
-            for i, counts in enumerate(histogramas):
+            # 4. estética
+            ax.set_ylim(min_val, max_val)
+            ax.set_xlim(0, max(max(h) for h in histogramas) * 1.1)
 
-                # grid local por bloque
-                for g in range(num_grid + 1):
-                    y = offset + g * global_max / num_grid
-                    ax.axhline(
-                        y,
-                        color='lightgray',
-                        linestyle='--',
-                        linewidth=0.5,
-                        alpha=0.5
-                    )
+            bin_centers = bins[:-1] + width / 2
+            ax.set_yticks(bin_centers)
 
-                # dibujar barras
-                bars = ax.bar(
-                    bins[:-1],
-                    counts,
-                    width=width,
-                    bottom=offset,
-                    align='edge',
-                    color=colors[i]
-                )
+            ax.set_xlabel('Number of times')
+            ax.set_ylabel('Truth values')
+            ax.set_yticklabels(["low","middle","high"])
 
-                # Añadir etiquetas encima de cada barra
-                for j, count in enumerate(counts):
-                    if count > 0:  # opcional
-                        x = bins[j] + width / 2
-                        y = offset + count + 0.02 * global_max  # pequeño margen
-                        ax.text(x,y,str(count),ha='center',va='bottom',fontsize=8)
-
-                offset += global_max + separacion
-
-            ax.set_ylim(0, offset)
-            ax.set_xlim(min_val, max_val)
-            ax.set_yticks([])
-            ax.set_xlabel('Truth values')
-            ax.set_ylabel('Number of times')       
+            for label in ax.get_yticklabels():
+                label.set_rotation(0)
+   
         plot_resource_allocation(axs[1,0],
                                  [matrix_best,matrix_last,matrix_train_default,matrix_test_default,matrix_test],
                                  ['black','blue','orange','purple','green'])
