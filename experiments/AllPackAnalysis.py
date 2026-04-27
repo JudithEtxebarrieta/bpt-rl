@@ -20,6 +20,19 @@ local_deg_metric='reward_diff'
 prec_metric='relative_perc_criteria_best'
 eff_metric='first_time_to_same_reward'
 
+NAME_TO_ABBR = {
+    'LunarLanderContinuous': 'LLC',
+    'BipedalWalker': 'BW',
+    'Ant': 'A',
+    'Hopper': 'H',
+    'HalfCheetah': 'HC',
+    'Walker2d': 'W2d',
+    'Swimmer': 'S'
+}
+
+def abbreviate(env_name: str) -> str:
+    return NAME_TO_ABBR.get(env_name, env_name)
+
 class Grapher():
 
     def __init__(self,library,all_packs,seeds,data_path,figure_path):
@@ -29,14 +42,14 @@ class Grapher():
         self.data_path=data_path
         self.figure_path=figure_path
 
+    def deg_prec_eff(self):
 
-    def degradation(self):
-
+        # Funciones para plotear datos pack-region
         def plot_pack_degradation(ax,deg_list,pack_name='',title='',not_last_pack=False):
 
             data = np.array(deg_list)
 
-            bins = 10
+            bins = 8
             bin_edges = np.linspace(0, 1, bins + 1)
             counts, _ = np.histogram(data, bins=bin_edges)
             
@@ -56,14 +69,56 @@ class Grapher():
 
             ax.set_xlim(-0.05, 1.05)
             ax.set_title(title)
-            ax.set_ylabel(pack_name,rotation=0, labelpad=80)
+            ax.set_ylabel(abbreviate(pack_name), rotation=0, labelpad=20)
+            ax.set_xticks([0, 0.25, 0.5, 0.75, 1])
+            ax.set_xticklabels(['0', '0.25', '0.5', '0.75', '1'])
+
             if not_last_pack:   
                 ax.set_xticks([])
             ax.set_yticks([]) 
 
-        fig, axs = plt.subplots(len(self.all_packs),3, figsize=(10,0.5*len(self.all_packs)))
-        plt.subplots_adjust(top=0.9,bottom=0.1,left=0.2,right=0.98, hspace=0.3,wspace=0.03)
+        def plot_pack_criteria_prec_or_eff(ax,listas,pack_name='',title='',last_pack=False):
+            colors=['green','orange','blue']
+            color_marker_map = {'green': 's','orange': '^','blue': 'o'}
+            for y, data,color in zip(range(len(listas)), listas,colors):
 
+                ax.hlines(y, np.percentile(data, 25), np.percentile(data, 75), color=color,linewidth=1)
+                ax.vlines(np.percentile(data, 25), y - 0.2, y + 0.2, color=color)
+                ax.vlines(np.percentile(data, 75), y - 0.2, y + 0.2, color=color)
+                ax.plot(np.median(data), y, color_marker_map[color], color=color,markersize=4)
+
+            ax.grid(axis='x', linestyle='--',alpha=0.4)
+            ax.set_title(title)
+            ax.set_xlim(-0.05,1.05)
+            ax.set_ylabel(abbreviate(pack_name), rotation=0, labelpad=20)
+            ax.set_xticks([0, 0.25, 0.5, 0.75, 1])
+            ax.set_xticklabels(['0', '0.25', '0.5', '0.75', '1'])
+            ax.set_yticks([])
+            ax.tick_params(axis='x', labelsize=8)
+            if not last_pack:
+                ax.tick_params(axis='x', labelbottom=False)
+            else:
+                if pack_name!='' and prec_or_eff=='prec':
+            
+                    legend_elements = [
+                        Line2D([0], [0], marker='o', color='blue', label='Last', markersize=6, linestyle=''),
+                        Line2D([0], [0], marker='^', color='orange', label='Train', markersize=6, linestyle=''),
+                        Line2D([0], [0], marker='s', color='green', label='Test', markersize=6, linestyle='')
+                    ]
+                    ax.legend(handles=legend_elements, loc='upper center',bbox_to_anchor=(1, -0.4), ncol=3, frameon=False)
+            
+        # Cargar datos necesarios
+        df_conf=pd.read_csv(self.data_path+'/configurations.csv')
+        train_conf=str(int(df_conf.loc[df_conf["pack"] == 'all', "train_opt"].iloc[0]))
+        conf_str=df_conf.loc[df_conf["pack"] == 'all', "test_cost_freq_opt"].iloc[0]
+        test_conf=conf_str.split('_')[0]+'_'+conf_str.split('_')[1]+'cost'
+            
+        # Graficas
+        fig, axs = plt.subplots(len(self.all_packs),3*3+2, figsize=(5*3,0.6*len(self.all_packs)),
+                                    gridspec_kw={'width_ratios': [1,1,1,0.35,1,1,1,0.35,1,1,1]})
+        plt.subplots_adjust(top=0.95,bottom=0.15,left=0.05,right=0.98, hspace=0.0,wspace=0.0)
+
+        #---- Degradacion
         for i,pack in enumerate(all_packs):
 
             pack_path=self.data_path+'/'+pack.replace('pack',self.library)+'/'
@@ -80,52 +135,9 @@ class Grapher():
             plot_pack_degradation(axs[i,0],deg1,pack_name=pack.replace('pack_PPO_',''),title=title[0],not_last_pack=not_last_pack)
             plot_pack_degradation(axs[i,1],deg2,title=title[1],not_last_pack=not_last_pack)
             plot_pack_degradation(axs[i,2],deg3,title=title[2],not_last_pack=not_last_pack)
-        
-        plt.savefig(self.figure_path+'/all_setups/degradation.pdf')
 
-    def criteria_precision_or_efficiency(self,prec_or_eff='prec'):
-
-        def plot_pack_criteria_prec_or_eff(ax,listas,pack_name='',title='',last_pack=False):
-            colors=['green','orange','blue']
-            color_marker_map = {'green': 's','orange': '^','blue': 'o'}
-            for y, data,color in zip(range(len(listas)), listas,colors):
-
-                ax.hlines(y, np.percentile(data, 25), np.percentile(data, 75), color=color,linewidth=1)
-                ax.vlines(np.percentile(data, 25), y - 0.2, y + 0.2, color=color)
-                ax.vlines(np.percentile(data, 75), y - 0.2, y + 0.2, color=color)
-                ax.plot(np.median(data), y, color_marker_map[color], color=color,markersize=4)
-
-            ax.grid(axis='x', linestyle='--',alpha=0.4)
-            ax.set_title(title)
-            ax.set_xlim(-0.05,1.05)
-            ax.set_ylabel(pack_name,rotation=0, labelpad=70,fontsize=8)
-            ax.set_yticks([])
-            ax.tick_params(axis='x', labelsize=8)
-            if not last_pack:
-                ax.tick_params(axis='x', labelbottom=False)
-            else:
-                if pack_name!='':
-            
-                    legend_elements = [
-                        Line2D([0], [0], marker='o', color='blue', label='Last', markersize=6, linestyle=''),
-                        Line2D([0], [0], marker='^', color='orange', label='Train', markersize=6, linestyle=''),
-                        Line2D([0], [0], marker='s', color='green', label='Test', markersize=6, linestyle='')
-                    ]
-                    ax.legend(handles=legend_elements, loc='upper center',bbox_to_anchor=(0.5, -0.4), ncol=3, frameon=False)
-            
-
-        fig, axs = plt.subplots(len(self.all_packs),3, figsize=(8.5,0.6*len(self.all_packs)))
-        plt.subplots_adjust(top=0.9,bottom=0.2,left=0.2,right=0.98, hspace=0.1,wspace=0.03)
-        
-        for ax in axs.flat:
-            for spine in ax.spines.values():
-                spine.set_linewidth(0.05)
-
-        df_conf=pd.read_csv(self.data_path+'/configurations.csv')
-        train_conf=str(int(df_conf.loc[df_conf["pack"] == 'all', "train_opt"].iloc[0]))
-        conf_str=df_conf.loc[df_conf["pack"] == 'all', "test_cost_freq_opt"].iloc[0]
-        test_conf=conf_str.split('_')[0]+'_'+conf_str.split('_')[1]+'cost'
-
+        #---- Precision
+        prec_or_eff='prec'
         for i,pack in enumerate(all_packs):
 
             pack_path=self.data_path+'/'+pack.replace('pack',self.library)+'/'
@@ -147,12 +159,43 @@ class Grapher():
             # Dibujar distribucion de prec/eff de las tres regiones
             title=[['Initialization','Learning','Stabilization']if i==0 else ['']*3][0]
             last_pack=[True if i==len(all_packs)-1 else False][0]
-            plot_pack_criteria_prec_or_eff(axs[i,0],[last1,train1,test1][::-1],pack_name=pack.replace('pack_PPO_',''),title=title[0],last_pack=last_pack)
-            plot_pack_criteria_prec_or_eff(axs[i,1],[last2,train2,test2][::-1],title=title[1],last_pack=last_pack)
-            plot_pack_criteria_prec_or_eff(axs[i,2],[last3,train3,test3][::-1],title=title[2],last_pack=last_pack)
-        
-        plt.savefig(self.figure_path+'/all_setups/criteria_'+prec_or_eff+'.pdf')
-        
+            plot_pack_criteria_prec_or_eff(axs[i,4],[last1,train1,test1][::-1],pack_name=pack.replace('pack_PPO_',''),title=title[0],last_pack=last_pack)
+            plot_pack_criteria_prec_or_eff(axs[i,5],[last2,train2,test2][::-1],title=title[1],last_pack=last_pack)
+            plot_pack_criteria_prec_or_eff(axs[i,6],[last3,train3,test3][::-1],title=title[2],last_pack=last_pack)
+
+        #---- Eficacia
+        prec_or_eff='eff'
+        for i,pack in enumerate(all_packs):
+
+            pack_path=self.data_path+'/'+pack.replace('pack',self.library)+'/'
+
+            # Obtener los datos de prec/eff por region de este pack
+            last1,last2,last3=DataConverter.from_df_data_to_graph_data(
+                            [pack_path+'learning_regions.csv',pack_path+'df_last_'+prec_or_eff+'.csv'],pack,which_graph='last_'+prec_or_eff,
+                            prec_metric=prec_metric,eff_metric=eff_metric
+                        )
+            train1,train2,train3=DataConverter.from_df_data_to_graph_data(
+                            [pack_path+'learning_regions.csv',pack_path+'df_train_'+prec_or_eff+'.csv'],pack,which_graph='train_'+prec_or_eff,
+                            prec_metric=prec_metric,eff_metric=eff_metric,train_conf=train_conf
+                        )
+            test1,test2,test3=DataConverter.from_df_data_to_graph_data(
+                            [pack_path+'learning_regions.csv',pack_path+'df_test_'+prec_or_eff+'.csv'],pack,which_graph='test_'+prec_or_eff,
+                            prec_metric=prec_metric,eff_metric=eff_metric,test_conf=test_conf
+                        )
+
+            # Dibujar distribucion de prec/eff de las tres regiones
+            title=[['Initialization','Learning','Stabilization']if i==0 else ['']*3][0]
+            last_pack=[True if i==len(all_packs)-1 else False][0]
+            plot_pack_criteria_prec_or_eff(axs[i,8],[last1,train1,test1][::-1],pack_name=pack.replace('pack_PPO_',''),title=title[0],last_pack=last_pack)
+            plot_pack_criteria_prec_or_eff(axs[i,9],[last2,train2,test2][::-1],title=title[1],last_pack=last_pack)
+            plot_pack_criteria_prec_or_eff(axs[i,10],[last3,train3,test3][::-1],title=title[2],last_pack=last_pack)
+
+        for i in range(len(all_packs)):
+                axs[i,3].axis('off')
+                axs[i,7].axis('off')
+
+        plt.savefig(self.figure_path+'/all_setups/degradation_precision_efficiency.pdf')
+ 
     def criteria_comparison(self,comparison_type='how_times_best'):
         '''
         `comparison_type`: puede ser 'how_times_best', 'in_which_deg_best', 'with_what_prec_diff_best'
@@ -163,161 +206,246 @@ class Grapher():
         conf_str=df_conf.loc[df_conf["pack"] == 'all', "test_cost_freq_opt"].iloc[0]
         test_conf=conf_str.split('_')[0]+'_'+conf_str.split('_')[1]+'cost'
 
-        legend_elements = [
-                Line2D([0], [0], marker='o', color='black', label='Last', markersize=6, linestyle=''),
-                Line2D([0], [0], marker='^', color='black', label='Train', markersize=6, linestyle=''),
-                Line2D([0], [0], marker='s', color='black', label='Test', markersize=6, linestyle='')
-            ]
+        legend_map = {
+                "last":  Line2D([0], [0], marker='o', color='#0000FF', label='Last', markersize=6, linestyle=''),
+                "train": Line2D([0], [0], marker='^', color='#FF8800', label='Train', markersize=6, linestyle=''),
+                "test":  Line2D([0], [0], marker='s', color='green',   label='Test', markersize=6, linestyle='')
+            }
+
+        legend_groups = [["last", "train"],["last", "test"],["train", "test"]]
 
         # Funciones para plotear datos por pack-region
-        def plot_how_many_times_better(ax,data,pack_name='',title='',not_last_pack=True):
+        def plot_how_many_times_better(axs, data, pack_name='', title='', not_last_pack=True):
 
-            color_marker_map = {'green': 's','orange': '^','blue': 'o'}
-            colors = [['blue', 'orange'],['blue', 'green'],['orange', 'green']]
+            color_marker_map = {
+                'green': 's',
+                'orange': '^',
+                'blue': 'o'
+            }
 
-            for i, ((left_val, right_val), (color_left, color_right)) in enumerate(zip(data, colors)):
-                
-                ax.barh(y=i,width=left_val,left=0,color=color_left,height=1)
-                ax.barh(y=i,width=right_val,left=1 - right_val,color=color_right,height=1)
+            colors = [
+                ['blue', 'orange'],
+                ['blue', 'green'],
+                ['orange', 'green']
+            ]
 
+            # 🔥 recorrer cada región → cada ax
+            for i, (ax, (pair, (color_left, color_right))) in enumerate(zip(axs, zip(data, colors))):
+
+                left_val, right_val = pair
+
+                # barras enfrentadas
+                ax.barh(
+                    y=0,
+                    width=left_val,
+                    left=0,
+                    color=color_left,
+                    height=0.8
+                )
+
+                ax.barh(
+                    y=0,
+                    width=right_val,
+                    left=1 - right_val,
+                    color=color_right,
+                    height=0.8
+                )
+
+                # marcadores extremos
                 marker_left = color_marker_map.get(color_left, 'o')
-                marker_right = color_marker_map.get(color_right, 'o')  
-                if left_val>0:       
-                    ax.plot(0, i,marker=marker_left,color='black',markersize=3) # Punta izquierda
-                if right_val>0:
-                    ax.plot(1 , i,marker=marker_right,color='black',markersize=3) # Punta derecha
+                marker_right = color_marker_map.get(color_right, 'o')
 
-            ax.set_xlim(-0.05, 1.05)
-            ax.set_ylim(-0.5, len(data)-0.5)
-            ax.set_yticks([0, 1, 2])
-            ax.set_ylabel(pack_name,rotation=0, labelpad=70)
-            ax.tick_params(axis='y', left=False, labelleft=False)
-            if not_last_pack:
-                ax.set_xticklabels([])
-                if pack_name!='':
-                    ax.legend(handles=legend_elements, loc='upper center', bbox_to_anchor=(0.5, -1.6), ncol=3, frameon=False)
+                if left_val > 0:
+                    ax.plot(0, 0, marker=marker_left, color='black', markersize=3)
 
-            ax.set_title(title)
-        
-        def plot_in_which_deg_best(ax,data,pack_name='',title='',not_last_pack=True):
+                if right_val > 0:
+                    ax.plot(1, 0, marker=marker_right, color='black', markersize=3)
 
-            colors = [['blue', 'orange'],['blue', 'green'],['orange', 'green']]
-            color_marker_map = {'blue': 'o','orange': '^','green': 's'}
+                # estética por ax
+                ax.set_xlim(-0.05, 1.05)
+                ax.set_ylim(-0.5, 0.5)
+                ax.set_yticks([])
+                ax.set_ylabel(abbreviate(pack_name), rotation=0, labelpad=20)
+                ax.set_xticks([0, 0.25, 0.5, 0.75, 1])
+                ax.set_xticklabels(['0', '0.25', '0.5', '0.75', '1'])
+                ax.set_title(title)
 
+                if not_last_pack:
+                    ax.set_xticklabels([])
+
+            # leyenda solo en último
+            if not not_last_pack and pack_name != '':
+                for i in range(3):
+                        handles = [legend_map[k] for k in legend_groups[i]]
+                        axs[i].legend(handles=handles,loc='upper center',bbox_to_anchor=(0.5, -0.4),ncol=len(handles),frameon=False)
+                        
+
+            # etiqueta global (opcional)
+            axs[0].set_ylabel(abbreviate(pack_name),
+                            rotation=0, labelpad=20, fontsize=8)
+
+        def plot_in_which_deg_best(axs, data, pack_name='', title='', not_last_pack=True):
+
+            colors = [
+                ['blue', 'orange'],
+                ['blue', 'green'],
+                ['orange', 'green']
+            ]
+
+            color_marker_map = {
+                'blue': 'o',
+                'orange': '^',
+                'green': 's'
+            }
+
+            bins = 10
             y_spacing = 0.5
             hist_height = 0.4
-            bins = 10
 
-            for i, (pair, pair_colors) in enumerate(zip(data, colors)):
+            # recorrer 3 regiones → 3 axes
+            for i, (ax, pair, pair_colors) in enumerate(zip(axs, data, colors)):
 
-                
-                bar_height = hist_height / len(pair_colors) # Para que las barras de un mismo bin no se solapen, dividimos verticalmente
+                bar_height = hist_height / len(pair_colors)
 
                 for j, (sublist, color) in enumerate(zip(pair, pair_colors)):
-                    if len(sublist)>0:
-                        sublist = np.asarray(sublist)
 
-                        # Histograma normalizado a porcentaje
-                        hist, bin_edges = np.histogram(sublist, bins=bins, range=(0,1), density=False)
-                        percentages = hist / hist.sum()  # entre 0 y 1
+                    if len(sublist) == 0:
+                        continue
 
-                        bin_width = bin_edges[1] - bin_edges[0]
+                    sublist = np.asarray(sublist)
 
-                        # Color proporcional al porcentaje 
-                        base_rgb = np.array(mcolors.to_rgb(color))
-                        colors_scaled = [tuple(base_rgb * p + (1-p)) for p in percentages]  # mezcla con blanco
+                    # histograma
+                    hist, bin_edges = np.histogram(
+                        sublist, bins=bins, range=(0, 1), density=False
+                    )
 
-                        # Dibujar barras
-                        for left, col in zip(bin_edges[:-1], colors_scaled):
-                            ax.bar(left, bar_height, width=bin_width,
-                                bottom=i*y_spacing + j*bar_height,
-                                align='edge', color=col, edgecolor=None)
+                    # normalización
+                    percentages = hist / hist.sum() if hist.sum() > 0 else hist
 
-                        # Mediana 
-                        median_val = np.median(sublist)
-                        bottom_y = i*y_spacing + j*bar_height
-                        mid_y = bottom_y + bar_height/2
-                        marker = color_marker_map.get(color, 'o')
-                        ax.plot(median_val, mid_y, marker=marker, color='black', markersize=3)
+                    bin_width = bin_edges[1] - bin_edges[0]
 
-
-            
-            ax.set_yticks([i*y_spacing for i in range(len(data))])
-            ax.tick_params(axis='y', left=False, labelleft=False)
-            ax.set_xlim(-0.05, 1.05)
-            ax.set_ylabel(pack_name,rotation=0, labelpad=70)
-            if not_last_pack:
-                ax.set_xticklabels([])
-                if pack_name!='':
-                    ax.legend(handles=legend_elements, loc='upper center', bbox_to_anchor=(0.5, -1.6), ncol=3, frameon=False)
-
-            ax.set_title(title)
-
-        def plot_with_what_prec_diff_best(ax,data,pack_name='',title='',not_last_pack=True):
-            colors = [
-                        [["#0000FF", "#FADDBB"], ["#FF8800", "#BABAFF"]],
-                        [["#0000FF", "#C7EBC7"], ["green", "#BABAFF"]],
-                        [["#FF8800", "#C7EBC7"], ["green", "#FADDBB"]]
+                    # color degradado
+                    base_rgb = np.array(mcolors.to_rgb(color))
+                    colors_scaled = [
+                        tuple(base_rgb * p + (1 - p)) for p in percentages
                     ]
-            color_marker_map = {"#0000FF": 'o', "#FF8800": '^', "green": 's',
-                                "#BABAFF": 'o', "#FADDBB": '^', "#C7EBC7": 's'
+
+                    # posición vertical dentro del ax
+                    bottom = j * bar_height
+
+                    for left, col in zip(bin_edges[:-1], colors_scaled):
+                        ax.bar(
+                            left,
+                            bar_height,
+                            width=bin_width,
+                            bottom=bottom,
+                            align='edge',
+                            color=col,
+                            edgecolor=None
+                        )
+
+                    # mediana
+                    median_val = np.median(sublist)
+                    mid_y = bottom + bar_height / 2
+                    marker = color_marker_map.get(color, 'o')
+
+                    ax.plot(median_val, mid_y, marker=marker,
+                            color='black', markersize=3)
+
+                # estética por ax
+                ax.set_xlim(-0.05, 1.05)
+                ax.set_yticks([])
+                ax.set_title(title)
+                ax.set_ylabel(abbreviate(pack_name), rotation=0, labelpad=20)
+                ax.set_xticks([0, 0.25, 0.5, 0.75, 1])
+                ax.set_xticklabels(['0', '0.25', '0.5', '0.75', '1'])
+
+                if not_last_pack:
+                    ax.set_xticklabels([])
+
+            # leyenda solo en el último si aplica
+            if not_last_pack:
+                for ax in axs:
+                    ax.set_xticklabels([])
+            else:
+                if pack_name != '':
+                    for i in range(3):
+                        handles = [legend_map[k] for k in legend_groups[i]]
+                        axs[i].legend(handles=handles,loc='upper center',bbox_to_anchor=(0.5, -0.4),ncol=len(handles),frameon=False)
+                        
+        def plot_with_what_prec_diff_best(axs, data, pack_name='', title='', not_last_pack=True):
+
+            colors = [
+                [["#0000FF", "#FADDBB"], ["#FF8800", "#BABAFF",]],
+                [["#0000FF", "#C7EBC7"], ["green", "#BABAFF"]],
+                [["#FF8800", "#C7EBC7"], ["green", "#FADDBB"]]
+            ]
+
+            color_marker_map = {
+                "#0000FF": 'o',
+                "#FF8800": '^',
+                "green": 's',
+                "#BABAFF": 'o',
+                "#FADDBB": '^',
+                "#C7EBC7": 's'
             }
-            
-            region_spacing = 0.9
-            level_spacing = 0.35      # separacion entre subniveles
+
+            level_spacing = 0.3      # separacion entre subniveles
             inner_offset = 0.06       # separacion pequeña entre los dos segmentos
             cap_height = 0.04         # tamaño de los topes verticales
 
-            # Dibujar los intervalos
-            for i, (region, region_colors) in enumerate(zip(data, colors)):
-                base_y = i * region_spacing
+            axes_out = []
+
+            # Cada region en un ax distinto
+            for i, (ax, (region, region_colors)) in enumerate(zip(axs, zip(data, colors))):
+
+                base_y = 0  # cada ax es independiente
+
                 for j, (sublist, sub_colors) in enumerate(zip(region, region_colors)):
                     base_level_y = base_y + j * level_spacing
+
                     for k, (subsubdata, color) in enumerate(zip(sublist, sub_colors)):
                         offset = inner_offset if k == 0 else -inner_offset
                         y_pos = base_level_y + offset
-    
-                        if len(subsubdata)>0:
-                            ax.hlines(y_pos, np.percentile(subsubdata, 25), np.percentile(subsubdata, 75), color=color,linewidth=0.25)
-                            ax.vlines(np.percentile(subsubdata, 25),  y_pos - cap_height, y_pos + cap_height, color=color)
-                            ax.vlines(np.percentile(subsubdata, 75), y_pos - cap_height, y_pos + cap_height, color=color)
+
+                        if len(subsubdata) > 0:
+                            q25 = np.percentile(subsubdata, 25)
+                            q75 = np.percentile(subsubdata, 75)
+
+                            ax.hlines(y_pos, q25, q75, color=color, linewidth=0.25)
+                            ax.vlines(q25, y_pos - cap_height, y_pos + cap_height, color=color)
+                            ax.vlines(q75, y_pos - cap_height, y_pos + cap_height, color=color)
                         else:
-                            subsubdata=[2] # para que cuando los dos criterios estan completamente empatados, en la grafica no aparezca ningun CI dibujado pero se mantengan los margenes
+                            subsubdata = [2]
 
-                        marker = color_marker_map.get(color, 'o')  # default circulo si color no mapeado
-                        ax.plot(np.median(subsubdata), y_pos, marker=marker, color=color, markersize=3)
+                        marker = color_marker_map.get(color, 'o')
+                        ax.plot(np.median(subsubdata), y_pos,
+                                marker=marker, color=color, markersize=3)
 
-
-            for i in range(1, len(data)):
-                ax.axhline(i * region_spacing - level_spacing / 2 -0.1, color='gray', linestyle='-',linewidth=0.5,alpha=0.5)
-                
-
-            region_centers = [i * region_spacing + level_spacing / 2 for i in range(len(data))]
-            ax.set_yticks(region_centers)
-            ax.set_ylabel(pack_name,rotation=0, labelpad=70)
-            ax.tick_params(axis='y', left=False, labelleft=False)
-            ax.set_xlim(-0.05,1.05)
-            ax.grid(axis='x', linestyle='--', color='gray', linewidth=0.6,alpha=0.5)
+                ax.grid(axis='x', linestyle='--', color='gray', linewidth=0.6, alpha=0.5)
+                ax.set_xlim(-0.05, 1.05)
+                ax.set_yticks([])
+                ax.set_ylabel(abbreviate(pack_name), rotation=0, labelpad=20)
+                ax.set_xticks([0, 0.25, 0.5, 0.75, 1])
+                ax.set_xticklabels(['0', '0.25', '0.5', '0.75', '1'])
+                ax.set_title(title)
+                axes_out.append(ax)
 
             if not_last_pack:
-                ax.set_xticklabels([])
-                if pack_name!='':
-                    ax.legend(handles=legend_elements, loc='upper center', bbox_to_anchor=(0.5, -1.6), ncol=3, frameon=False)
+                for ax in axs:
+                    ax.set_xticklabels([])
+            else:
+                if pack_name != '':
+                    for i in range(3):
+                        handles = [legend_map[k] for k in legend_groups[i]]
+                        axs[i].legend(handles=handles,loc='upper center',bbox_to_anchor=(0.5, -0.4),ncol=len(handles),frameon=False)
 
-
-            ax.set_title(title)
-
+            return axes_out
 
         # Graficas
-        if comparison_type=='with_what_prec_diff_best':
-            fig, axs = plt.subplots(len(self.all_packs),3, figsize=(10,1.3*len(self.all_packs)))
-            plt.subplots_adjust(top=0.9,bottom=0.1,left=0.2,right=0.98, hspace=0.1,wspace=0.03)
-        if comparison_type=='how_times_best':
-            fig, axs = plt.subplots(len(self.all_packs),3, figsize=(10,0.6*len(self.all_packs)))
-            plt.subplots_adjust(top=0.9,bottom=0.2,left=0.2,right=0.98, hspace=0.1,wspace=0.03)
-        if comparison_type=='in_which_deg_best':
-            fig, axs = plt.subplots(len(self.all_packs),3, figsize=(10,0.8*len(self.all_packs)))
-            plt.subplots_adjust(top=0.9,bottom=0.1,left=0.2,right=0.98, hspace=0.1,wspace=0.03)
+        fig, axs = plt.subplots(len(self.all_packs),3*3+2, figsize=(5*3,0.6*len(self.all_packs)),
+                                    gridspec_kw={'width_ratios': [1,1,1,0.35,1,1,1,0.35,1,1,1]})
+        plt.subplots_adjust(top=0.95,bottom=0.15,left=0.05,right=0.98, hspace=0.0,wspace=0.0)
 
         for i,pack in enumerate(all_packs):
 
@@ -333,9 +461,9 @@ class Grapher():
                                         pack_path+'df_train_truth.csv',pack_path+'df_test_truth.csv'],
                                         pack,which_graph=comparison_type,train_conf=train_conf,test_conf=test_conf)
                 # Dibujar distribucion de la medida de comparacion de las tres regiones
-                plot_how_many_times_better(axs[i,0],matrix1,pack_name=pack.replace('pack_PPO_',''),title=title[0],not_last_pack=not_last_pack)
-                plot_how_many_times_better(axs[i,1],matrix2,title=title[1],not_last_pack=not_last_pack)
-                plot_how_many_times_better(axs[i,2],matrix3,title=title[2],not_last_pack=not_last_pack)
+                plot_how_many_times_better([axs[i,0],axs[i,4],axs[i,8]],matrix1,pack_name=pack.replace('pack_PPO_',''),title=title[0],not_last_pack=not_last_pack)
+                plot_how_many_times_better([axs[i,1],axs[i,5],axs[i,9]],matrix2,title=title[1],not_last_pack=not_last_pack)
+                plot_how_many_times_better([axs[i,2],axs[i,6],axs[i,10]],matrix3,title=title[2],not_last_pack=not_last_pack)
 
             if comparison_type=='in_which_deg_best':
                 matrix1,matrix2,matrix3=DataConverter.from_df_data_to_graph_data(
@@ -346,9 +474,9 @@ class Grapher():
                                 global_deg_metric=global_deg_metric,local_deg_metric=local_deg_metric
                                 )
                 
-                plot_in_which_deg_best(axs[i,0],matrix1,pack_name=pack.replace('pack_PPO_',''),title=title[0],not_last_pack=not_last_pack)
-                plot_in_which_deg_best(axs[i,1],matrix2,title=title[1],not_last_pack=not_last_pack)
-                plot_in_which_deg_best(axs[i,2],matrix3,title=title[2],not_last_pack=not_last_pack)
+                plot_in_which_deg_best([axs[i,0],axs[i,4],axs[i,8]],matrix1,pack_name=pack.replace('pack_PPO_',''),title=title[0],not_last_pack=not_last_pack)
+                plot_in_which_deg_best([axs[i,1],axs[i,5],axs[i,9]],matrix2,title=title[1],not_last_pack=not_last_pack)
+                plot_in_which_deg_best([axs[i,2],axs[i,6],axs[i,10]],matrix3,title=title[2],not_last_pack=not_last_pack)
                 
             if comparison_type=='with_what_prec_diff_best':
 
@@ -359,9 +487,13 @@ class Grapher():
                                     which_graph=comparison_type,train_conf=train_conf,test_conf=test_conf,prec_metric=prec_metric
                                     )
 
-                plot_with_what_prec_diff_best(axs[i,0],matrix1,pack_name=pack.replace('pack_PPO_',''),title=title[0],not_last_pack=not_last_pack)
-                plot_with_what_prec_diff_best(axs[i,1],matrix2,title=title[1],not_last_pack=not_last_pack)
-                plot_with_what_prec_diff_best(axs[i,2],matrix3,title=title[2],not_last_pack=not_last_pack)
+                plot_with_what_prec_diff_best([axs[i,0],axs[i,4],axs[i,8]],matrix1,pack_name=pack.replace('pack_PPO_',''),title=title[0],not_last_pack=not_last_pack)
+                plot_with_what_prec_diff_best([axs[i,1],axs[i,5],axs[i,9]],matrix2,title=title[1],not_last_pack=not_last_pack)
+                plot_with_what_prec_diff_best([axs[i,2],axs[i,6],axs[i,10]],matrix3,title=title[2],not_last_pack=not_last_pack)
+            
+            for i in range(len(all_packs)):
+                axs[i,3].axis('off')
+                axs[i,7].axis('off')
 
         plt.savefig(self.figure_path+'/all_setups/criteria_comparison_'+comparison_type+'.pdf')
         
@@ -371,7 +503,7 @@ class Grapher():
         conf_str=df_conf.loc[df_conf["pack"] == 'all', "test_cost_freq_opt"].iloc[0]
         test_cost_freq=conf_str.split('_')[0]+'_'+conf_str.split('_')[1]+'cost'
 
-        legend_elements = [
+        legend_elements = [Line2D([0], [0], color='black', label='Truth best', linestyle='-', linewidth=1.5),
                             Line2D([0], [0], marker='o', color='blue', label='Last',markersize=6, linestyle=''),
                             Line2D([0], [0], marker='^', color='orange', label='Train default',markersize=6, linestyle=''),
                             Line2D([0], [0], marker='D', color="#A52D81", label='Test default',markersize=6, linestyle=''),
@@ -405,15 +537,17 @@ class Grapher():
             plot_mediana_ci(axs[3,pack_indx], df_test_pack_conf, color="green", marker='s')
 
             if first_pack:
-                axs[0,pack_indx].set_ylabel('Truth of selected as best',fontsize=8)
-                axs[1,pack_indx].set_ylabel('Truth of selected as best',fontsize=8)
-                axs[2,pack_indx].set_ylabel('Truth of selected as best',fontsize=8)
-                axs[3,pack_indx].set_ylabel('Truth of selected as best',fontsize=8)
+                for i in range(4):
+                    axs[i,pack_indx].set_ylabel(r"$f(\widetilde{\pi}_t)$",fontsize=12)
                 if pack_name!='':
-                    axs[3,pack_indx].legend(handles=legend_elements,loc='upper center',bbox_to_anchor=(2, -0.3),ncol=4,frameon=False)
-            axs[0,pack_indx].set_title(pack_name)
-            axs[3,pack_indx].set_xlabel('Number of iterations',fontsize=8)
-
+                    axs[3,pack_indx].legend(handles=legend_elements,loc='upper center',bbox_to_anchor=(1.5, -0.3),ncol=5,frameon=False)
+            for i in range(4):
+                axs[i, pack_indx].ticklabel_format(axis='y', style='sci', scilimits=(0, 0))
+                if i!=0:
+                    axs[i, pack_indx].yaxis.get_offset_text().set_visible(False)
+            axs[0,pack_indx].set_title(abbreviate(pack_name),fontsize=12)
+            axs[3,pack_indx].set_xlabel('$t$',fontsize=12)
+            
         def plot_pack_criteria_cummulative_diff(axs,pack_name,pack_indx,first_pack=False):
             #---- Obtener listas con diferencia pareada de evolucion de estimaciones de las politicas seleccionadas
             last_paired_diff,train_paired_diff,test_paired_diff,cost_freq_paired_diff=[],[],[],[]
@@ -432,7 +566,7 @@ class Grapher():
                 test_paired_diff.append(abs(truth-test))
                 
             #---- Graficas de error acumulado pareado entre curvas de aprendizaje truth vs estimadas
-            def plot_cumulative_learning_curve_paired_diff(ax,data,color,nombre=None):
+            def plot_cumulative_learning_curve_paired_diff(ax,data,color):
                 data = np.array(data)
                 accumulated = np.zeros(data.shape[1])
                 
@@ -449,16 +583,16 @@ class Grapher():
 
             if first_pack:
                 if pack_name!='':
-                    axs[3,pack_indx].legend(handles=legend_elements,loc='upper center',bbox_to_anchor=(2, -0.3),ncol=4,frameon=False)
+                    axs[3,pack_indx].legend(handles=legend_elements,loc='upper center',bbox_to_anchor=(1.5, -0.3),ncol=5,frameon=False)
                 for i in range(4):
-                    axs[i,pack_indx].set_ylabel("Cumulative paired difference\nbetween truth and criteria\nlearning curve",fontsize=8)
+                    axs[i,pack_indx].set_ylabel(r"$\sum_{\rho}f(\pi^*_t)-f(\widetilde{\pi}_t)$",fontsize=10)
             for i in range(4):
                 axs[i, pack_indx].ticklabel_format(axis='y', style='sci', scilimits=(0, 0))
                 if i!=0:
                     axs[i, pack_indx].yaxis.get_offset_text().set_visible(False)
 
-            axs[0,pack_indx].set_title(pack_name)
-            axs[3,pack_indx].set_xlabel('Number of iterations',fontsize=8)
+            axs[0,pack_indx].set_title(abbreviate(pack_name),fontsize=12)
+            axs[3,pack_indx].set_xlabel(r"$t$",fontsize=12)
 
         def plot_pack_early_stopping(axs,pack_name,pack_indx,first_pack=False,early_stopping_graph='all'):
 
@@ -488,12 +622,17 @@ class Grapher():
 
                 if first_pack:
                     if pack_name!='':
-                        axs[3,pack_indx].legend(handles=legend_elements,loc='upper center',bbox_to_anchor=(2, -1.4),ncol=4,frameon=False)
-                    for i in range(4):
-                        axs[i,pack_indx].set_ylabel("Truth of selected as best",fontsize=8)
+                        axs[3,pack_indx].legend(handles=legend_elements,loc='upper center',bbox_to_anchor=(1.5, -1.4),ncol=5,frameon=False)
+                    for i in range(5):
+                        axs[i,pack_indx].set_ylabel(r"$f(\widetilde{\pi}_t)$",fontsize=12)
+                for i in range(5):
+                    axs[i, pack_indx].ticklabel_format(axis='y', style='sci', scilimits=(0, 0))
+                    if i!=0:
+                        axs[i, pack_indx].yaxis.get_offset_text().set_visible(False)
 
-                axs[0,pack_indx].set_title(pack_name)
-                axs[4,pack_indx].set_xlabel('Number of iterations',fontsize=8)
+
+                axs[0,pack_indx].set_title(abbreviate(pack_name),fontsize=12)
+                axs[4,pack_indx].set_xlabel(r"$t$",fontsize=12)
 
             def plot_resource_allocation(ax, listas, colors):
 
@@ -501,61 +640,66 @@ class Grapher():
                 all_data = [x for lista in listas for sub in lista for x in sub]
                 min_val = min(all_data)
                 max_val = max(all_data)
-                bins = np.linspace(min_val, max_val, 4)
-                width = bins[1] - bins[0]
+
+                # bins no uniformes
+                bins = np.array([min_val,min_val + 0.25 * (max_val - min_val),min_val + 0.75 * (max_val - min_val),max_val])
+
                 n_groups = len(listas)
+                bar_height = (max_val - min_val) * 0.05
+                spacing = bar_height * 1.2
+                outer_margin = (max_val - min_val) * 0.08
 
-                # espacio interno dentro de cada bin
-                group_height = width / (n_groups + 1)
-
-                # 2. calcular histogramas
+                # 2. histogramas
                 histogramas = []
                 for lista_de_listas in listas:
                     datos = [x for sub in lista_de_listas for x in sub]
                     counts, _ = np.histogram(datos, bins=bins)
                     histogramas.append(counts)
 
-                # 3. dibujar: bins apilados verticalmente
+                # 3. dibujar
                 for b in range(len(bins) - 1):
-                    y_base = bins[b]
-                    for i, counts in enumerate(histogramas):
-                        y = y_base + (i + 1) * group_height
-                        ax.barh(y,counts[b],height=group_height * 0.8,left=0,color=colors[i],align='center')
 
-                # 4. estética
-                ax.set_ylim(min_val, max_val)
+                    y_center = (bins[b] + bins[b+1]) / 2
+
+                    total_height = (n_groups - 1) * spacing
+                    start = y_center - total_height / 2
+
+                    for i, counts in enumerate(histogramas):
+                        y = start + i * spacing
+                        ax.barh(y,counts[b],height=bar_height,left=0,color=colors[i],align='center')
+
+                # 4. estetica
+                ax.set_ylim(min_val - outer_margin, max_val + outer_margin)  
                 ax.set_xlim(0, max(max(h) for h in histogramas) * 1.1)
 
-                bin_centers = bins[:-1] + width / 2
+                bin_centers = [(bins[i] + bins[i+1]) / 2 for i in range(len(bins)-1)]
                 ax.set_yticks(bin_centers)
 
                 ax.set_xlabel('Number of times')
-                if pack_indx==0:
-                    ax.set_ylabel('Truth values')
-                    ax.set_yticklabels(["low","middle","high"])
-                    ax.legend(handles=legend_elements,loc='upper center',bbox_to_anchor=(2, -0.3),ncol=4,frameon=False)
 
-                    for label in ax.get_yticklabels():
-                        label.set_rotation(0)
+                if pack_indx == 0:
+                    ax.set_ylabel('Truth values')
+                    ax.set_yticklabels(["low", "middle", "high"])
+                    ax.legend(handles=legend_elements,loc='upper center',bbox_to_anchor=(2, -0.3),ncol=5,frameon=False)
                 else:
-                    ax.set_yticklabels(["","",""])
+                    ax.set_yticklabels(["", "", ""])    
 
             if early_stopping_graph=='summary':
                 plot_resource_allocation(axs[pack_indx],
                                             [matrix_best,matrix_last,matrix_train_default,matrix_test_default,matrix_test],
                                             ['black','blue','orange','purple','green'])
-                axs[pack_indx].set_title(pack_name)
+                axs[pack_indx].set_title(abbreviate(pack_name))
 
 
-        if consequence_type in ['learning_curve','cummulative_diff' ]:
-            fig, axs = plt.subplots(4,len(self.all_packs), figsize=(3*len(self.all_packs),8),sharex='col',sharey='col')
-            plt.subplots_adjust(top=0.9,bottom=0.1,left=0.2,right=0.98, hspace=0.05,wspace=0.3)
+        if consequence_type in ['learning_curve','cummulative_diff']:
+            fig, axs = plt.subplots(4,len(self.all_packs), figsize=(3*len(self.all_packs),6),sharex='col',sharey='col')
+            plt.subplots_adjust(top=0.95,bottom=0.1,left=0.05,right=0.98, hspace=0.05,wspace=0.15)
         if consequence_type=='early_stopping_all':
-            fig, axs = plt.subplots(5,len(self.all_packs), figsize=(3*len(self.all_packs),10),sharex='col',sharey='col')
-            plt.subplots_adjust(top=0.9,bottom=0.1,left=0.2,right=0.98, hspace=0.05,wspace=0.3)
+            fig, axs = plt.subplots(5,len(self.all_packs), figsize=(2.5*len(self.all_packs),9),sharex='col',sharey='col')
+            plt.subplots_adjust(top=0.95,bottom=0.1,left=0.05,right=0.98, hspace=0.05,wspace=0.25)
         if consequence_type=='early_stopping_summary':
-            fig, axs = plt.subplots(1,len(self.all_packs), figsize=(3*len(self.all_packs),3))
-            plt.subplots_adjust(top=0.9,bottom=0.3,left=0.2,right=0.98, hspace=0.05,wspace=0.1)
+            fig, axs = plt.subplots(1,len(self.all_packs), figsize=(2*len(self.all_packs),3))
+            plt.subplots_adjust(top=0.9,bottom=0.3,left=0.07,right=0.98, hspace=0.0,wspace=0.05)
 
         for i,pack in enumerate(all_packs):
 
@@ -586,9 +730,7 @@ class Grapher():
 
 
 grapher=Grapher(library,all_packs,seeds,data_path,figure_path) 
-grapher.degradation()
-grapher.criteria_precision_or_efficiency()
-grapher.criteria_precision_or_efficiency(prec_or_eff='eff')
+grapher.deg_prec_eff()
 grapher.criteria_comparison()
 grapher.criteria_comparison(comparison_type='in_which_deg_best')
 grapher.criteria_comparison(comparison_type='with_what_prec_diff_best')

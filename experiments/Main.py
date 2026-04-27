@@ -2717,41 +2717,45 @@ class Grapher:
             all_data = [x for lista in listas for sub in lista for x in sub]
             min_val = min(all_data)
             max_val = max(all_data)
-            bins = np.linspace(min_val, max_val, 4)
-            width = bins[1] - bins[0]
+
+            # bins no uniformes
+            bins = np.array([min_val,min_val + 0.25 * (max_val - min_val),min_val + 0.75 * (max_val - min_val),max_val])
+
             n_groups = len(listas)
+            bar_height = (max_val - min_val) * 0.05
+            spacing = bar_height * 1.2
+            outer_margin = (max_val - min_val) * 0.08
 
-            # espacio interno dentro de cada bin
-            group_height = width / (n_groups + 1)
-
-            # 2. calcular histogramas
+            # 2. histogramas
             histogramas = []
             for lista_de_listas in listas:
                 datos = [x for sub in lista_de_listas for x in sub]
                 counts, _ = np.histogram(datos, bins=bins)
                 histogramas.append(counts)
 
-            # 3. dibujar: bins apilados verticalmente
+            # 3. dibujar
             for b in range(len(bins) - 1):
-                y_base = bins[b]
-                for i, counts in enumerate(histogramas):
-                    y = y_base + (i + 1) * group_height
-                    ax.barh(y,counts[b],height=group_height * 0.8,left=0,color=colors[i],align='center')
 
-            # 4. estética
-            ax.set_ylim(min_val, max_val)
+                y_center = (bins[b] + bins[b+1]) / 2
+
+                total_height = (n_groups - 1) * spacing
+                start = y_center - total_height / 2
+
+                for i, counts in enumerate(histogramas):
+                    y = start + i * spacing
+                    ax.barh(y,counts[b],height=bar_height,left=0,color=colors[i],align='center')
+
+            # 4. estetica
+            ax.set_ylim(min_val - outer_margin, max_val + outer_margin)  
             ax.set_xlim(0, max(max(h) for h in histogramas) * 1.1)
 
-            bin_centers = bins[:-1] + width / 2
+            bin_centers = [(bins[i] + bins[i+1]) / 2 for i in range(len(bins)-1)]
             ax.set_yticks(bin_centers)
-
             ax.set_xlabel('Number of times')
             ax.set_ylabel('Truth values')
-            ax.set_yticklabels(["low","middle","high"])
+            ax.set_yticklabels(["low", "middle", "high"])
+        
 
-            for label in ax.get_yticklabels():
-                label.set_rotation(0)
-   
         plot_resource_allocation(axs[1,0],
                                  [matrix_best,matrix_last,matrix_train_default,matrix_test_default,matrix_test],
                                  ['black','blue','orange','purple','green'])
