@@ -1606,18 +1606,30 @@ class EarlyStopping:
         '''
 
         # Leer base de datos correspondiente
-        df=pd.read_csv(data_path+pack.replace('pack','SB3')+'/df_'+criteria+'_truth.csv')
-        total_policies=df.shape[0]
+        if criteria=='best':
+            df_est=pd.read_csv(data_path+pack.replace('pack','SB3')+'/df_'+criteria+'_truth.csv')
+        else:
+            df_est=pd.read_csv(data_path+pack.replace('pack','SB3')+'/df_'+criteria+'_est.csv')
+        df_truth=pd.read_csv(data_path+pack.replace('pack','SB3')+'/df_'+criteria+'_truth.csv')
+        total_policies=df_truth.shape[0]
 
         # Reducir df a las columnas que registran los truth de las configuraciones del criterio indicadas
         if criteria=='train':
-            df = df[[col for col in df.columns if col == 'n_policy' or col.endswith('_'+str(conf[0]))]]
+            df_est = df_est[[col for col in df_est.columns if col == 'n_policy' or col.endswith('_'+str(conf[0]))]]
+            df_truth = df_truth[[col for col in df_truth.columns if col == 'n_policy' or col.endswith('_'+str(conf[0]))]]
         if criteria=='test':
             if type(conf[1])==int: # cuando es test_default
-                df = df[[col for col in df.columns if col == 'n_policy' or col.endswith('_'+str(conf[0])+'_'+str(conf[1]))]]
+                df_est = df_est[[col for col in df_est.columns if col == 'n_policy' or col.endswith('_'+str(conf[0])+'_'+str(conf[1]))]]
+                df_truth = df_truth[[col for col in df_truth.columns if col == 'n_policy' or col.endswith('_'+str(conf[0])+'_'+str(conf[1]))]]
             if type(conf[1])==float: # cuando es test_with_cost
-                df = df[[col for col in df.columns if col == 'n_policy' or col.endswith('_'+str(conf[0])+'_'+str(conf[1])+'cost')]]
-            
+                df_est = df_est[[col for col in df_est.columns if col == 'n_policy' or col.endswith('_'+str(conf[0])+'_'+str(conf[1])+'cost')]]
+                df_truth = df_truth[[col for col in df_truth.columns if col == 'n_policy' or col.endswith('_'+str(conf[0])+'_'+str(conf[1])+'cost')]]
+
+
+        # Igualar columnas de last est y truth
+        if criteria=='last':
+            df_est.columns = df_est.columns.str.replace('_100', '', regex=False)
+                
         # A partir del parametro eta se calcula el numero de iteraciones s (de halvings) y la longitud de cada una r
         def possible_B_values_for_eta(max_B,eta):
             def compute_s(B, eta):
@@ -1653,14 +1665,20 @@ class EarlyStopping:
         r=total_policies/(s+1)
 
         # Aplicar el sucessive halving
+        list_est_per_halving=[]
         list_truth_per_halving=[]
         for i in range(s+1):
-            
+            #print(list_processes)
             r_i=math.floor(r*(eta**i))
 
-            df_current = df.loc[
-                                    df['n_policy'] <= r_i,
-                                    [col for col in df.columns.drop('n_policy') if col.split('_')[2] in [pack.split('_')[2] + str(seed) for seed in list_processes]]
+            df_current = df_est.loc[
+                                    df_est['n_policy'] <= r_i,
+                                    [col for col in df_est.columns.drop('n_policy') if col.split('_')[2] in [pack.split('_')[2] + str(seed) for seed in list_processes]]
+                                ]
+
+            df_truth_current = df_truth.loc[
+                                    df_truth['n_policy'] <= r_i,
+                                    [col for col in df_truth.columns.drop('n_policy') if col.split('_')[2] in [pack.split('_')[2] + str(seed) for seed in list_processes]]
                                 ]
 
             if i<s:
@@ -1670,18 +1688,22 @@ class EarlyStopping:
 
                 # Los peores procesos
                 worst_processes = df_current.iloc[-1].nsmallest(len(list_processes)-n_next).index
-                # Guardar evolucion de truth de los procesos que descartamos
+                # Guardar evolucion de est y truth de los procesos que descartamos
                 df_worst = df_current[worst_processes]
-                list_truth_per_halving += [df_worst[col].tolist() for col in df_worst.columns]
+                df_truth_worst= df_truth_current[worst_processes]
+                list_est_per_halving += [df_worst[col].tolist() for col in df_worst.columns]
+                list_truth_per_halving+=[df_truth_worst[col].tolist() for col in df_truth_worst.columns]
                 # Actualizar lista de semillas que pasan a la siguiente iteracion
                 list_best_columns = [col for col in df_current.columns if col not in worst_processes]
                 list_processes=[int(s.split('_')[2].replace(pack.split('_')[2], '')) for s in list_best_columns]
 
 
             else:
-                list_truth_per_halving += [df_current[col].tolist() for col in df_current.columns]
+                list_est_per_halving += [df_current[col].tolist() for col in df_current.columns]
+       
+
     
-        return list_truth_per_halving
+        return list_est_per_halving,list_truth_per_halving
 
 class Grapher:
 
@@ -2665,7 +2687,6 @@ class Grapher:
 
         # Leer configuraciones generales optimas
         df_conf=pd.read_csv(self.data_common_path+'configurations.csv')
-        train_n_ep=int(df_conf.loc[df_conf["pack"] == 'all', "train_opt"].iloc[0])
 
         conf_str=df_conf.loc[df_conf["pack"] == 'all', "test_cost_freq_opt"].iloc[0]
         test_n_ep=int(conf_str.split('_')[0])
@@ -2676,11 +2697,13 @@ class Grapher:
         test_n_ep_default,test_freq_default=int(test_default.split('_')[0]),int(test_default.split('_')[1])
 
         # Obtener datos para las graficas
-        matrix_best=EarlyStopping.successive_halving(self.data_common_path,pack)
-        matrix_last=EarlyStopping.successive_halving(self.data_common_path,pack,criteria='last')
-        matrix_train_default=EarlyStopping.successive_halving(self.data_common_path,pack,criteria='train',conf=[train_default,None])
-        matrix_test_default=EarlyStopping.successive_halving(self.data_common_path,pack,criteria='test',conf=[test_n_ep_default,test_freq_default])
-        matrix_test=EarlyStopping.successive_halving(self.data_common_path,pack,criteria='test',conf=[test_n_ep,test_freq])
+        matrix_best_est,matrix_best_truth=EarlyStopping.successive_halving(self.data_common_path,pack)
+        matrix_last_est,matrix_last_truth=EarlyStopping.successive_halving(self.data_common_path,pack,criteria='last')
+        matrix_train_default_est,matrix_train_default_truth=EarlyStopping.successive_halving(self.data_common_path,pack,criteria='train',conf=[train_default,None])
+        matrix_test_default_est,matrix_test_default_truth=EarlyStopping.successive_halving(self.data_common_path,pack,criteria='test',conf=[test_n_ep_default,test_freq_default])
+        matrix_test_est,matrix_test_truth=EarlyStopping.successive_halving(self.data_common_path,pack,criteria='test',conf=[test_n_ep,test_freq])
+
+
 
         # Graficas
         fig, axs = plt.subplots(2,5, figsize=(11, 5))
@@ -2704,11 +2727,11 @@ class Grapher:
             else:
                 ax.tick_params(axis='y', which='both', labelleft=False)
 
-        plot_succesive_halving(axs[0,0],matrix_best,'black',name=True)
-        plot_succesive_halving(axs[0,1],matrix_last,'blue')
-        plot_succesive_halving(axs[0,2],matrix_train_default,'orange')
-        plot_succesive_halving(axs[0,3],matrix_test_default,'purple')
-        plot_succesive_halving(axs[0,4],matrix_test,'green')
+        plot_succesive_halving(axs[0,0],matrix_best_truth,'black',name=True)
+        plot_succesive_halving(axs[0,1],matrix_last_truth,'blue')
+        plot_succesive_halving(axs[0,2],matrix_train_default_truth,'orange')
+        plot_succesive_halving(axs[0,3],matrix_test_default_truth,'purple')
+        plot_succesive_halving(axs[0,4],matrix_test_truth,'green')
 
         #---- Eficacia
         def plot_resource_allocation(ax, listas, colors):
@@ -2757,40 +2780,42 @@ class Grapher:
         
 
         plot_resource_allocation(axs[1,0],
-                                 [matrix_best,matrix_last,matrix_train_default,matrix_test_default,matrix_test],
+                                 [matrix_best_truth,matrix_last_truth,matrix_train_default_truth,matrix_test_default_truth,matrix_test_truth],
                                  ['black','blue','orange','purple','green'])
 
         # Leyenda
         colors = ['black','blue','orange','purple','green']
         labels = ['best','last','train default','test default','test with cost']
         handles = [mpatches.Patch(color=c, label=l) for c, l in zip(colors, labels)]
-        ax.legend(handles=handles,title='criteria',loc='center left',bbox_to_anchor=(-2.5, -0.8), ncol=1 )
+        ax.legend(handles=handles,title='criteria',loc='center left',bbox_to_anchor=(0, -0.8), ncol=1 )
 
 
         #---- Performance
-        def plot_performnace_curve(ax, matrix_criteria,color,label):
-            max_long=max([len(i) for i in matrix_criteria])
+        def plot_performnace_curve(ax, matrix_criteria_est,matrix_criteria_truth,color,label):
+            max_long=max([len(i) for i in matrix_criteria_truth])
 
             current_best=[]
             for i in range(max_long):
-                best_by_process=[]
-                for sub in matrix_criteria:
-                    if len(sub)>=i+1:
-                        best_by_process.append(sub[i])
-                current_best.append(max(best_by_process)) #TODO: este max lo tendria que hacer con la estimacion y no con el truth
-
+                best_by_process_est=[]
+                best_by_process_truth=[]
+                for sub_est,sub_truth in zip(matrix_criteria_est,matrix_criteria_truth):
+                    if len(sub_truth)>=i+1:
+                        best_by_process_est.append(sub_est[i])
+                        best_by_process_truth.append(sub_truth[i])
+                current_best.append(best_by_process_truth[best_by_process_est.index(max(best_by_process_est))]) 
+                
             
             ax.plot(range(max_long) , current_best, color=color,linewidth=1,label=label)  
 
-        # plot_performnace_curve(axs[1,2], matrix_best,'black','best')
-        # plot_performnace_curve(axs[1,2], matrix_last,'blue','last')
-        # plot_performnace_curve(axs[1,2], matrix_train_default,'orange','train_default')
-        # plot_performnace_curve(axs[1,2], matrix_test_default,'purple','test_default')
-        # plot_performnace_curve(axs[1,2], matrix_test,'green','test with cost')
-        # axs[1,2].set_xlabel('Number of iterations')
-        # axs[1,2].set_ylabel('Truth of selected as best')
+        plot_performnace_curve(axs[1,2], matrix_best_est,matrix_best_truth,'black','best')
+        plot_performnace_curve(axs[1,2], matrix_last_est,matrix_last_truth,'blue','last')
+        plot_performnace_curve(axs[1,2], matrix_train_default_est,matrix_train_default_truth,'orange','train_default')
+        plot_performnace_curve(axs[1,2], matrix_test_default_est,matrix_test_default_truth,'purple','test_default')
+        plot_performnace_curve(axs[1,2], matrix_test_est,matrix_test_truth,'green','test with cost')
+        axs[1,2].set_xlabel('Number of iterations')
+        axs[1,2].set_ylabel('Truth of selected as best')
 
-        axs[1,2].axis('off')
+        #axs[1,2].axis('off')
         axs[1,1].axis('off')
         axs[1,3].axis('off')
         axs[1,4].axis('off')
