@@ -51,6 +51,7 @@ import time
 import csv
 from torch.nn import functional as F
 import torch.nn as nn
+import shutil
 
 
 from stable_baselines3.common.off_policy_algorithm import OffPolicyAlgorithm
@@ -1238,6 +1239,9 @@ class Options:
         make_normalize=normalize
 
         # Crear nuevos directorios.
+        if os.path.exists(process_dir):
+            shutil.rmtree(process_dir)
+
         os.makedirs(process_dir)
 
         # Modificar funciones de librerias existentes TODO: cuidado cuando se usa un algortimo que no sea PPO
@@ -1564,7 +1568,7 @@ class PackOptions:
 #==================================================================================================
 experiments_OnPolicy=False
 experiments_OffPolicy=False
-experiments_pack=False
+experiments_pack=True
 
 env='Ant-v4'
 seed=1
