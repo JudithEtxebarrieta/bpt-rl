@@ -511,11 +511,13 @@ class Grapher():
                             
                         ]
 
-        def plot_mediana_ci(ax, df, color, marker=None):
-            ax.plot(df.index , df.median(axis=1), color=color, marker=marker,markevery=int(len(df.index)/10),linewidth=1)
-            ax.fill_between(df.index, df.quantile(0.25, axis=1), df.quantile(0.75, axis=1), color=color, alpha=0.2)
-        
+
         def plot_pack_criteria_learning_curves(axs,pack_name,pack_indx,first_pack=False):
+
+            def plot_mediana_ci(ax, df, color, marker=None):
+                ax.plot(df.index , df.median(axis=1), color=color, marker=marker,markevery=int(len(df.index)/10),linewidth=1)
+                ax.fill_between(df.index, df.quantile(0.25, axis=1), df.quantile(0.75, axis=1), color=color, alpha=0.2)
+            
 
             #---- Truth vs last
             plot_mediana_ci(axs[0,pack_indx], df_truth_pack, color='black')
@@ -548,7 +550,7 @@ class Grapher():
             axs[0,pack_indx].set_title(abbreviate(pack_name),fontsize=12)
             axs[3,pack_indx].set_xlabel('$t$',fontsize=12)
             
-        def plot_pack_criteria_cummulative_diff(axs,pack_name,pack_indx,first_pack=False):
+        def plot_pack_criteria_cummulative_diff(axs,pack_name,pack_indx,first_pack=False,diff_type='cummulative'):
             #---- Obtener listas con diferencia pareada de evolucion de estimaciones de las politicas seleccionadas
             last_paired_diff,train_paired_diff,test_paired_diff,cost_freq_paired_diff=[],[],[],[]
 
@@ -566,7 +568,7 @@ class Grapher():
                 test_paired_diff.append(abs(truth-test))
                 
             #---- Graficas de error acumulado pareado entre curvas de aprendizaje truth vs estimadas
-            def plot_cumulative_learning_curve_paired_diff(ax,data,color):
+            def plot_cummulative_learning_curve_paired_diff(ax,data,color):
                 data = np.array(data)
                 accumulated = np.zeros(data.shape[1])
                 
@@ -575,24 +577,45 @@ class Grapher():
                     ax.fill_between(np.arange(data.shape[1]),accumulated,new_accumulated,color=color,alpha=0.6,edgecolor='none') # area entre la curva anterior y la nueva
                     ax.plot(np.arange(data.shape[1]),new_accumulated,color=color,linewidth=0.8) # Curva superior de esta capa
                     accumulated = new_accumulated
+            
+            def plot_cummulative_mean_learning_curves(ax,data,color,marker):
+                ax.plot(range(len(data)),data,color=color,marker=marker,markevery=int(len(data)*0.2))
 
-            plot_cumulative_learning_curve_paired_diff(axs[0,pack_indx],last_paired_diff,'blue',nombre=True)
-            plot_cumulative_learning_curve_paired_diff(axs[1,pack_indx],train_paired_diff,'orange')
-            plot_cumulative_learning_curve_paired_diff(axs[2,pack_indx],test_paired_diff,'#A52D81')
-            plot_cumulative_learning_curve_paired_diff(axs[3,pack_indx],cost_freq_paired_diff,"green")
+            if diff_type=='cummulative':
 
-            if first_pack:
-                if pack_name!='':
-                    axs[3,pack_indx].legend(handles=legend_elements,loc='upper center',bbox_to_anchor=(1.5, -0.3),ncol=5,frameon=False)
+                plot_cummulative_learning_curve_paired_diff(axs[0,pack_indx],last_paired_diff,'blue',nombre=True)
+                plot_cummulative_learning_curve_paired_diff(axs[1,pack_indx],train_paired_diff,'orange')
+                plot_cummulative_learning_curve_paired_diff(axs[2,pack_indx],test_paired_diff,'#A52D81')
+                plot_cummulative_learning_curve_paired_diff(axs[3,pack_indx],cost_freq_paired_diff,"green")
+
+                if first_pack:
+                    if pack_name!='':
+                        axs[3,pack_indx].legend(handles=legend_elements,loc='upper center',bbox_to_anchor=(1.5, -0.3),ncol=5,frameon=False)
+                    for i in range(4):
+                        axs[i,pack_indx].set_ylabel(r"$\sum_{\rho}~f(\pi^*_t)-f(\widetilde{\pi}_t)$",fontsize=10)
                 for i in range(4):
-                    axs[i,pack_indx].set_ylabel(r"$\sum_{\rho}f(\pi^*_t)-f(\widetilde{\pi}_t)$",fontsize=10)
-            for i in range(4):
-                axs[i, pack_indx].ticklabel_format(axis='y', style='sci', scilimits=(0, 0))
-                if i!=0:
-                    axs[i, pack_indx].yaxis.get_offset_text().set_visible(False)
+                    axs[i, pack_indx].ticklabel_format(axis='y', style='sci', scilimits=(0, 0))
+                    if i!=0:
+                        axs[i, pack_indx].yaxis.get_offset_text().set_visible(False)
 
-            axs[0,pack_indx].set_title(abbreviate(pack_name),fontsize=12)
-            axs[3,pack_indx].set_xlabel(r"$t$",fontsize=12)
+                axs[0,pack_indx].set_title(abbreviate(pack_name),fontsize=12)
+                axs[3,pack_indx].set_xlabel(r"$t$",fontsize=12)
+
+            if diff_type=='mean':
+                plot_cummulative_mean_learning_curves(axs[pack_indx],[0]*len(last_paired_diff[-1]),'black',None)
+                plot_cummulative_mean_learning_curves(axs[pack_indx],[sum(col) / len(col) for col in zip(*last_paired_diff)],'blue','o')
+                plot_cummulative_mean_learning_curves(axs[pack_indx],[sum(col) / len(col) for col in zip(*train_paired_diff)],'orange','^')
+                plot_cummulative_mean_learning_curves(axs[pack_indx],[sum(col) / len(col) for col in zip(*test_paired_diff)],'#A52D81','D')
+                plot_cummulative_mean_learning_curves(axs[pack_indx],[sum(col) / len(col) for col in zip(*cost_freq_paired_diff)],"green",'s')
+                
+                if first_pack:
+                    if pack_name!='':
+                        axs[pack_indx].legend(handles=legend_elements,loc='upper center',bbox_to_anchor=(1.5, -0.3),ncol=5,frameon=False)
+                        axs[pack_indx].set_ylabel(r"$\text{mean}_{\rho}~f(\pi^*_t)-f(\widetilde{\pi}_t)$",fontsize=10)
+
+                axs[pack_indx].ticklabel_format(axis='y', style='sci', scilimits=(0, 0))
+                axs[pack_indx].set_title(abbreviate(pack_name),fontsize=12)
+                axs[pack_indx].set_xlabel(r"$t$",fontsize=12)
 
         def plot_pack_early_stopping(axs,pack_name,pack_indx,first_pack=False,early_stopping_graph='all'):
 
@@ -600,12 +623,13 @@ class Grapher():
             test_n_ep,test_freq=int(conf_str.split('_')[0]),float(conf_str.split('_')[1])
 
             # Obtener datos para las graficas
-            matrix_best=EarlyStopping.successive_halving(self.data_path+'/',pack)
-            matrix_last=EarlyStopping.successive_halving(self.data_path+'/',pack,criteria='last')
-            matrix_train_default=EarlyStopping.successive_halving(self.data_path+'/',pack,criteria='train',conf=[train_default,None])
-            matrix_test_default=EarlyStopping.successive_halving(self.data_path+'/',pack,criteria='test',conf=[test_n_ep_default,test_freq_default])
-            matrix_test=EarlyStopping.successive_halving(self.data_path+'/',pack,criteria='test',conf=[test_n_ep,test_freq])
+            matrix_best_est,matrix_best_truth=EarlyStopping.successive_halving(self.data_path+'/',pack)
+            matrix_last_est,matrix_last_truth=EarlyStopping.successive_halving(self.data_path+'/',pack,criteria='last')
+            matrix_train_default_est,matrix_train_default_truth=EarlyStopping.successive_halving(self.data_path+'/',pack,criteria='train',conf=[train_default,None])
+            matrix_test_default_est,matrix_test_default_truth=EarlyStopping.successive_halving(self.data_path+'/',pack,criteria='test',conf=[test_n_ep_default,test_freq_default])
+            matrix_test_est,matrix_test_truth=EarlyStopping.successive_halving(self.data_path+'/',pack,criteria='test',conf=[test_n_ep,test_freq])
 
+            # Grafica 1: sucessive halving explicito
             def plot_succesive_halving(ax,matrix_criteria,color):
                 max_long=max([len(i) for i in matrix_criteria])
                 for truth_evol in matrix_criteria:
@@ -614,11 +638,11 @@ class Grapher():
                         ax.axvline(x=len(truth_evol), color='red', linewidth=1)
 
             if early_stopping_graph=='all':
-                plot_succesive_halving(axs[0,pack_indx],matrix_best,'black')
-                plot_succesive_halving(axs[1,pack_indx],matrix_last,'blue')
-                plot_succesive_halving(axs[2,pack_indx],matrix_train_default,'orange')
-                plot_succesive_halving(axs[3,pack_indx],matrix_test_default,'purple')
-                plot_succesive_halving(axs[4,pack_indx],matrix_test,'green')
+                plot_succesive_halving(axs[0,pack_indx],matrix_best_truth,'black')
+                plot_succesive_halving(axs[1,pack_indx],matrix_last_truth,'blue')
+                plot_succesive_halving(axs[2,pack_indx],matrix_train_default_truth,'orange')
+                plot_succesive_halving(axs[3,pack_indx],matrix_test_default_truth,'purple')
+                plot_succesive_halving(axs[4,pack_indx],matrix_test_truth,'green')
 
                 if first_pack:
                     if pack_name!='':
@@ -634,6 +658,7 @@ class Grapher():
                 axs[0,pack_indx].set_title(abbreviate(pack_name),fontsize=12)
                 axs[4,pack_indx].set_xlabel(r"$t$",fontsize=12)
 
+            # Graficas 2 y 3: info de resource allocation (eff) y evolucion de performnace (prec)
             def plot_resource_allocation(ax, listas, colors):
 
                 # 1. rango global
@@ -676,6 +701,7 @@ class Grapher():
                 ax.set_yticks(bin_centers)
 
                 ax.set_xlabel('Number of times')
+                
 
                 if pack_indx == 0:
                     ax.set_ylabel('Truth values')
@@ -684,10 +710,41 @@ class Grapher():
                 else:
                     ax.set_yticklabels(["", "", ""])    
 
-            if early_stopping_graph=='summary':
+            def plot_performnace_curve(ax, matrix_criteria_est,matrix_criteria_truth,color,marker,label):
+                max_long=max([len(i) for i in matrix_criteria_truth])
+
+                current_best=[]
+                for i in range(max_long):
+                    best_by_process_est=[]
+                    best_by_process_truth=[]
+                    for sub_est,sub_truth in zip(matrix_criteria_est,matrix_criteria_truth):
+                        if len(sub_truth)>=i+1:
+                            best_by_process_est.append(sub_est[i])
+                            best_by_process_truth.append(sub_truth[i])
+                    current_best.append(best_by_process_truth[best_by_process_est.index(max(best_by_process_est))]) 
+                    
+                
+                ax.plot(range(max_long) , current_best, color=color,marker=marker,markevery=int(max_long/10),linewidth=1,label=label)  
+                ax.ticklabel_format(axis='y', style='sci', scilimits=(0, 0))
+                ax.set_xlabel(r'$t$')
+
+                if pack_indx == 0:
+                    ax.set_ylabel('Truth of '+r'${\arg\max}_{\rho,\widetilde{\pi}_t}~\widetilde{f}(\widetilde{\pi}_t)$')
+                    ax.legend(handles=legend_elements,loc='upper center',bbox_to_anchor=(1.5, -.2),ncol=5,frameon=False)
+
+
+            if early_stopping_graph=='eff':
                 plot_resource_allocation(axs[pack_indx],
-                                            [matrix_best,matrix_last,matrix_train_default,matrix_test_default,matrix_test],
-                                            ['black','blue','orange','purple','green'])
+                                 [matrix_best_truth,matrix_last_truth,matrix_train_default_truth,matrix_test_default_truth,matrix_test_truth],
+                                 ['black','blue','orange','purple','green'])
+                axs[pack_indx].set_title(abbreviate(pack_name))
+            if early_stopping_graph=='prec':
+                plot_performnace_curve(axs[pack_indx], matrix_best_est,matrix_best_truth,'black',None,'best')
+                plot_performnace_curve(axs[pack_indx], matrix_last_est,matrix_last_truth,'blue','o','last')
+                plot_performnace_curve(axs[pack_indx], matrix_train_default_est,matrix_train_default_truth,'orange','^','train_default')
+                plot_performnace_curve(axs[pack_indx], matrix_test_default_est,matrix_test_default_truth,'purple','D','test_default')
+                plot_performnace_curve(axs[pack_indx], matrix_test_est,matrix_test_truth,'green','s','test with cost')
+
                 axs[pack_indx].set_title(abbreviate(pack_name))
 
 
@@ -697,9 +754,12 @@ class Grapher():
         if consequence_type=='early_stopping_all':
             fig, axs = plt.subplots(5,len(self.all_packs), figsize=(2.5*len(self.all_packs),9),sharex='col',sharey='col')
             plt.subplots_adjust(top=0.95,bottom=0.1,left=0.05,right=0.98, hspace=0.05,wspace=0.25)
-        if consequence_type=='early_stopping_summary':
+        if consequence_type =='early_stopping_eff':
             fig, axs = plt.subplots(1,len(self.all_packs), figsize=(2*len(self.all_packs),3))
             plt.subplots_adjust(top=0.9,bottom=0.3,left=0.07,right=0.98, hspace=0.0,wspace=0.05)
+        if consequence_type in['cummulative_mean_diff','early_stopping_prec']:
+            fig, axs = plt.subplots(1,len(self.all_packs), figsize=(2.5*len(self.all_packs),3))
+            plt.subplots_adjust(top=0.9,bottom=0.3,left=0.05,right=0.98, hspace=0.0,wspace=0.2)
 
         for i,pack in enumerate(all_packs):
 
@@ -720,10 +780,14 @@ class Grapher():
                 plot_pack_criteria_learning_curves(axs,pack.replace('pack_PPO_',''),i,first_pack=first_pack)
             if consequence_type=='cummulative_diff':
                 plot_pack_criteria_cummulative_diff(axs,pack.replace('pack_PPO_',''),i,first_pack=first_pack)
+            if consequence_type=='cummulative_mean_diff':
+                plot_pack_criteria_cummulative_diff(axs,pack.replace('pack_PPO_',''),i,first_pack=first_pack,diff_type='mean')
             if consequence_type=='early_stopping_all':
                 plot_pack_early_stopping(axs,pack.replace('pack_PPO_',''),i,first_pack=first_pack)
-            if consequence_type=='early_stopping_summary':
-                plot_pack_early_stopping(axs,pack.replace('pack_PPO_',''),i,first_pack=first_pack,early_stopping_graph='summary')
+            if consequence_type =='early_stopping_eff':
+                plot_pack_early_stopping(axs,pack.replace('pack_PPO_',''),i,first_pack=first_pack,early_stopping_graph='eff')
+            if consequence_type =='early_stopping_prec':
+                plot_pack_early_stopping(axs,pack.replace('pack_PPO_',''),i,first_pack=first_pack,early_stopping_graph='prec')
             
 
         plt.savefig(self.figure_path+'/all_setups/criteria_consequences_'+consequence_type+'.pdf')
@@ -736,5 +800,7 @@ grapher.criteria_comparison(comparison_type='in_which_deg_best')
 grapher.criteria_comparison(comparison_type='with_what_prec_diff_best')
 grapher.criteria_consequences()
 grapher.criteria_consequences(consequence_type='cummulative_diff')
+grapher.criteria_consequences(consequence_type='cummulative_mean_diff')
 grapher.criteria_consequences(consequence_type='early_stopping_all')
-grapher.criteria_consequences(consequence_type='early_stopping_summary')
+grapher.criteria_consequences(consequence_type='early_stopping_eff')
+grapher.criteria_consequences(consequence_type='early_stopping_prec')

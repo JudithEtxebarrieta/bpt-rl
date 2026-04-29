@@ -20,10 +20,10 @@ class ComputeCommonData():
         # Almacenar p5 de precision de cada region para cada posible configuracion
         for pack,seeds in zip(all_packs,all_seeds):
             datagenerator=DataGenerator(library,pack,seeds,generated_in_cluster=True)
-            datagenerator.add_p5prec_by_conf_and_regions_per_pack(pack)
+            datagenerator.add_p25prec_by_conf_and_regions_per_pack(pack)
 
         # Obtener y guardar la configuracion con mayor p5 de precision de promedio en todas las regiones
-        DataConverter.from_p5prec_to_common_optimal_conf()
+        DataConverter.from_p25prec_to_common_optimal_conf()
 
 class PackAnalyzer():
     '''
@@ -89,7 +89,6 @@ class PackAnalyzer():
     def main_motivation_recommendation(self):
         '''Recomendacion'''
         self.grapher.graph_pack_learning_curves_with_criteria(self.pack)
-        self.grapher.graph_pack_learning_curves_error(self.pack)
 
 
     # Graficas secundarias
@@ -112,18 +111,19 @@ class PackAnalyzer():
 
     # Graficas para discusion
     def discussion_analysis(self):
-        self.grapher.graph_test_with_cost()
+        # self.grapher.graph_test_with_cost()
+        self.grapher.graph_early_stopping(self.pack)
 
 class ExecutePackAnalysis():
     def __init__(self,library,pack,default_train_n_ep,default_test_n_ep,default_test_freq,seeds=list(range(1,31))):
 
         analyzer=PackAnalyzer(library,pack,seeds,default_train_n_ep,default_test_n_ep,default_test_freq)
 
-        analyzer.main_analysis1()
-        analyzer.main_analysis2()
-        analyzer.main_motivation_recommendation()
+        # analyzer.main_analysis1()
+        # analyzer.main_analysis2()
+        # analyzer.main_motivation_recommendation()
         analyzer.discussion_analysis()
-        analyzer.internal_analysis()
+        # analyzer.internal_analysis()
 
 #==================================================================================================
 # Programa principal
@@ -132,30 +132,38 @@ class ExecutePackAnalysis():
 # Obtener configuraciones a considerar para cada criterio
 # ComputeCommonData('SB3')
 
-# Analisis para entornos Box2D
+# # Analisis para entornos Box2D
 # ExecutePackAnalysis('SB3','pack_PPO_BipedalWalker',100,5,5)
 # ExecutePackAnalysis('SB3','pack_PPO_LunarLanderContinuous',100,5,10)
 
-# Analisis para entornos MuJoCo
+# # Analisis para entornos MuJoCo
 # ExecutePackAnalysis('SB3','pack_PPO_Swimmer',100,5,10)
-ExecutePackAnalysis('SB3','pack_PPO_HalfCheetah',100,5,20)
+# ExecutePackAnalysis('SB3','pack_PPO_HalfCheetah',100,5,20)
 # ExecutePackAnalysis('SB3','pack_PPO_Ant',100,5,5)
 # ExecutePackAnalysis('SB3','pack_PPO_Hopper',100,5,20)
 # ExecutePackAnalysis('SB3','pack_PPO_Walker2d',100,5,20)
 
 # Analisis de entornos normalizados
-# ExecutePackAnalysis('SB3','pack_PPO_BipedalWalkerNorm',100,5,20)
+ExecutePackAnalysis('SB3','pack_PPO_BipedalWalkerNorm',100,5,5)
 
 
-path='experiments/results/data/SB3_PPO_HalfCheetah/'
+# path='experiments/results/data/SB3_PPO_BipedalWalker/'
+path='experiments/results/data/SB3_PPO_BipedalWalkerNorm/'
+# path='experiments/results/data/SB3_PPO_LunarLanderContinuous/'
+# path='experiments/results/data/SB3_PPO_Swimmer/'
+# path='experiments/results/data/SB3_PPO_Ant/'
+# path='experiments/results/data/SB3_PPO_HalfCheetah/'
+# path='experiments/results/data/SB3_PPO_Hopper/'
+# path='experiments/results/data/SB3_PPO_Walker2d/'
 seeds=list(range(1,31))
 
 
-def join_df_analysis_seed(path,seeds,only_test_with_cost_truth=False):
+def join_df_analysis_seed(path,seeds,only_test_with_cost_truth=False,only_default_est=False):
 
     if only_test_with_cost_truth:
         df = pd.concat([pd.read_csv(path+'df_test_truth_with_cost'+str(i)+'.csv') for i in seeds],axis=1)
         df = pd.concat([pd.read_csv(path+"df_test_truth.csv"),df ],axis=1)
+        df = df.loc[:, ~df.columns.duplicated()]
         df.to_csv(path+"df_test_truth.csv", index=False)
 
         # Borrar archivos usados
@@ -163,11 +171,33 @@ def join_df_analysis_seed(path,seeds,only_test_with_cost_truth=False):
             if os.path.exists(f):
                 os.remove(f)
 
+    elif only_default_est:
+        df = pd.concat([pd.read_csv(path+'df_train_default_est'+str(i)+'.csv') for i in seeds],axis=1)
+        df = pd.concat([pd.read_csv(path+"df_train_est.csv"),df ],axis=1)
+        df = df.loc[:, ~df.columns.duplicated()]
+        df.to_csv(path+"df_train_est.csv", index=False)
+        
+
+        df = pd.concat([pd.read_csv(path+'df_test_default_est'+str(i)+'.csv') for i in seeds],axis=1)
+        df = pd.concat([pd.read_csv(path+"df_test_est.csv"),df ],axis=1)
+        df = df.loc[:, ~df.columns.duplicated()]
+        df.to_csv(path+"df_test_est.csv", index=False)
+
+        # Borrar archivos usados
+        for f in [path+'df_test_default_est'+str(i)+'.csv' for i in seeds]:
+            if os.path.exists(f):
+                os.remove(f)
+        for f in [path+'df_train_default_est'+str(i)+'.csv' for i in seeds]:
+            if os.path.exists(f):
+                os.remove(f)
+
     else:
         list_csv_names=['deg_evolution','learning_regions',
             'df_best_truth','df_last_truth','df_train_truth','df_test_truth',
             'df_last_prec','df_train_prec','df_test_prec',
-            'df_test_cost','df_test_n_ep'
+            'df_test_cost','df_test_n_ep',
+            'df_last_eff','df_train_eff','df_test_eff',
+            'df_last_est','df_train_est','df_test_est'
             ]
 
 
@@ -189,7 +219,10 @@ def join_df_analysis_seed(path,seeds,only_test_with_cost_truth=False):
                 if os.path.exists(f):
                     os.remove(f)
 
+# join_df_analysis_seed(path,seeds,only_test_with_cost_truth=False)
 # join_df_analysis_seed(path,seeds,only_test_with_cost_truth=True)
+# join_df_analysis_seed(path,seeds,only_default_est=True)
+
 
 
 
