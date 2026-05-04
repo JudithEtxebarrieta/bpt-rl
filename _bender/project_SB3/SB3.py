@@ -1559,8 +1559,37 @@ class PackOptions:
             n_workers=4,truth_n_workers=16, batch_size=256,n_steps_per_env=1024,# learning interaction
             device='auto', vec_env_type='sequential', # execution type
             policy='MlpPolicy',gamma=0.9999,learning_rate=6e-4,gae_lambda=0.98,
-            callback=True, n_eval_ep=500, eval_freq=1024, deterministic_eval=True # selection criteria
+            callback=True, n_eval_ep=500, eval_freq=1024, n_eval_envs=1,deterministic_eval=True # selection criteria
             )
+
+    def PPO_Pendulum(seed,experiment_name,library_dir):
+
+        ''' Pendulum-v1:
+                n_envs: 4
+                n_timesteps: !!float 1e5
+                policy: 'MlpPolicy'
+                n_steps: 1024
+                gae_lambda: 0.95
+                gamma: 0.9
+                n_epochs: 10
+                ent_coef: 0.0
+                learning_rate: !!float 1e-3
+                clip_range: 0.2
+                use_sde: True
+                sde_sample_freq: 4
+
+        '''
+        Options.OnPolicy_learn_process(
+            'PPO','Pendulum-v1', # pack
+            seed,1e5+.5*1e5,experiment_name,library_dir,save_policies=False, # learning process
+            n_steps_per_env=1024,n_workers=4,truth_n_workers=16, # learning interaction
+            n_epoch=10, # policy update
+            device='auto', vec_env_type='sequential', # execution type
+            policy='MlpPolicy',gae_lambda=0.95,gamma=0.9,ent_coef=0.0, learning_rate=1e-3,clip_range=0.2,
+            use_sde=True,sde_sample_freq=4, # learning process parameters
+            callback=True, n_eval_ep=500, eval_freq=1024, n_eval_envs=4, deterministic_eval=True # selection criteria
+            )
+
 
 #==================================================================================================
 # Pruebas de funcionamiento en PC (tambien sirve como ejemplo para el cluster, se especifica
@@ -1615,7 +1644,7 @@ if experiments_OffPolicy:
 # Experimentos con packs
 if experiments_pack:
     if __name__ == "__main__": 
-        PackOptions.PPO_Walker2d(seed,'execution10',library_dir)
+        PackOptions.PPO_Walker2d(seed,'execution11',library_dir)
 
 
 

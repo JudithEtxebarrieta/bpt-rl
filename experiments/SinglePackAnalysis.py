@@ -4,8 +4,8 @@ class ComputeCommonData():
     '''Guardar la mejor configuracion de los criterios teniendo en cuenta todos los setups'''
 
     def __init__(self,library,
-                 all_seeds=[list(range(1,31))]*8,
-                 all_packs=[
+                 all_seeds=[list(range(1,31))]*9,
+                 all_packs=['pack_PPO_Pendulum',
                             'pack_PPO_BipedalWalker',
                             'pack_PPO_BipedalWalkerNorm',
                             'pack_PPO_LunarLanderContinuous',
@@ -119,11 +119,11 @@ class ExecutePackAnalysis():
 
         analyzer=PackAnalyzer(library,pack,seeds,default_train_n_ep,default_test_n_ep,default_test_freq)
 
-        # analyzer.main_analysis1()
-        # analyzer.main_analysis2()
-        # analyzer.main_motivation_recommendation()
+        analyzer.main_analysis1()
+        analyzer.main_analysis2()
+        analyzer.main_motivation_recommendation()
         analyzer.discussion_analysis()
-        # analyzer.internal_analysis()
+        analyzer.internal_analysis()
 
 #==================================================================================================
 # Programa principal
@@ -132,23 +132,26 @@ class ExecutePackAnalysis():
 # Obtener configuraciones a considerar para cada criterio
 # ComputeCommonData('SB3')
 
+# # Analisis para entornos ClassicControl
+# ExecutePackAnalysis('SB3','pack_PPO_Pendulum',100,5,10)
+
 # # Analisis para entornos Box2D
 # ExecutePackAnalysis('SB3','pack_PPO_BipedalWalker',100,5,5)
 # ExecutePackAnalysis('SB3','pack_PPO_LunarLanderContinuous',100,5,10)
 
 # # Analisis para entornos MuJoCo
-# ExecutePackAnalysis('SB3','pack_PPO_Swimmer',100,5,10)
+ExecutePackAnalysis('SB3','pack_PPO_Swimmer',100,5,10)
 # ExecutePackAnalysis('SB3','pack_PPO_HalfCheetah',100,5,20)
 # ExecutePackAnalysis('SB3','pack_PPO_Ant',100,5,5)
 # ExecutePackAnalysis('SB3','pack_PPO_Hopper',100,5,20)
 # ExecutePackAnalysis('SB3','pack_PPO_Walker2d',100,5,20)
 
-# Analisis de entornos normalizados
-ExecutePackAnalysis('SB3','pack_PPO_BipedalWalkerNorm',100,5,5)
+# # Analisis de entornos normalizados
+# ExecutePackAnalysis('SB3','pack_PPO_BipedalWalkerNorm',100,5,5)
 
-
+path='experiments/results/data/SB3_PPO_Pendulum/'
 # path='experiments/results/data/SB3_PPO_BipedalWalker/'
-path='experiments/results/data/SB3_PPO_BipedalWalkerNorm/'
+# path='experiments/results/data/SB3_PPO_BipedalWalkerNorm/'
 # path='experiments/results/data/SB3_PPO_LunarLanderContinuous/'
 # path='experiments/results/data/SB3_PPO_Swimmer/'
 # path='experiments/results/data/SB3_PPO_Ant/'
