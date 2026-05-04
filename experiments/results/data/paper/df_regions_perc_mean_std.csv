@@ -1,0 +1,9 @@
+,setup,a_mean,a_std,b_mean,b_std
+0,SB3_PPO_Pendulum,8.11,0.0,66.94,32.47
+1,SB3_PPO_LunarLanderContinuous,9.78,0.0,85.33,9.2
+2,SB3_PPO_BipedalWalker,14.49,8.28,70.52,21.48
+3,SB3_PPO_Swimmer,9.81,0.0,66.94,22.11
+4,SB3_PPO_HalfCheetah,10.79,3.62,68.44,19.74
+5,SB3_PPO_Hopper,12.3,5.01,31.48,23.04
+6,SB3_PPO_Ant,16.58,2.5,79.69,10.58
+7,SB3_PPO_Walker2d,10.0,0.0,77.09,16.24
