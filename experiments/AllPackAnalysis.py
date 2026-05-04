@@ -1,10 +1,15 @@
 from Main import *
+import seaborn as sns
 
-library='SB3'
+
 data_path='experiments/results/data'
 figure_path='experiments/results/figures'
+library='SB3'
+
 seeds=list(range(1,31))
-all_packs=[ # Box2D
+all_packs=[ # ClassicControl
+            'pack_PPO_Pendulum',
+            # Box2D
             'pack_PPO_LunarLanderContinuous',
             'pack_PPO_BipedalWalker',
             # MuJoCo
@@ -21,6 +26,7 @@ prec_metric='relative_perc_criteria_best'
 eff_metric='first_time_to_same_reward'
 
 NAME_TO_ABBR = {
+    'Pendulum': 'P',
     'LunarLanderContinuous': 'LLC',
     'BipedalWalker': 'BW',
     'Ant': 'A',
@@ -130,7 +136,7 @@ class Grapher():
                                 ) 
 
             # Dibujar distribucion de degradacion de las tres regiones
-            title=[['Initialization','Learning','Stabilization']if i==0 else ['']*3][0]
+            title=[['Initialization','Learning','Convergence']if i==0 else ['']*3][0]
             not_last_pack=[False if i==len(all_packs)-1 else True][0]
             plot_pack_degradation(axs[i,0],deg1,pack_name=pack.replace('pack_PPO_',''),title=title[0],not_last_pack=not_last_pack)
             plot_pack_degradation(axs[i,1],deg2,title=title[1],not_last_pack=not_last_pack)
@@ -157,7 +163,7 @@ class Grapher():
                         )
 
             # Dibujar distribucion de prec/eff de las tres regiones
-            title=[['Initialization','Learning','Stabilization']if i==0 else ['']*3][0]
+            title=[['Initialization','Learning','Convergence']if i==0 else ['']*3][0]
             last_pack=[True if i==len(all_packs)-1 else False][0]
             plot_pack_criteria_prec_or_eff(axs[i,4],[last1,train1,test1][::-1],pack_name=pack.replace('pack_PPO_',''),title=title[0],last_pack=last_pack)
             plot_pack_criteria_prec_or_eff(axs[i,5],[last2,train2,test2][::-1],title=title[1],last_pack=last_pack)
@@ -184,7 +190,7 @@ class Grapher():
                         )
 
             # Dibujar distribucion de prec/eff de las tres regiones
-            title=[['Initialization','Learning','Stabilization']if i==0 else ['']*3][0]
+            title=[['Initialization','Learning','Convergence']if i==0 else ['']*3][0]
             last_pack=[True if i==len(all_packs)-1 else False][0]
             plot_pack_criteria_prec_or_eff(axs[i,8],[last1,train1,test1][::-1],pack_name=pack.replace('pack_PPO_',''),title=title[0],last_pack=last_pack)
             plot_pack_criteria_prec_or_eff(axs[i,9],[last2,train2,test2][::-1],title=title[1],last_pack=last_pack)
@@ -450,7 +456,7 @@ class Grapher():
         for i,pack in enumerate(all_packs):
 
             pack_path=self.data_path+'/'+pack.replace('pack',self.library)+'/'
-            title=[['Initialization','Learning','Stabilization']if i==0 else ['']*3][0]
+            title=[['Initialization','Learning','Convergence']if i==0 else ['']*3][0]
             not_last_pack=[False if i==len(all_packs)-1 else True][0]
             
             if comparison_type=='how_times_best':
@@ -583,7 +589,7 @@ class Grapher():
 
             if diff_type=='cummulative':
 
-                plot_cummulative_learning_curve_paired_diff(axs[0,pack_indx],last_paired_diff,'blue',nombre=True)
+                plot_cummulative_learning_curve_paired_diff(axs[0,pack_indx],last_paired_diff,'blue')
                 plot_cummulative_learning_curve_paired_diff(axs[1,pack_indx],train_paired_diff,'orange')
                 plot_cummulative_learning_curve_paired_diff(axs[2,pack_indx],test_paired_diff,'#A52D81')
                 plot_cummulative_learning_curve_paired_diff(axs[3,pack_indx],cost_freq_paired_diff,"green")
@@ -610,12 +616,13 @@ class Grapher():
                 
                 if first_pack:
                     if pack_name!='':
-                        axs[pack_indx].legend(handles=legend_elements,loc='upper center',bbox_to_anchor=(1.5, -0.3),ncol=5,frameon=False)
-                        axs[pack_indx].set_ylabel(r"$\text{mean}_{\rho}~f(\pi^*_t)-f(\widetilde{\pi}_t)$",fontsize=10)
+                        axs[pack_indx].legend(handles=legend_elements,loc='upper center',bbox_to_anchor=(2, -0.3),ncol=5,frameon=False,fontsize=12)
+                        axs[pack_indx].set_ylabel(r"$\text{mean}_{\rho}~f(\pi^*_t)-f(\widetilde{\pi}_t)$",fontsize=14)
 
                 axs[pack_indx].ticklabel_format(axis='y', style='sci', scilimits=(0, 0))
-                axs[pack_indx].set_title(abbreviate(pack_name),fontsize=12)
-                axs[pack_indx].set_xlabel(r"$t$",fontsize=12)
+                axs[pack_indx].set_title(abbreviate(pack_name),fontsize=14)
+                axs[pack_indx].set_xlabel(r"$t$",fontsize=14)
+                axs[pack_indx].tick_params(axis='both', labelsize=10)
 
         def plot_pack_early_stopping(axs,pack_name,pack_indx,first_pack=False,early_stopping_graph='all'):
 
@@ -661,6 +668,9 @@ class Grapher():
             # Graficas 2 y 3: info de resource allocation (eff) y evolucion de performnace (prec)
             def plot_resource_allocation(ax, listas, colors):
 
+                # markers por color (orden fijo)
+                marker_map = {'blue': 'o','orange': '^','green': 's','purple': 'D'}
+
                 # 1. rango global
                 all_data = [x for lista in listas for sub in lista for x in sub]
                 min_val = min(all_data)
@@ -693,6 +703,10 @@ class Grapher():
                         y = start + i * spacing
                         ax.barh(y,counts[b],height=bar_height,left=0,color=colors[i],align='center')
 
+                        color = colors[i]
+                        if color in marker_map and color != 'black':
+                            ax.scatter(counts[b],y,marker=marker_map[color],color='black',zorder=5,s=10)
+
                 # 4. estetica
                 ax.set_ylim(min_val - outer_margin, max_val + outer_margin)  
                 ax.set_xlim(0, max(max(h) for h in histogramas) * 1.1)
@@ -701,8 +715,17 @@ class Grapher():
                 ax.set_yticks(bin_centers)
 
                 ax.set_xlabel('Number of times')
-                
 
+                # para que los numeros del eje x no se superpongan
+                step = 100
+
+                xmin, xmax = ax.get_xlim()
+
+                tick_1 = step * round((xmin + (xmax - xmin)/3) / step)
+                tick_2 = 2 * tick_1
+
+                ax.set_xticks([0, tick_1, tick_2])
+                        
                 if pack_indx == 0:
                     ax.set_ylabel('Truth values')
                     ax.set_yticklabels(["low", "middle", "high"])
@@ -738,6 +761,7 @@ class Grapher():
                                  [matrix_best_truth,matrix_last_truth,matrix_train_default_truth,matrix_test_default_truth,matrix_test_truth],
                                  ['black','blue','orange','purple','green'])
                 axs[pack_indx].set_title(abbreviate(pack_name))
+
             if early_stopping_graph=='prec':
                 plot_performnace_curve(axs[pack_indx], matrix_best_est,matrix_best_truth,'black',None,'best')
                 plot_performnace_curve(axs[pack_indx], matrix_last_est,matrix_last_truth,'blue','o','last')
@@ -789,18 +813,114 @@ class Grapher():
             if consequence_type =='early_stopping_prec':
                 plot_pack_early_stopping(axs,pack.replace('pack_PPO_',''),i,first_pack=first_pack,early_stopping_graph='prec')
             
-
         plt.savefig(self.figure_path+'/all_setups/criteria_consequences_'+consequence_type+'.pdf')
 
 
+    def test_default_vs_with_cost(self):
+
+        # Configuracion de test with cost
+        df_conf=pd.read_csv(self.data_path+'/configurations.csv')
+        conf_str=df_conf.loc[df_conf["pack"] == 'all', "test_cost_freq_opt"].iloc[0]
+        test_conf=conf_str.split('_')[0]+'_'+conf_str.split('_')[1]+'cost'
+
+        # Funciones
+        def plot_pack_costs(ax,cost_list,pack_name='',title='',not_last_pack=False):
+ 
+            # Nube de puntos
+            sns.stripplot(x=cost_list, orient='h', jitter=0.25,ax=ax,color='black',zorder=1)
+
+            # Linea de la mediana
+            ax.axvline(np.median(cost_list), color='red',linewidth=2,zorder=2)
+            ax.axvspan(np.quantile(cost_list,0.25), np.quantile(cost_list,0.75), color='red', alpha=0.5,zorder=2)
+
+            ax.set_xlim(-0.05, 1.05)
+            ax.set_title(title)
+            ax.set_ylabel(abbreviate(pack_name), rotation=0, labelpad=20)
+            ax.set_xticks([0, 0.25, 0.5, 0.75, 1])
+            ax.set_xticklabels(['0', '0.25', '0.5', '0.75', '1'])
+
+            if not_last_pack:   
+                ax.set_xticks([])
+            else:
+                ax.set_xlabel('Validation cost (truncated to 1)', rotation=0, labelpad=20)
+            ax.set_yticks([]) 
+
+        def plot_val_times(ax,times_list,single_or_list='list',pack_name='',title='',not_last_pack=False):
+
+            if single_or_list=='list':
+                ax.barh(0, np.median(times_list), height=0.3, color='black')
+                ax.axvspan(np.quantile(times_list,0.25), np.quantile(times_list,0.75), color='red', alpha=0.5,zorder=2)
+
+            if single_or_list=='number':
+                ax.barh(0, times_list, height=0.3, color='black')
+            
+            ax.set_xlim(-0.05, 1.05)
+            ax.set_xticks([0, 0.25, 0.5, 0.75, 1])
+            ax.set_xticklabels(['0', '0.25', '0.5', '0.75', '1'])
+            ax.set_title(title)
+            ax.set_ylabel(abbreviate(pack_name), rotation=0, labelpad=20)
+            if not_last_pack:   
+                ax.set_xticks([])
+            else:
+                ax.set_xlabel('Number of validations', rotation=0, labelpad=20)
+            ax.set_yticks([]) 
+                
+        # Grafica
+        fig, axs = plt.subplots(len(self.all_packs),7, figsize=(3*4,0.4*len(self.all_packs)),
+                                    gridspec_kw={'width_ratios': [1,0.25,1,0.25,1,0.25,1]})
+        plt.subplots_adjust(top=0.9,bottom=0.3,left=0.1,right=0.98, hspace=0.0,wspace=0.0)
+
+        axs = np.atleast_2d(axs)
+
+        for i,pack in enumerate(all_packs):
+
+            
+            # Leear bases de datos necesarias
+            df_cost=pd.read_csv(self.data_path+'/'+pack.replace('pack',self.library)+'/df_test_cost.csv')
+            df_n_ep=pd.read_csv(self.data_path+'/'+pack.replace('pack',self.library)+'/df_test_n_ep.csv')
+
+            # Listas de costes
+            test_default=df_conf.loc[df_conf["pack"] == pack, "test_default"].iloc[0]
+            df_default= df_cost.loc[:, df_cost.columns.str.contains('_'+test_default+'_')]
+            cost_default = [min(cost, 1) for cost in df_default.values.flatten().tolist()] 
+            df_with_cost=df_cost.loc[:, df_cost.columns.str.contains('_'+test_conf+'_')]
+            cost_with_cost=[min(cost, 1) for cost in df_with_cost.values.flatten().tolist()] 
+
+            # Listas de numero de validaciones
+            times_default=int(df_n_ep.shape[0]/int(test_default.split('_')[1]))/df_n_ep.shape[0]
+            df_with_cost=df_n_ep.loc[:, df_n_ep.columns.str.contains('_'+test_conf+'_')]
+            times_with_cost=[i/df_n_ep.shape[0] for i in (df_with_cost != 0).sum().tolist()]
+
+            not_last_pack=[False if i==len(all_packs)-1 else True][0]
+            titles=[['Test default', 'Test with cost']if i==0 else ['','']][0]
+            plot_pack_costs(axs[i,0],cost_default,pack_name=pack.replace('pack_PPO_',''),title=titles[0],not_last_pack=not_last_pack)
+            plot_pack_costs(axs[i,2],cost_with_cost,pack_name=pack.replace('pack_PPO_',''),title=titles[1],not_last_pack=not_last_pack)
+            plot_val_times(axs[i,4],times_default,pack_name=pack.replace('pack_PPO_',''),single_or_list='number',title=titles[0],not_last_pack=not_last_pack)
+            plot_val_times(axs[i,6],times_with_cost,pack_name=pack.replace('pack_PPO_',''),single_or_list='list',title=titles[1],not_last_pack=not_last_pack)
+
+
+        for i in range(len(all_packs)):
+            axs[i,1].axis('off')
+            axs[i,3].axis('off')
+            axs[i,5].axis('off')
+        plt.savefig('experiments/results/figures/all_setups/test_default_vs_with_cost.png')
+
+
+
+
 grapher=Grapher(library,all_packs,seeds,data_path,figure_path) 
+
 grapher.deg_prec_eff()
+
 grapher.criteria_comparison()
 grapher.criteria_comparison(comparison_type='in_which_deg_best')
 grapher.criteria_comparison(comparison_type='with_what_prec_diff_best')
+
 grapher.criteria_consequences()
 grapher.criteria_consequences(consequence_type='cummulative_diff')
 grapher.criteria_consequences(consequence_type='cummulative_mean_diff')
 grapher.criteria_consequences(consequence_type='early_stopping_all')
 grapher.criteria_consequences(consequence_type='early_stopping_eff')
 grapher.criteria_consequences(consequence_type='early_stopping_prec')
+
+grapher.test_default_vs_with_cost()
