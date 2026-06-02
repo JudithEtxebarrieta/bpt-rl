@@ -1,0 +1,8 @@
+,env,engine,dim_s,dim_a,bodies,joints
+0,LunarLanderContinuous-v3,Box2D,8,2,4,2
+1,BipedalWalker-v3,Box2D,24,4,204,4
+2,Swimmer-v4,MuJoCo,8,2,4,5
+3,Hopper-v4,MuJoCo,11,3,5,6
+4,HalfCheetah-v4,MuJoCo,17,6,8,9
+5,Walker2d-v4,MuJoCo,17,6,8,9
+6,Ant-v4,MuJoCo,27,8,14,9
