@@ -1,5 +1,6 @@
 from Main import *
 import seaborn as sns
+from matplotlib.patches import Rectangle
 
 
 data_path='experiments/results/data'
@@ -8,16 +9,17 @@ library='SB3'
 
 seeds=list(range(1,31))
 all_packs=[ # ClassicControl
-            'pack_PPO_Pendulum',
+            #'pack_PPO_Pendulum',
             # Box2D
             'pack_PPO_LunarLanderContinuous',
             'pack_PPO_BipedalWalker',
             # MuJoCo
             'pack_PPO_Swimmer',
-            'pack_PPO_HalfCheetah',
             'pack_PPO_Hopper',
-            'pack_PPO_Ant',
-            'pack_PPO_Walker2d'            
+            'pack_PPO_HalfCheetah',
+            'pack_PPO_Walker2d',
+            'pack_PPO_Ant'
+                      
                             ]
 
 global_deg_metric='norm_from_mean_worsening_to_improvement'
@@ -26,7 +28,7 @@ prec_metric='relative_perc_criteria_best'
 eff_metric='first_time_to_same_reward'
 
 NAME_TO_ABBR = {
-    'Pendulum': 'P',
+    #'Pendulum': 'P',
     'LunarLanderContinuous': 'LLC',
     'BipedalWalker': 'BW',
     'Ant': 'A',
@@ -235,7 +237,7 @@ class Grapher():
                 ['orange', 'green']
             ]
 
-            # 🔥 recorrer cada región → cada ax
+            # recorrer cada región → cada ax
             for i, (ax, (pair, (color_left, color_right))) in enumerate(zip(axs, zip(data, colors))):
 
                 left_val, right_val = pair
@@ -274,21 +276,22 @@ class Grapher():
                 ax.set_ylabel(abbreviate(pack_name), rotation=0, labelpad=20)
                 ax.set_xticks([0, 0.25, 0.5, 0.75, 1])
                 ax.set_xticklabels(['0', '0.25', '0.5', '0.75', '1'])
-                ax.set_title(title)
+                
 
-                if not_last_pack:
-                    ax.set_xticklabels([])
+                #if not_last_pack:
+                ax.set_xticks([])
 
+            axs[0].set_title(title)
             # leyenda solo en último
             if not not_last_pack and pack_name != '':
                 for i in range(3):
                         handles = [legend_map[k] for k in legend_groups[i]]
-                        axs[i].legend(handles=handles,loc='upper center',bbox_to_anchor=(0.5, -0.4),ncol=len(handles),frameon=False)
+                        axs[i].legend(handles=handles,loc='upper center',bbox_to_anchor=(0.5, 0.5),ncol=len(handles),frameon=False)
                         
 
             # etiqueta global (opcional)
-            axs[0].set_ylabel(abbreviate(pack_name),
-                            rotation=0, labelpad=20, fontsize=8)
+            for i in range(3):
+                axs[i].set_ylabel(abbreviate(pack_name),rotation=0, labelpad=20, fontsize=8)
 
         def plot_in_which_deg_best(axs, data, pack_name='', title='', not_last_pack=True):
 
@@ -449,15 +452,22 @@ class Grapher():
             return axes_out
 
         # Graficas
-        fig, axs = plt.subplots(len(self.all_packs),3*3+2, figsize=(5*3,0.6*len(self.all_packs)),
-                                    gridspec_kw={'width_ratios': [1,1,1,0.35,1,1,1,0.35,1,1,1]})
-        plt.subplots_adjust(top=0.95,bottom=0.15,left=0.05,right=0.98, hspace=0.0,wspace=0.0)
+        if comparison_type=='how_times_best':
+            fig, axs = plt.subplots(len(self.all_packs)*3+2,3, figsize=(5,4.8*0.1*len(self.all_packs)),
+                                        gridspec_kw={'height_ratios': [1]*len(self.all_packs)+[2]+[1]*len(self.all_packs)+[2]+[1]*len(self.all_packs)})
+            plt.subplots_adjust(top=0.92,bottom=0.06,left=0.1,right=0.98, hspace=0.0,wspace=0.0)
+        else:
+            fig, axs = plt.subplots(len(self.all_packs),3*3+2, figsize=(5*3,0.6*len(self.all_packs)),
+                                        gridspec_kw={'width_ratios': [1,1,1,0.35,1,1,1,0.35,1,1,1]})
+            plt.subplots_adjust(top=0.95,bottom=0.15,left=0.05,right=0.98, hspace=0.0,wspace=0.0)
 
         for i,pack in enumerate(all_packs):
 
             pack_path=self.data_path+'/'+pack.replace('pack',self.library)+'/'
             title=[['Initialization','Learning','Convergence']if i==0 else ['']*3][0]
             not_last_pack=[False if i==len(all_packs)-1 else True][0]
+
+            p=len(self.all_packs)
             
             if comparison_type=='how_times_best':
 
@@ -467,9 +477,9 @@ class Grapher():
                                         pack_path+'df_train_truth.csv',pack_path+'df_test_truth.csv'],
                                         pack,which_graph=comparison_type,train_conf=train_conf,test_conf=test_conf)
                 # Dibujar distribucion de la medida de comparacion de las tres regiones
-                plot_how_many_times_better([axs[i,0],axs[i,4],axs[i,8]],matrix1,pack_name=pack.replace('pack_PPO_',''),title=title[0],not_last_pack=not_last_pack)
-                plot_how_many_times_better([axs[i,1],axs[i,5],axs[i,9]],matrix2,title=title[1],not_last_pack=not_last_pack)
-                plot_how_many_times_better([axs[i,2],axs[i,6],axs[i,10]],matrix3,title=title[2],not_last_pack=not_last_pack)
+                plot_how_many_times_better([axs[i,0],axs[p+i+1,0],axs[p*2+i+2,0]],matrix1,pack_name=pack.replace('pack_PPO_',''),title=title[0],not_last_pack=not_last_pack)
+                plot_how_many_times_better([axs[i,1],axs[p+i+1,1],axs[p*2+i+2,1]],matrix2,title=title[1],not_last_pack=not_last_pack)
+                plot_how_many_times_better([axs[i,2],axs[p+i+1,2],axs[p*2+i+2,2]],matrix3,title=title[2],not_last_pack=not_last_pack)
 
             if comparison_type=='in_which_deg_best':
                 matrix1,matrix2,matrix3=DataConverter.from_df_data_to_graph_data(
@@ -497,9 +507,14 @@ class Grapher():
                 plot_with_what_prec_diff_best([axs[i,1],axs[i,5],axs[i,9]],matrix2,title=title[1],not_last_pack=not_last_pack)
                 plot_with_what_prec_diff_best([axs[i,2],axs[i,6],axs[i,10]],matrix3,title=title[2],not_last_pack=not_last_pack)
             
-            for i in range(len(all_packs)):
-                axs[i,3].axis('off')
-                axs[i,7].axis('off')
+            if not comparison_type=='how_times_best':
+                for i in range(len(all_packs)):
+                    axs[i,3].axis('off')
+                    axs[i,7].axis('off')
+            else:
+                for i in range(3):
+                    axs[p,i].axis('off')
+                    axs[p*2+1,i].axis('off')
 
         plt.savefig(self.figure_path+'/all_setups/criteria_comparison_'+comparison_type+'.pdf')
         
@@ -842,7 +857,7 @@ class Grapher():
             if not_last_pack:   
                 ax.set_xticks([])
             else:
-                ax.set_xlabel('Validation cost (truncated to 1)', rotation=0, labelpad=20)
+                ax.set_xlabel('Validation cost (truncated to 1)', rotation=0, labelpad=2)
             ax.set_yticks([]) 
 
         def plot_val_times(ax,times_list,single_or_list='list',pack_name='',title='',not_last_pack=False):
@@ -862,13 +877,14 @@ class Grapher():
             if not_last_pack:   
                 ax.set_xticks([])
             else:
-                ax.set_xlabel('Number of validations', rotation=0, labelpad=20)
+                ax.set_xlabel('Number of validations', rotation=0, labelpad=2)
             ax.set_yticks([]) 
                 
         # Grafica
-        fig, axs = plt.subplots(len(self.all_packs),7, figsize=(3*4,0.4*len(self.all_packs)),
-                                    gridspec_kw={'width_ratios': [1,0.25,1,0.25,1,0.25,1]})
-        plt.subplots_adjust(top=0.9,bottom=0.3,left=0.1,right=0.98, hspace=0.0,wspace=0.0)
+        fig, axs = plt.subplots(len(self.all_packs)*2+1,3, figsize=(3*2,0.6*len(self.all_packs)),
+                                    gridspec_kw={'width_ratios': [1,0.25,1],
+                                                 'height_ratios': [1]*len(self.all_packs)+[3]+[1]*len(self.all_packs)})
+        plt.subplots_adjust(top=0.9,bottom=0.1,left=0.1,right=0.98, hspace=0.0,wspace=0.0)
 
         axs = np.atleast_2d(axs)
 
@@ -895,22 +911,163 @@ class Grapher():
             titles=[['Test default', 'Test with cost']if i==0 else ['','']][0]
             plot_pack_costs(axs[i,0],cost_default,pack_name=pack.replace('pack_PPO_',''),title=titles[0],not_last_pack=not_last_pack)
             plot_pack_costs(axs[i,2],cost_with_cost,pack_name=pack.replace('pack_PPO_',''),title=titles[1],not_last_pack=not_last_pack)
-            plot_val_times(axs[i,4],times_default,pack_name=pack.replace('pack_PPO_',''),single_or_list='number',title=titles[0],not_last_pack=not_last_pack)
-            plot_val_times(axs[i,6],times_with_cost,pack_name=pack.replace('pack_PPO_',''),single_or_list='list',title=titles[1],not_last_pack=not_last_pack)
+            plot_val_times(axs[i+len(self.all_packs)+1,0],times_default,pack_name=pack.replace('pack_PPO_',''),single_or_list='number',title='',not_last_pack=not_last_pack)
+            plot_val_times(axs[i+len(self.all_packs)+1,2],times_with_cost,pack_name=pack.replace('pack_PPO_',''),single_or_list='list',title='',not_last_pack=not_last_pack)
 
 
-        for i in range(len(all_packs)):
+        for i in range(len(self.all_packs)):
             axs[i,1].axis('off')
-            axs[i,3].axis('off')
-            axs[i,5].axis('off')
+            axs[len(self.all_packs)+i+1,1].axis('off')
+
+        axs[len(self.all_packs),0].axis('off')
+        axs[len(self.all_packs),1].axis('off')
+        axs[len(self.all_packs),2].axis('off')
+
         plt.savefig('experiments/results/figures/all_setups/test_default_vs_with_cost.png')
 
 
+    def patterns_deg_acc_eff(self):
+
+        # Plotear scatter plot para pack-region
+        def plot_uncertainty_rectangles(ax, lista1, lista2, lista3, lista4,color,pack='',first_row=True,first_column=True):
+
+            x_med = np.median(lista1)
+            y_lists = [lista2, lista3, lista4]
+            markers = ['o', '^', 's'] 
+
+            for y_data, marker in zip(y_lists, markers):
+                y_med = np.median(y_data)
+                ax.scatter(x_med,y_med,facecolors='none',edgecolor=color,marker=marker,s=40,zorder=3)
+
+                ax.set_ylim(-0.1,1.1)
+                ax.set_xlim(-0.1,1.1)
+                ax.set_xticks([0, 1])
+                ax.set_yticks([0, 1])
+
+                
+                if first_row:
+                    ax.set_title(abbreviate(pack.replace('pack_PPO_','')),fontsize=8)
+                    ax.set_xticks([])
+                else:
+                    ax.set_xlabel(r'Median $\delta_t$',fontsize=8)
+                if not first_column:
+                    ax.set_yticks([])
+                else:
+                    if first_row:
+                        ax.set_ylabel(r'Median $\alpha_t$',fontsize=8)
+                    else:
+                        ax.set_ylabel(r'Median $\varepsilon_t$',fontsize=8)
+
+        
+        # Cargar datos necesarios
+        df_conf=pd.read_csv(self.data_path+'/configurations.csv')
+        train_conf=str(int(df_conf.loc[df_conf["pack"] == 'all', "train_opt"].iloc[0]))
+        conf_str=df_conf.loc[df_conf["pack"] == 'all', "test_cost_freq_opt"].iloc[0]
+        test_conf=conf_str.split('_')[0]+'_'+conf_str.split('_')[1]+'cost'
+            
+        # Graficas
+        fig, axs = plt.subplots(2,len(self.all_packs), figsize=(1.3*len(self.all_packs),1.1*2))
+        plt.subplots_adjust(top=0.9,bottom=0.2,left=0.05,right=0.8, hspace=0,wspace=0)
+
+        
+        for i,pack in enumerate(all_packs):
+            first_column=[True if i==0 else False][0]
+            colors = [
+                        (0.8, 0.8, 0.8),  # gris claro
+                        (0.5, 0.5, 0.5),  # gris medio
+                        (0.2, 0.2, 0.2)   # gris oscuro
+                    ]
+
+            pack_path=self.data_path+'/'+pack.replace('pack',self.library)+'/'
+
+            #---- Degradacion
+            deg1,deg2,deg3=DataConverter.from_df_data_to_graph_data(
+                                    [pack_path+'learning_regions.csv',pack_path+'deg_evolution.csv'],pack,'deg_distribution',
+                                    global_deg_metric=global_deg_metric,local_deg_metric=local_deg_metric
+                                ) 
+
+            #---- Precision
+            last1,last2,last3=DataConverter.from_df_data_to_graph_data(
+                            [pack_path+'learning_regions.csv',pack_path+'df_last_prec.csv'],pack,which_graph='last_prec',
+                            prec_metric=prec_metric,eff_metric=eff_metric
+                        )
+            train1,train2,train3=DataConverter.from_df_data_to_graph_data(
+                            [pack_path+'learning_regions.csv',pack_path+'df_train_prec.csv'],pack,which_graph='train_prec',
+                            prec_metric=prec_metric,eff_metric=eff_metric,train_conf=train_conf
+                        )
+            test1,test2,test3=DataConverter.from_df_data_to_graph_data(
+                            [pack_path+'learning_regions.csv',pack_path+'df_test_prec.csv'],pack,which_graph='test_prec',
+                            prec_metric=prec_metric,eff_metric=eff_metric,test_conf=test_conf
+                        )
+            
+            plot_uncertainty_rectangles(axs[0,i],deg1,last1,train1,test1,colors[0],pack,first_column=first_column)
+            plot_uncertainty_rectangles(axs[0,i],deg2,last2,train2,test2,colors[1],pack,first_column=first_column)
+            plot_uncertainty_rectangles(axs[0,i],deg3,last3,train3,test3,colors[2],pack,first_column=first_column)
+            
+            #---- Eficacia
+            last1,last2,last3=DataConverter.from_df_data_to_graph_data(
+                            [pack_path+'learning_regions.csv',pack_path+'df_last_eff.csv'],pack,which_graph='last_eff',
+                            prec_metric=prec_metric,eff_metric=eff_metric
+                        )
+            train1,train2,train3=DataConverter.from_df_data_to_graph_data(
+                            [pack_path+'learning_regions.csv',pack_path+'df_train_eff.csv'],pack,which_graph='train_eff',
+                            prec_metric=prec_metric,eff_metric=eff_metric,train_conf=train_conf
+                        )
+            test1,test2,test3=DataConverter.from_df_data_to_graph_data(
+                            [pack_path+'learning_regions.csv',pack_path+'df_test_eff.csv'],pack,which_graph='test_eff',
+                            prec_metric=prec_metric,eff_metric=eff_metric,test_conf=test_conf
+                        )
+            
+            plot_uncertainty_rectangles(axs[1,i],deg1,last1,train1,test1,colors[0],pack,False,first_column=first_column)
+            plot_uncertainty_rectangles(axs[1,i],deg2,last2,train2,test2,colors[1],first_row=False,first_column=first_column)
+            plot_uncertainty_rectangles(axs[1,i],deg3,last3,train3,test3,colors[2],first_row=False,first_column=first_column)
+
+        # Leyenda
+
+        legend_elements = [
+            # puntos (solo borde)
+            Line2D([0], [0], marker='o', linestyle='None',
+                markerfacecolor='none', markeredgecolor='black',
+                label='last'),
+
+            Line2D([0], [0], marker='^', linestyle='None',
+                markerfacecolor='none', markeredgecolor='black',
+                label='train'),
+
+            Line2D([0], [0], marker='s', linestyle='None',
+                markerfacecolor='none', markeredgecolor='black',
+                label='test'),
+
+            # líneas
+            Line2D([0], [0], color=colors[0], lw=2,
+                label='initialization'),
+
+            Line2D([0], [0], color=colors[1], lw=2,
+                label='learning'),
+
+            Line2D([0], [0], color=colors[2], lw=2,
+                label='convergence'),
+        ]
+
+        axs[0,6].legend(
+            handles=legend_elements,
+            loc='upper center',
+            bbox_to_anchor=(2, 1),  # fuera abajo
+            ncol=1,                       # 3 columnas
+            frameon=False,
+            fontsize=10,
+            handlelength=2
+        )
+
+            
+        plt.savefig(self.figure_path+'/all_setups/patterns_degradation_precision_efficiency.pdf')
+ 
 
 
 grapher=Grapher(library,all_packs,seeds,data_path,figure_path) 
 
 grapher.deg_prec_eff()
+grapher.patterns_deg_acc_eff()
 
 grapher.criteria_comparison()
 grapher.criteria_comparison(comparison_type='in_which_deg_best')
