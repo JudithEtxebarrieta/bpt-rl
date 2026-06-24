@@ -15,8 +15,9 @@ from matplotlib.lines import Line2D
 from matplotlib.colors import ListedColormap
 import math
 import matplotlib.patches as mpatches
-
-
+import matplotlib.ticker as ticker
+from matplotlib.patches import Patch
+import matplotlib as mpl
 
 parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -564,11 +565,18 @@ class DataConverter:
             # Almacenar degradaciones por region
             initialization,learning,stabilization=[],[],[]
 
+            if which_graph=='last_eff':
+                conf=''
+            if which_graph=='train_eff':
+                conf=str(int(train_conf))+'_'
+            if which_graph=='test_eff':
+                conf=test_conf+'_'
+
             for pack_seed in tqdm(df_limits['pack_seed'],desc="Data for deg graphs"):
                 a=int(df_limits.loc[df_limits['pack_seed'] == pack_seed, 'a'])
                 b=int(df_limits.loc[df_limits['pack_seed'] == pack_seed, 'b'])
 
-                df_pack_seed= df.filter(like=pack_seed+'_').iloc[:, 0].tolist()
+                df_pack_seed= df.filter(like=pack_seed+'_'+conf).iloc[:, 0].tolist()
                 initialization+=df_pack_seed[:a]
                 learning+=df_pack_seed[a:b]
                 stabilization+=df_pack_seed[b:]
@@ -594,7 +602,7 @@ class DataConverter:
                 a=int(df_limits.loc[df_limits['pack_seed'] == pack_seed, 'a'])
                 b=int(df_limits.loc[df_limits['pack_seed'] == pack_seed, 'b'])
 
-                df_pack_seed= df.filter(like=pack_seed+'_'+conf).iloc[:, 0].tolist()
+                df_pack_seed= df.filter(like=pack_seed+'_'+conf+'_').iloc[:, 0].tolist()
                 initialization+=df_pack_seed[:a]
                 learning+=df_pack_seed[a:b]
                 stabilization+=df_pack_seed[b:]
@@ -639,6 +647,7 @@ class DataConverter:
                 last_train1,last_train2,last_train3 = update_times_best_with_new_seed(truth_last,truth_train,a,b,last_train1,last_train2,last_train3)
 
                 truth_test=df_test.filter(like=pack_seed+'_'+str(test_conf)).iloc[:, 0].tolist()
+
                 last_test1,last_test2,last_test3 = update_times_best_with_new_seed(truth_last,truth_test,a,b,last_test1,last_test2,last_test3)
 
                 train_test1,train_test2,train_test3 = update_times_best_with_new_seed(truth_train,truth_test,a,b,train_test1,train_test2,train_test3)
@@ -763,6 +772,120 @@ class DataConverter:
                 last_test1,last_test2,last_test3 = update_prec_best_with_new_seed(prec_last,prec_test,truth_last,truth_test,a,b,last_test1,last_test2,last_test3)
 
                 train_test1,train_test2,train_test3 = update_prec_best_with_new_seed(prec_train,prec_test,truth_train,truth_test,a,b,train_test1,train_test2,train_test3)
+
+            return [last_train1,last_test1,train_test1], [last_train2,last_test2,train_test2], [last_train3,last_test3,train_test3]
+
+        # NOTE: nuevo para la sugerencia de Aritz de p(A wins B|deg)
+        if which_graph=='how_times_best_in_deg_level':
+
+            # Quedarnos unicamente con los datos necesarios
+            df_last=pd.read_csv(path[1])
+            df_last = df_last.filter(regex=r''+pack) # Solo columnas asociadas al pack
+
+            df_train=pd.read_csv(path[2])
+            df_train = df_train.filter(regex=r''+pack+'.*_'+str(train_conf)+'$') # Solo columnas asociadas al pack y la configuracion indicada
+
+            df_test=pd.read_csv(path[3])
+            df_test = df_test.filter(regex=r''+pack+'.*_'+str(test_conf)+'$') # Solo columnas asociadas al pack y la configuracion indicada
+
+            df_deg=pd.read_csv(path[4])
+            df_deg = df_deg.filter(like=pack) # Solo columnas del pack
+            df_deg = df_deg.filter(regex=global_deg_metric+'_'+local_deg_metric+"$") # Solo columnas del pack con deg indicada
+
+            # Acumular el numero de veces que cada criterio es mejor en cada nivel de degradacion (8 niveles, 0-0.125-0.25-0.375-0.5-0.675-0.75-0.875-1)
+            last_train1,last_train2,last_train3=[[0,0]]*10,[[0,0]]*10,[[0,0]]*10
+            last_test1,last_test2,last_test3=[[0,0]]*10,[[0,0]]*10,[[0,0]]*10
+            train_test1,train_test2,train_test3=[[0,0]]*10,[[0,0]]*10,[[0,0]]*10
+            for pack_seed in df_limits['pack_seed']:
+
+                def update_times_best_by_deg_with_new_seed(deg, truth1, truth2, a, b, old1, old2, old3):
+
+                    truth1 = np.array(truth1)
+                    truth2 = np.array(truth2)
+                    deg = np.array(deg)
+
+                    olds = [old1, old2, old3]
+
+                    # =========================================================
+                    # 1. bins en [0,1] en 10 regiones
+                    # =========================================================
+                    bin_edges = np.linspace(0, 1, 11)  # 10 bins
+
+                    def compute_update(deg_seg, t1_seg, t2_seg):
+
+                        # estructura: 10 bins × 2 (truth1>truth2, truth2>truth1)
+                        counts = [[0, 0] for _ in range(10)]
+
+                        # =========================================================
+                        # 2. asignación por bin
+                        # =========================================================
+                        for d, t1, t2 in zip(deg_seg, t1_seg, t2_seg):
+
+                            # encontrar bin
+                            bin_idx = np.searchsorted(bin_edges, d, side='right') - 1
+                            bin_idx = np.clip(bin_idx, 0, 9)
+
+                            if t1 > t2:
+                                counts[bin_idx][0] += 1
+                            elif t2 > t1:
+                                counts[bin_idx][1] += 1
+
+                        return counts
+
+                    # =========================================================
+                    # 3. segmentación por intervalos a, b
+                    # =========================================================
+                    segments = [
+                        slice(0, a),
+                        slice(a, b),
+                        slice(b, None)
+                    ]
+
+                    news = []
+
+                    for seg in segments:
+
+                        deg_seg = deg[seg]
+                        t1_seg = truth1[seg]
+                        t2_seg = truth2[seg]
+
+                        new_counts = compute_update(deg_seg, t1_seg, t2_seg)
+
+                        news.append(new_counts)
+
+                    # =========================================================
+                    # 4. acumulación con olds
+                    # =========================================================
+                    updated = []
+
+                    for old_i, new_i in zip(olds, news):
+
+                        updated_i = []
+
+                        for old_bin, new_bin in zip(old_i, new_i):
+
+                            updated_i.append([
+                                old_bin[0] + new_bin[0],
+                                old_bin[1] + new_bin[1]
+                            ])
+
+                        updated.append(updated_i)
+
+                    return updated
+                
+                a=int(df_limits.loc[df_limits['pack_seed'] == pack_seed, 'a'])
+                b=int(df_limits.loc[df_limits['pack_seed'] == pack_seed, 'b'])
+                deg=df_deg.filter(like=pack_seed).iloc[:, 0].tolist()
+
+
+                truth_last=df_last.filter(like=pack_seed).iloc[:, 0].tolist()
+                truth_train=df_train.filter(like=pack_seed+'_'+str(train_conf)).iloc[:, 0].tolist()
+                last_train1,last_train2,last_train3 = update_times_best_by_deg_with_new_seed(deg,truth_last,truth_train,a,b,last_train1,last_train2,last_train3)
+
+                truth_test=df_test.filter(like=pack_seed+'_'+str(test_conf)).iloc[:, 0].tolist()
+                last_test1,last_test2,last_test3 = update_times_best_by_deg_with_new_seed(deg,truth_last,truth_test,a,b,last_test1,last_test2,last_test3)
+
+                train_test1,train_test2,train_test3 = update_times_best_by_deg_with_new_seed(deg,truth_train,truth_test,a,b,train_test1,train_test2,train_test3)
 
             return [last_train1,last_test1,train_test1], [last_train2,last_test2,train_test2], [last_train3,last_test3,train_test3]
 
@@ -1664,12 +1787,14 @@ class EarlyStopping:
 
         r=total_policies/(s+1)
 
+
         # Aplicar el sucessive halving
         list_est_per_halving=[]
         list_truth_per_halving=[]
         for i in range(s+1):
-            #print(list_processes)
+
             r_i=math.floor(r*(eta**i))
+
 
             df_current = df_est.loc[
                                     df_est['n_policy'] <= r_i,
@@ -1687,6 +1812,7 @@ class EarlyStopping:
                 n_next=math.floor(len(list_processes)/eta)
 
                 # Los peores procesos
+                
                 worst_processes = df_current.iloc[-1].nsmallest(len(list_processes)-n_next).index
                 # Guardar evolucion de est y truth de los procesos que descartamos
                 df_worst = df_current[worst_processes]
@@ -1700,6 +1826,7 @@ class EarlyStopping:
 
             else:
                 list_est_per_halving += [df_current[col].tolist() for col in df_current.columns]
+                list_truth_per_halving += [df_truth_current[col].tolist() for col in df_truth_current.columns]
        
 
     
@@ -2247,12 +2374,12 @@ class Grapher:
                         )
             eff1_train,eff2_train,eff3_train=DataConverter.from_df_data_to_graph_data(
                             [self.data_path+'learning_regions.csv',self.data_path+'df_train_eff.csv'],pack,which_graph='train_eff',
-                            prec_metric=prec_metric,n_ep_type=n_ep_type,eff_metric=eff_metric
+                            prec_metric=prec_metric,n_ep_type=n_ep_type,eff_metric=eff_metric,train_conf=general_train_n_ep
                         )
             eff1_test,eff2_test,eff3_test=DataConverter.from_df_data_to_graph_data(
                             [self.data_path+'learning_regions.csv',self.data_path+'df_test_eff.csv'],pack,which_graph='test_eff',
-                            prec_metric=prec_metric,n_ep_type=n_ep_type,eff_metric=eff_metric
-                        )
+                            prec_metric=prec_metric,n_ep_type=n_ep_type,eff_metric=eff_metric,test_conf=str(general_test_n_ep)+'_'+str(general_test_freq)+'cost'
+                                                                            )
             
             last_train_test_prec_or_effCI(axs[2,0],[eff1_last,eff1_train,eff1_test][::-1],nombres=True,prec_or_eff='eff')
             last_train_test_prec_or_effCI(axs[2,1],[eff2_last,eff2_train,eff2_test][::-1],prec_or_eff='eff')
@@ -2530,7 +2657,7 @@ class Grapher:
 
         # Dibujar areas de diferencia acumulada
         #---- Obtener listas con diferencia pareada de evolucion de estimaciones de las politicas seleccionadas
-        last_paired_diff,train_paired_diff,test_paired_diff,cost_n_ep_paired_diff,cost_freq_paired_diff=[],[],[],[],[]
+        last_paired_diff,train_paired_diff,test_paired_diff,cost_freq_paired_diff=[],[],[],[]
 
         for pack_seed in list(df_truth_pack.columns):
 
@@ -2538,10 +2665,8 @@ class Grapher:
             last=np.array(df_last_pack[pack_seed].tolist())
             train=np.array(df_train_pack[pack_seed+'_'+str(train_default)].tolist())
             test=np.array(df_test_pack[pack_seed+'_'+test_default].tolist())
-            test_with_cost_n_ep=np.array(df_test_pack[pack_seed+'_'+test_cost_n_ep].tolist())
             test_with_cost_freq=np.array(df_test_pack[pack_seed+'_'+test_cost_freq].tolist())
 
-            cost_n_ep_paired_diff.append(abs(truth-test_with_cost_n_ep))
             cost_freq_paired_diff.append(abs(truth-test_with_cost_freq))
             last_paired_diff.append(abs(truth-last))
             train_paired_diff.append(abs(truth-train))
@@ -2640,7 +2765,6 @@ class Grapher:
         for i,perc in enumerate(list_cost):
             first_column=[True if i==0 else False][0]
             for j,freq in enumerate(list_freq):
-
 
                 # Solo seleccionar columnas con esa prec y freq
                 df_cost = df_test_cost.loc[:, df_test_cost.columns.str.contains('_'+str(perc)+'cost_'+str(freq)+'_')]
