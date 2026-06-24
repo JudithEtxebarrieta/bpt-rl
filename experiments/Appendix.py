@@ -4,11 +4,16 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 from matplotlib.colors import LinearSegmentedColormap, Normalize
+import matplotlib.lines as mlines
 
-
+# Common variables
 data_path='experiments/results/data'
 figure_path='experiments/results/figures'
 library='SB3'
+global_deg_metric='norm_from_mean_worsening_to_improvement'
+local_deg_metric='reward_diff'
+prec_metric='relative_perc_criteria_best'
+eff_metric='first_time_to_same_reward'
 
 seeds=list(range(1,31))
 all_packs=[ # ClassicControl
@@ -19,11 +24,11 @@ all_packs=[ # ClassicControl
             # MuJoCo
             'pack_PPO_Swimmer',
             'pack_PPO_Hopper',
+            'pack_PPO_Ant',
             'pack_PPO_HalfCheetah',
-            'pack_PPO_Walker2d' , 
-            'pack_PPO_Ant'         
+            'pack_PPO_Walker2d' 
+                   
                             ]
-
 packs_with_norm=[ 
             # Box2D
             'pack_PPO_BipedalWalker'
@@ -32,15 +37,12 @@ packs_with_norm=[
             # 'pack_PPO_Hopper',
             # 'pack_PPO_Ant',
             # 'pack_PPO_Walker2d'            
-                            ]*2
+                            ]*5
 
 
-global_deg_metric='norm_from_mean_worsening_to_improvement'
-local_deg_metric='reward_diff'
-prec_metric='relative_perc_criteria_best'
-eff_metric='first_time_to_same_reward'
-
-NAME_TO_ABBR = {
+# Common functions
+def abbreviate(env_name: str) -> str:
+    NAME_TO_ABBR = {
     'Pendulum': 'P',
     'LunarLanderContinuous': 'LLC',
     'BipedalWalker': 'BW',
@@ -55,12 +57,10 @@ NAME_TO_ABBR = {
     'HalfCheetahNorm': 'HC',
     'Walker2dNorm': 'W2d'
 }
-
-def abbreviate(env_name: str) -> str:
     return NAME_TO_ABBR.get(env_name, env_name)
 
 
-
+# Class to construct figures for the appendixes
 class Grapher():
 
     def __init__(self,library,all_packs,seeds,data_path,figure_path):
@@ -79,7 +79,7 @@ class Grapher():
 
             data = np.array(deg_list)
 
-            bins = 8
+            bins = 10
             bin_edges = np.linspace(0, 1, bins + 1)
             counts, _ = np.histogram(data, bins=bin_edges)
             
@@ -111,9 +111,9 @@ class Grapher():
     
 
         # Grafica de degradaciones
-        fig, axs = plt.subplots(len(current_packs),3*2+1, figsize=(5*2,0.6*len(current_packs)),
+        fig, axs = plt.subplots(len(current_packs),3*2+1, figsize=(5*2,0.5*len(current_packs)),
                                     gridspec_kw={'width_ratios': [1,1,1,0.35,1,1,1]})
-        plt.subplots_adjust(top=0.95,bottom=0.15,left=0.05,right=0.98, hspace=0.0,wspace=0.0)
+        plt.subplots_adjust(top=0.9,bottom=0.1,left=0.05,right=0.98, hspace=0.0,wspace=0.0)
 
         for i,pack in enumerate(current_packs):
 
@@ -133,12 +133,12 @@ class Grapher():
             # Dibujar distribucion de degradacion de las tres regiones
             title=[['Initialization','Learning','Convergence']if i==0 else ['']*3][0]
             not_last_pack=[False if i==len(current_packs)-1 else True][0]
-            plot_pack_degradation(axs[i,0],deg1,pack_name=pack.replace('pack_PPO_',''),title=title[0],not_last_pack=not_last_pack)
-            plot_pack_degradation(axs[i,1],deg2,title=title[1],not_last_pack=not_last_pack)
-            plot_pack_degradation(axs[i,2],deg3,title=title[2],not_last_pack=not_last_pack)
-            plot_pack_degradation(axs[i,4],deg1_norm,pack_name=pack.replace('pack_PPO_',''),title=title[0],not_last_pack=not_last_pack)
-            plot_pack_degradation(axs[i,5],deg2_norm,title=title[1],not_last_pack=not_last_pack)
-            plot_pack_degradation(axs[i,6],deg3_norm,title=title[2],not_last_pack=not_last_pack)
+            plot_pack_degradation(axs[i,4],deg1,pack_name=pack.replace('pack_PPO_',''),title=title[0],not_last_pack=not_last_pack)
+            plot_pack_degradation(axs[i,5],deg2,title=title[1],not_last_pack=not_last_pack)
+            plot_pack_degradation(axs[i,6],deg3,title=title[2],not_last_pack=not_last_pack)
+            plot_pack_degradation(axs[i,0],deg1_norm,pack_name=pack.replace('pack_PPO_',''),title=title[0],not_last_pack=not_last_pack)
+            plot_pack_degradation(axs[i,1],deg2_norm,title=title[1],not_last_pack=not_last_pack)
+            plot_pack_degradation(axs[i,2],deg3_norm,title=title[2],not_last_pack=not_last_pack)
 
             axs[i,3].axis('off')
 
@@ -149,20 +149,21 @@ class Grapher():
 
         def plot_analysis_per_seed(ax,truth,cols_test,cols_train,first_row,last_row,first_column):
 
-            # Ground truth
-            ax.plot(range(len(truth)),np.array(truth)-np.array(truth), color='black', label='truth')
-
             # Estimates with validation
             greens = plt.cm.Greens(np.linspace(0.3, 0.9, len(cols_test.columns)))
             oranges = plt.cm.Oranges(np.linspace(0.3, 0.9, len(cols_train.columns)))
 
+            # Ground truth
+            #ax.plot(range(len(truth)),np.array(truth)-np.array(truth), color='black', label='truth')
+
             for col, color in zip(cols_test.columns[::-1], greens):
-                ax.plot(range(len(truth)), abs(np.array(cols_test[col].values)-np.array(truth)), color=color, label=col.split('_')[0]+' test',linewidth=1)
+                ax.plot(range(len(truth)), abs(np.array(cols_test[col].values)-np.array(truth)), color=color, label=col.split('_')[0]+' validation',linewidth=1)
             for col, color in zip(cols_train.columns[::-1], oranges):
                 if train_white:
                     ax.plot(range(len(truth)), abs(np.array(cols_train[col].values)-np.array(truth)), color='white',alpha=0,linewidth=1)
                 else:
                     ax.plot(range(len(truth)), abs(np.array(cols_train[col].values)-np.array(truth)), color=color, label=col.split('_')[0]+' train',linewidth=1)
+
 
             ax.ticklabel_format(axis='y', style='sci', scilimits=(0, 0))
             offset = ax.yaxis.get_offset_text()
@@ -193,7 +194,7 @@ class Grapher():
         n_seeds=5
 
         fig, axs = plt.subplots(n_seeds,len(self.all_packs), figsize=(2.5*len(self.all_packs),1.2*n_seeds),sharex='col',sharey='col')
-        plt.subplots_adjust(top=0.95,bottom=0.15,left=0.05,right=0.98, hspace=0.1,wspace=0.2)
+        plt.subplots_adjust(top=0.95,bottom=0.13,left=0.03,right=0.99, hspace=0.1,wspace=0.2)
 
 
         for i,pack in tqdm(enumerate(self.all_packs)):
@@ -216,8 +217,90 @@ class Grapher():
 
         if train_white:
             plt.savefig(self.figure_path+'/all_setups/appendix_estimations_only_test.pdf')
-        else:
+        if not train_white:
             plt.savefig(self.figure_path+'/all_setups/appendix_estimations.pdf')
+
+    def estimations_selected_conf(self):
+
+
+        def plot_analysis_per_seed(ax,truth,test,train,first_row,last_row,first_column):
+
+
+            # Ground truth
+            ax.plot(range(len(train)),np.array(test), color='green', label='validation',linewidth=2,alpha=0.8)
+            ax.plot(range(len(truth)),np.array(truth), color='black', label='truth',linewidth=1)
+            ax.plot(range(len(train)),np.array(train), color='orange', label='train',linewidth=1)
+            
+
+            ax.ticklabel_format(axis='y', style='sci', scilimits=(0, 0))
+            offset = ax.yaxis.get_offset_text()
+            offset.set_x(-0.15)
+
+            if first_row:
+                ax.set_title(abbreviate(pack.split('_')[2]))
+            else:
+                ax.yaxis.get_offset_text().set_visible(False)
+            if last_row:
+                ax.set_xlabel(r'$t$')
+                ax.tick_params(labelbottom=True)
+            else:
+                ax.tick_params(labelbottom=False)
+            if first_column:
+                ax.set_ylabel(r'$\widetilde{f}(\pi_t)$')
+
+            if last_row and first_column:
+                legend_handles = [
+                    mlines.Line2D([], [], color='black', linestyle='-', linewidth=2, label='ground truth'),
+                    mlines.Line2D([], [], color='green', linestyle='-', linewidth=2, label=r'validation $\kappa=5$'),
+                    mlines.Line2D([], [], color='orange', linestyle='-', linewidth=2, label=r'train $\kappa=50$'),
+                ]
+
+                leg=ax.legend(
+                    handles=legend_handles,
+                    loc='upper center',
+                    bbox_to_anchor=(1, -0.45),  # fuera de la gráfica (abajo)
+                    ncol=3,
+                    frameon=False
+                )
+                for line in leg.get_lines():
+                    line.set_linewidth(3)
+
+        n_seeds=5
+
+        fig, axs = plt.subplots(n_seeds,len(self.all_packs), figsize=(2.5*len(self.all_packs),1.2*n_seeds),sharex='col',sharey='col')
+        plt.subplots_adjust(top=0.95,bottom=0.15,left=0.05,right=0.98, hspace=0.1,wspace=0.2)
+
+        # Leer configuraciones generales optimas para poder las marcar en las graficas
+        df_conf=pd.read_csv(self.data_path+'/configurations.csv')
+
+
+        for i,pack in tqdm(enumerate(self.all_packs)):
+            df_truth=pd.read_csv(self.data_path+'/'+pack.replace('pack','SB3')+'/df_last_truth.csv')
+            df_test=pd.read_csv(self.data_path+'/'+pack.replace('pack','SB3')+'/df_test_all_seq_est.csv')
+            df_train=pd.read_csv(self.data_path+'/'+pack.replace('pack','SB3')+'/df_train_all_seq_est.csv')
+
+            general_train_n_ep=int(df_conf.loc[df_conf["pack"] == 'all', "train_opt"].iloc[0])
+            general_test_n_ep=int(df_conf.loc[df_conf["pack"] == 'all', "test_cost_freq_opt"].iloc[0].split('_')[0])
+            print(general_test_n_ep,general_train_n_ep)
+
+
+            for seed in range(1,n_seeds+1):
+
+                first_row=[True if seed==1 else False][0]
+                last_row=[True if seed==n_seeds else False][0]
+                first_column=[True if i==0 else False][0]
+
+                truth= df_truth[pack+str(seed)].tolist()
+                
+                test = df_test[str(general_test_n_ep)+'_val_ep_seed'+str(seed)].tolist()
+                test=[DataConverter.compress_decompress_list(x,compress=False)[0] for x in test]
+                train = df_train[str(general_train_n_ep)+'_traj_ep_seed'+str(seed)].tolist()
+
+                plot_analysis_per_seed(axs[seed-1,i],truth,test,train,first_row,last_row,first_column)
+
+
+
+        plt.savefig(self.figure_path+'/all_setups/appendix_estimations_curves.pdf')
 
     def regions_with_deg(self):
 
@@ -356,9 +439,10 @@ class Grapher():
             )
     
             n_ep_train=obtain_best_train_conf(prec1,prec2,prec3,conf_list)
-            train_conf_precCI(ax1_train,prec1,conf_list,nombres=True,optimal_conf=n_ep_train)
-            train_conf_precCI(ax2_train,prec2,conf_list,optimal_conf=n_ep_train,title=abbreviate(pack.split('_')[2]))
-            train_conf_precCI(ax3_train,prec3,conf_list,optimal_conf=n_ep_train)
+            title=['\nInitialization',abbreviate(pack.split('_')[2])+'\nLearning','Convergence']
+            train_conf_precCI(ax1_train,prec1,conf_list,nombres=True,optimal_conf=n_ep_train,title=title[0])
+            train_conf_precCI(ax2_train,prec2,conf_list,optimal_conf=n_ep_train,title=title[1])
+            train_conf_precCI(ax3_train,prec3,conf_list,optimal_conf=n_ep_train,title=title[2])
 
             conf_list=[int(n_ep) for n_ep in conf_list]
             prec1_simple.append(prec1[conf_list.index(int(general_train_n_ep))])
@@ -405,7 +489,7 @@ class Grapher():
                     for center, name in zip(region_centers, n_ep_list):
                         ax.text(-0.25, center, name,transform=ax.get_yaxis_transform(),ha='right', va='center')
                     if first_column:
-                        ax.set_ylabel(r'test $(\kappa,\varphi_c)$',labelpad=35)
+                        ax.set_ylabel(r'validation $(\kappa,\varphi_c)$',labelpad=35)
                 else:
                     ax.set_yticks([])
       
@@ -452,7 +536,7 @@ class Grapher():
         fig, axs = plt.subplots(8,11, figsize=(1.8*11,2*8),
                                 gridspec_kw={'width_ratios': [1]*3+[0.5]+[1]*3+[0.5]+[1]*3,
                                              'height_ratios': [0.1,0.5]+[0.05]+[0.1,0.5]+[0.05]+[0.1,0.5]})
-        plt.subplots_adjust(top=0.95,bottom=0.05,left=0.05,right=0.98, hspace=0.1,wspace=0)
+        plt.subplots_adjust(top=0.95,bottom=0.05,left=0.06,right=0.98, hspace=0.1,wspace=0)
 
 
         for i,pack in tqdm(enumerate(self.all_packs)):
@@ -479,7 +563,7 @@ class Grapher():
             axs[7,i].axis('off')
 
         legend_elements = [Line2D([0], [0], color='yellow', lw=6, alpha=0.3, label='max p25_initialization+p25_learning+p25_stabilization'),
-                                Line2D([0], [0], color="red", lw=6, alpha=0.3, label='in general (all setups)'), 
+                                Line2D([0], [0], color="red", lw=6, alpha=0.3, label='in general (all environments)'), 
                                 Line2D([0], [0], color='grey', lw=6, alpha=0.3, label='by default')
                                 ]
         axs[6,8].legend(
@@ -918,16 +1002,234 @@ class Grapher():
 
         plt.savefig(self.figure_path+'/all_setups/appendix_val_freq_throughout_sequence.pdf')
 
-    def resource_allocation(self):
-        pass
+    def resource_allocation(self,test_n_ep=5,list_test_freq=[0.05,0.1,0.15,0.2,0.25,0.3,0.35,0.4,0.45,0.5]):
 
+
+
+        def accuracy_curve(matrix_criteria_est,matrix_criteria_truth,plot_yes=False,
+                                       curve_truth=None,curve_criteria=None,current_min=None):
+
+
+                if plot_yes:
+                    acc_evol=[]
+                    for i in range(len(curve_truth)):
+                        numerator=curve_criteria[i]-current_min[i]
+                        denominator=curve_truth[i]-current_min[i]
+                        
+                        acc_evol.append([1 if denominator==0 or curve_criteria[i]>curve_truth[i] else numerator/denominator][0])
+
+                    return acc_evol
+                else:
+
+                    max_long=max([len(i) for i in matrix_criteria_truth])
+
+                    current_best=[]
+                    for i in range(max_long):
+                        best_by_process_est=[]
+                        best_by_process_truth=[]
+                        for sub_est,sub_truth in zip(matrix_criteria_est,matrix_criteria_truth):
+                            if len(sub_truth)>=i+1:
+                                best_by_process_est.append(sub_est[i])
+                                best_by_process_truth.append(sub_truth[i])
+                        current_best.append(best_by_process_truth[best_by_process_est.index(max(best_by_process_est))]) 
+
+                    return current_best
+
+        def get_current_min(matrix_truth,matrix_criteria):
+
+                max_long=max([len(i) for i in matrix_truth])
+                current_min=[]
+                for i in range(max_long):
+                    # Minimo global para normalizar despues
+                    current_truht_mins,current_criteria_mins=[],[]
+                    for sub_truth,sub_criteria in zip(matrix_truth,matrix_criteria):
+                        current_truht_mins.append(min(sub_truth[:i+1]))
+                        current_criteria_mins.append(min(sub_criteria[:i+1]))
+                    current_min.append(min(current_truht_mins+current_criteria_mins))
+
+                return current_min
+
+        def resource_allocation(listas):
+
+            # 1. rango global
+            all_data = [x for lista in listas for sub in lista for x in sub]
+            min_val = min(all_data)
+            max_val = max(all_data)
+
+            # bins no uniformes
+            bins = np.array([min_val,min_val + 0.25 * (max_val - min_val),min_val + 0.75 * (max_val - min_val),max_val])
+
+            # 2. histogramas
+            histogramas = []
+            for lista_de_listas in listas:
+                datos = [x for sub in lista_de_listas for x in sub]
+                counts, _ = np.histogram(datos, bins=bins)
+                histogramas.append(counts)
+
+            # 3. obtener diferencias de histogramas
+            low1= histogramas[1][0]/(histogramas[1][0]+histogramas[1][1]+histogramas[1][2])
+            middle1= histogramas[1][1]/(histogramas[1][0]+histogramas[1][1]+histogramas[1][2])
+            high1= histogramas[1][2]/(histogramas[1][0]+histogramas[1][1]+histogramas[1][2])
+            low2= histogramas[0][0]/(histogramas[0][0]+histogramas[0][1]+histogramas[0][2])
+            middle2= histogramas[0][1]/(histogramas[0][0]+histogramas[0][1]+histogramas[0][2])
+            high2= histogramas[0][2]/(histogramas[0][0]+histogramas[0][1]+histogramas[0][2])
+
+
+            diff_list=[low1-low2,middle1-middle2,high1-high2]
+
+            return diff_list
+
+            
+        fig, axs = plt.subplots(2,len(self.all_packs), figsize=(2*len(self.all_packs),2*2),sharey='row',sharex='col')
+        plt.subplots_adjust(top=0.9,bottom=0.2,left=0.06,right=0.99, hspace=0.,wspace=0.)
+
+        for ax in axs.flat:
+            ax.grid(True, which='major', axis='both', color='gray', linestyle='--', alpha=0.3)
+        
+
+        for i,pack in enumerate(all_packs):
+
+            # Almacenar datos
+            acc_p25,acc_median,acc_p75=[],[],[]
+            acc_all=[]
+            ra_low,ra_middle,ra_high=[],[],[]
+            for test_freq in list_test_freq:
+
+                # Obtener evolucion de accuracy
+                matrix_best_est,matrix_best_truth=EarlyStopping.successive_halving(self.data_path+'/',pack)
+                matrix_test_est,matrix_test_truth=EarlyStopping.successive_halving(self.data_path+'/',pack,criteria='test',conf=[test_n_ep,test_freq])
+
+                truth_curve=accuracy_curve( matrix_best_est,matrix_best_truth)
+                test_curve=accuracy_curve( matrix_test_est,matrix_test_truth)
+                current_min=get_current_min(matrix_best_truth,matrix_test_truth)
+                acc_evol=accuracy_curve( matrix_test_est,matrix_test_truth,plot_yes=True,curve_truth=truth_curve,curve_criteria=test_curve,current_min=current_min)
+
+                acc_p25.append(np.percentile(acc_evol,25))
+                acc_median.append(np.median(acc_evol))
+                acc_p75.append(np.percentile(acc_evol,75))
+                acc_all.append(acc_evol)
+
+
+                # Obtener resource allocation
+                diff_list=resource_allocation([matrix_best_truth,matrix_test_truth])
+
+                ra_low.append(diff_list[0])
+                ra_middle.append(diff_list[1])
+                ra_high.append(diff_list[2])
+
+            # Dibujar graficas por entorno
+            def plot_eff(ax,x,y1,y2,y3,pack,first_pack=False):
+                ax.plot(x, y1, color="#e65858", label='low',marker=7,linewidth=1.5)
+                ax.plot(x, y2, color="#815513", label='middle',linewidth=1.5)
+                ax.plot(x, y3, color='#3cb371', label='high',marker=6,linewidth=1.5)
+                ax.axhline(y=0, color='black', linestyle='--',linewidth=1)
+                ax.set_title(abbreviate(pack.replace('pack_PPO_','')))
+
+
+                if first_pack:
+                    ax.set_ylabel('Proportion\ndifference in RA')
+
+            def plot_acc(ax,x,listas,first_pack=False,middle_pack=False):
+
+
+                for x_i, data in zip(x, listas):
+
+                    # puntos individuales
+                    jitter = np.random.uniform(-0.015, 0.015, len(data))
+                    ax.scatter(
+                        np.full(len(data), x_i) + jitter,
+                        data,
+                        color='black',
+                        s=0.5,
+                        zorder=5
+                    )
+
+                    # estadísticos
+                    p25 = np.percentile(data, 25)
+                    med = np.median(data)
+                    p75 = np.percentile(data, 75)
+
+                    # banda IQR
+                    ax.fill_between(
+                        [x_i - 0.015, x_i + 0.015],
+                        [p25, p25],
+                        [p75, p75],
+                        color='red',
+                        alpha=0.5,
+                        zorder=2
+                    )
+
+                    # mediana
+                    ax.hlines(
+                        med,
+                        x_i - 0.015,
+                        x_i + 0.015,
+                        color='red',
+                        linewidth=2,
+                        zorder=6
+                    )
+
+
+
+
+                ax.set_ylim(-0.1,1.1)
+                ax.set_yticks([0, 0.25, 0.5, 0.75, 1])
+                ax.set_yticklabels([0, 0.25, 0.5, 0.75, 1])
+                ax.set_xlim(0,0.55)
+                ax.set_xticks([0.05, 0.2, 0.35, 0.5])
+                ax.set_xticklabels([0.05, 0.2, 0.35, 0.5])
+                if first_pack:
+                    ax.set_ylabel('Accuracy in\nbest-policy tracking')
+                if middle_pack:
+                    ax.set_xlabel(r'$\varphi_c$')
+
+
+            first_pack=[True if i==0 else False][0]
+            middle_pack=[True if i==len(all_packs)//2 else False][0]
+            #---- curvas eff: ox=list_test_freq, oy=ra_low,ra_middle,ra_high
+            plot_eff(axs[0,i],list_test_freq,ra_low,ra_middle,ra_high,pack,first_pack=first_pack)
+            #---- curvas con CI acc: ox=list_test_freq, oy=[acc_p25,acc_median,acc_p75]
+            plot_acc(axs[1,i],list_test_freq,acc_all,first_pack=first_pack,middle_pack=middle_pack)
+
+        # Leyenda
+        legend_elements = [
+            Line2D([0], [0], marker=6, color='#3cb371',
+                markerfacecolor='#3cb371', markersize=10,lw=2,
+                label='high reward evaluations'),
+            
+            Line2D([0], [0], marker=7, color="#e65858",
+                markerfacecolor="#e65858", markersize=10, lw=2,
+                label='low reward evaluations'),
+            
+            Line2D([0], [0], color="#815513", lw=2,
+                label='middle reward evaluations'),
+
+            Line2D([0], [0], color='red', alpha=0.5, lw=7,
+           label='interquartile range'),
+    
+            Line2D([0], [0], color='red', lw=2,
+                label='median')
+        ]
+
+        axs[1,0].legend(handles=legend_elements,
+                loc='upper center',
+                bbox_to_anchor=(2.5, -0.3),
+                ncol=5,
+                frameon=False)
+                
+        plt.savefig(self.figure_path+'/all_setups/appendix_early_stopping_tradeoff.png')
+
+
+# Main program
 grapher=Grapher(library,all_packs,seeds,data_path,figure_path) 
 
 grapher.deg_with_without_norm(packs_with_norm)
 grapher.estimations()
 grapher.estimations(train_white=True)
+grapher.estimations_selected_conf()
 grapher.regions_with_deg()
 grapher.criteria_configurations()
 grapher.val_cost_throughout_sequence()
 grapher.cost_of_cost_driven_test()
 grapher.val_freq_throughout_sequence()
+grapher.resource_allocation()
