@@ -5,9 +5,9 @@ class ComputeCommonData():
 
     def __init__(self,library,
                  all_seeds=[list(range(1,31))]*9,
-                 all_packs=['pack_PPO_Pendulum',
+                 all_packs=[#'pack_PPO_Pendulum',
                             'pack_PPO_BipedalWalker',
-                            'pack_PPO_BipedalWalkerNorm',
+                            #'pack_PPO_BipedalWalkerNorm',
                             'pack_PPO_LunarLanderContinuous',
                             'pack_PPO_Swimmer',
                             'pack_PPO_Ant',
@@ -90,7 +90,6 @@ class PackAnalyzer():
         '''Recomendacion'''
         self.grapher.graph_pack_learning_curves_with_criteria(self.pack)
 
-
     # Graficas secundarias
     def internal_analysis(self):
         ''' Para mostrar como la degradacion y los limites definen lo que decimos'''
@@ -107,7 +106,6 @@ class PackAnalyzer():
         # self.grapher.graph_pack_all_stability_truth_estimator(self.pack,self.seeds)
         # self.grapher.graph_pack_all_stability_truth_estimator(self.pack,self.seeds,stability_metric='mean_diff')
         # self.grapher.graph_pack_all_stability_truth_estimator(self.pack,self.seeds,stability_metric='CI_width')
-
 
     # Graficas para discusion
     def discussion_analysis(self):
@@ -130,37 +128,42 @@ class ExecutePackAnalysis():
 #==================================================================================================
 
 # Obtener configuraciones a considerar para cada criterio
-# ComputeCommonData('SB3')
+ComputeCommonData('SB3')
 
-# # Analisis para entornos ClassicControl
-# ExecutePackAnalysis('SB3','pack_PPO_Pendulum',100,5,10)
+# Analisis para entornos ClassicControl
+ExecutePackAnalysis('SB3','pack_PPO_Pendulum',100,5,10)
 
-# # Analisis para entornos Box2D
-# ExecutePackAnalysis('SB3','pack_PPO_BipedalWalker',100,5,5)
-# ExecutePackAnalysis('SB3','pack_PPO_LunarLanderContinuous',100,5,10)
+# Analisis para entornos Box2D
+ExecutePackAnalysis('SB3','pack_PPO_BipedalWalker',100,5,5)
+ExecutePackAnalysis('SB3','pack_PPO_LunarLanderContinuous',100,5,10)
 
-# # Analisis para entornos MuJoCo
+# Analisis para entornos MuJoCo
 ExecutePackAnalysis('SB3','pack_PPO_Swimmer',100,5,10)
-# ExecutePackAnalysis('SB3','pack_PPO_HalfCheetah',100,5,20)
-# ExecutePackAnalysis('SB3','pack_PPO_Ant',100,5,5)
-# ExecutePackAnalysis('SB3','pack_PPO_Hopper',100,5,20)
-# ExecutePackAnalysis('SB3','pack_PPO_Walker2d',100,5,20)
+ExecutePackAnalysis('SB3','pack_PPO_HalfCheetah',100,5,20)
+ExecutePackAnalysis('SB3','pack_PPO_Ant',100,5,5)
+ExecutePackAnalysis('SB3','pack_PPO_Hopper',100,5,20)
+ExecutePackAnalysis('SB3','pack_PPO_Walker2d',100,5,20)
 
-# # Analisis de entornos normalizados
-# ExecutePackAnalysis('SB3','pack_PPO_BipedalWalkerNorm',100,5,5)
+# Analisis de entornos normalizados
+ExecutePackAnalysis('SB3','pack_PPO_BipedalWalkerNorm',100,5,5)
 
+
+#==================================================================================================
+# Cuando se bajan los datos del cluster, estas funciones se ejecutan para simplificar
+# datos almacenados en diferentes csv en uno solo
+#==================================================================================================
 path='experiments/results/data/SB3_PPO_Pendulum/'
-# path='experiments/results/data/SB3_PPO_BipedalWalker/'
-# path='experiments/results/data/SB3_PPO_BipedalWalkerNorm/'
-# path='experiments/results/data/SB3_PPO_LunarLanderContinuous/'
-# path='experiments/results/data/SB3_PPO_Swimmer/'
-# path='experiments/results/data/SB3_PPO_Ant/'
-# path='experiments/results/data/SB3_PPO_HalfCheetah/'
-# path='experiments/results/data/SB3_PPO_Hopper/'
-# path='experiments/results/data/SB3_PPO_Walker2d/'
+path='experiments/results/data/SB3_PPO_BipedalWalker/'
+path='experiments/results/data/SB3_PPO_BipedalWalkerNorm/'
+path='experiments/results/data/SB3_PPO_LunarLanderContinuous/'
+path='experiments/results/data/SB3_PPO_Swimmer/'
+path='experiments/results/data/SB3_PPO_Ant/'
+path='experiments/results/data/SB3_PPO_HalfCheetah/'
+path='experiments/results/data/SB3_PPO_Hopper/'
+path='experiments/results/data/SB3_PPO_Walker2d/'
 seeds=list(range(1,31))
 
-
+'''
 def join_df_analysis_seed(path,seeds,only_test_with_cost_truth=False,only_default_est=False):
 
     if only_test_with_cost_truth:
@@ -222,10 +225,10 @@ def join_df_analysis_seed(path,seeds,only_test_with_cost_truth=False,only_defaul
                 if os.path.exists(f):
                     os.remove(f)
 
-# join_df_analysis_seed(path,seeds,only_test_with_cost_truth=False)
-# join_df_analysis_seed(path,seeds,only_test_with_cost_truth=True)
-# join_df_analysis_seed(path,seeds,only_default_est=True)
-
+join_df_analysis_seed(path,seeds,only_test_with_cost_truth=False)
+join_df_analysis_seed(path,seeds,only_test_with_cost_truth=True)
+join_df_analysis_seed(path,seeds,only_default_est=True)
+'''
 
 
 
