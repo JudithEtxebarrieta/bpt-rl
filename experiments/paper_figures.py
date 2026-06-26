@@ -3,6 +3,16 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import matplotlib.lines as mlines
 
+
+plt.rc('text', usetex=True)
+plt.rc('font', family='serif')
+plt.rcParams['text.latex.preamble'] = r'''
+\usepackage{amsmath}
+\boldmath
+'''
+
+
+
 #==================================================================================================
 # Regiones
 #==================================================================================================
@@ -63,6 +73,7 @@ def plot_curve_with_limits(ax,truth_last,first=False):
     
 fig, axs = plt.subplots(1,4, figsize=(12, 2.5))
 plt.subplots_adjust(top=0.9,bottom=0.3,left=0.05,right=0.98, hspace=0.0,wspace=0.2)
+
 
 truth_last1=pd.read_csv('experiments/results/data/paper/a_b_std.csv').iloc[:, 0].tolist()
 truth_last2=pd.read_csv('experiments/results/data/paper/a_b_min.csv').iloc[:, 0].tolist()
@@ -270,6 +281,7 @@ plt.savefig('experiments/results/figures/paper/deg_acc_eff.pdf')
 fig, axs = plt.subplots(1,1, figsize=(4.5, 3))
 plt.subplots_adjust(top=0.93,bottom=0.25,left=0.15,right=0.98, hspace=0.0,wspace=0.2)
 
+
 truth_last=pd.read_csv('experiments/results/data/paper/a_b_std.csv').iloc[:, 0].tolist()
 
 def degradation_evolution(truth_last):
@@ -331,7 +343,7 @@ def plot_degradation(ax,truth_last):
     transform=ax.transAxes,ha='left',va='top',fontsize=10)
 
 
-    ax.set_title('Degradation',fontsize=10)
+    ax.set_title(r'Degradation',fontsize=12)
     ax.set_ylabel(r'$f(\pi_t)$',fontsize=10)
     ax.set_xlabel(r'$t$',fontsize=10)
     ax.set_ylim([-0.1, 1.3])
@@ -342,7 +354,7 @@ def plot_degradation(ax,truth_last):
     mlines.Line2D([], [], color='grey', linestyle='-', linewidth=6, alpha=0.3,label=r'denominator of $\delta_t$'),
     mlines.Line2D([], [], color='black', linestyle='-', linewidth=6, alpha=0.5,label=r'numerator of $\delta_t$'),
 ]
-    leg1 = ax.legend(handles=legend_handles[:4],loc='upper center',bbox_to_anchor=(0.5, -0.2),ncol=2,frameon=False,fontsize=9)
+    leg1 = ax.legend(handles=legend_handles[:4],loc='upper center',bbox_to_anchor=(0.5, -0.2),ncol=2,frameon=False,fontsize=10)
     ax.add_artist(leg1)
 
 plot_degradation(axs,truth_last)
@@ -351,6 +363,7 @@ plt.savefig('experiments/results/figures/paper/deg.pdf')
 # Precision
 fig, axs = plt.subplots(1,1, figsize=(4.5, 3.2))
 plt.subplots_adjust(top=0.93,bottom=0.3,left=0.15,right=0.98, hspace=0.0,wspace=0.2)
+
 
 def precision(truth_selection,truth_best,min_truth):
     return (truth_selection-min_truth)/(truth_best-min_truth)
@@ -387,12 +400,12 @@ def plot_precision(ax,truth_last):
 
     prec1=round(precision(truth_last[35],max(truth_last[:65+1]),min(truth_last[:65+1])),2)
     prec2=round(precision(truth_last[50],max(truth_last),min(truth_last)),2)
-    ax.text(0.02, 0.98,rf'Train: $\alpha_{{65}}$ = {prec1}',transform=ax.transAxes,ha='left',va='top',fontsize=10,color='orange')
-    ax.text(0.02, 0.89,rf'Test: $\alpha_{{65}}$ = {prec2}',transform=ax.transAxes,ha='left',va='top',fontsize=10,color='green')
+    ax.text(0.02, 0.98,rf'\textit{{Train}}: $\alpha_{{65}}$ = ${prec1}$',transform=ax.transAxes,ha='left',va='top',fontsize=10,color='orange')
+    ax.text(0.02, 0.89,rf'\textit{{Validation}}: $\alpha_{{65}}$ = ${prec2}$',transform=ax.transAxes,ha='left',va='top',fontsize=10,color='green')
     ax.text(0.02, 0.80,r'$(t^\prime = 35)$',transform=ax.transAxes,ha='left',va='top',fontsize=10,color='green')
 
     ax.set_ylabel(r'$f(\pi_t)$',fontsize=10)
-    ax.set_title('Accuracy',fontsize=10)
+    ax.set_title(r'Accuracy',fontsize=12)
     ax.set_xlabel(r'$t$',fontsize=10)
 
     ax.set_ylim([-0.1, 1.3])
@@ -406,9 +419,9 @@ def plot_precision(ax,truth_last):
     mlines.Line2D([], [], color='blue', linestyle='--',linewidth=2, label=r"reward evolution by investing validation time $t'$ learning"),
 ]
 
-    leg1 = ax.legend(handles=legend_handles[:2],loc='upper center',bbox_to_anchor=(0.43, -0.15),ncol=2,frameon=False,fontsize=9,columnspacing=1.5)
-    leg2 = ax.legend(handles=legend_handles[2:3],loc='upper center',bbox_to_anchor=(0.43, -0.245),ncol=1,frameon=False,fontsize=9,columnspacing=1.5)
-    leg3 = ax.legend(handles=legend_handles[3:],loc='upper center',bbox_to_anchor=(0.43, -0.34),ncol=1,frameon=False,fontsize=9,columnspacing=1.5)
+    leg1 = ax.legend(handles=legend_handles[:2],loc='upper center',bbox_to_anchor=(0.43, -0.15),ncol=2,frameon=False,fontsize=10,columnspacing=1.5)
+    leg2 = ax.legend(handles=legend_handles[2:3],loc='upper center',bbox_to_anchor=(0.43, -0.245),ncol=1,frameon=False,fontsize=10,columnspacing=1.5)
+    leg3 = ax.legend(handles=legend_handles[3:],loc='upper center',bbox_to_anchor=(0.43, -0.34),ncol=1,frameon=False,fontsize=10,columnspacing=1.5)
     ax.add_artist(leg1)
     ax.add_artist(leg2)
 
@@ -418,6 +431,7 @@ plt.savefig('experiments/results/figures/paper/acc.pdf')
 # Eficiencia
 fig, axs = plt.subplots(1,1, figsize=(4.5, 3))
 plt.subplots_adjust(top=0.93,bottom=0.3,left=0.15,right=0.98, hspace=0.0,wspace=0.2)
+
 
 def efficiency(truth_selection,all_truth):
     indice = next(i for i, x in enumerate(all_truth) if x >= truth_selection)
@@ -436,7 +450,7 @@ def plot_efficiency(ax,truth_last):
     ax.scatter(42, truth_last[42], color='orange',zorder=10)
     ax.text(42+3, truth_last[42]-0.2,r'$\widetilde{\pi}_{100}$',color='orange',va='bottom')
     ax.scatter(t_min, truth_last[42], color='black',marker='x',zorder=10)
-    ax.text(0.05, truth_last[42]+0.03,r'$\varepsilon_{100}=$'+str(round(eff,2)),transform=ax.get_yaxis_transform(),color='orange',va='bottom')
+    ax.text(0.05, truth_last[42]+0.03,rf'$\varepsilon_{{100}}={{{round(eff,2)}}}$',transform=ax.get_yaxis_transform(),color='orange',va='bottom')
 
 
     #t=92, eficiencia baja por convergencia
@@ -446,10 +460,10 @@ def plot_efficiency(ax,truth_last):
     ax.scatter(92, truth_last[92], color='green',zorder=10)
     ax.text(92-2, truth_last[92]-0.3,r'$\widetilde{\pi}_{100}$',color='green',va='bottom')
     ax.scatter(t_min, truth_last[92], color='black',zorder=10,marker='x')
-    ax.text(0.05, truth_last[92]-0.15,r'$\varepsilon_{100}=$'+str(round(eff,2)),transform=ax.get_yaxis_transform(),color='green',va='bottom')
+    ax.text(0.05, truth_last[92]-0.15,rf'$\varepsilon_{{100}}={{{round(eff,2)}}}$',transform=ax.get_yaxis_transform(),color='green',va='bottom')
 
     ax.set_ylabel(r'$f(\pi_t)$',fontsize=10)
-    ax.set_title('Efficiency',fontsize=10)
+    ax.set_title(r'Efficiency',fontsize=12)
     ax.set_xlabel(r'$t$',fontsize=10)
 
     # Leyenda
@@ -459,8 +473,8 @@ def plot_efficiency(ax,truth_last):
     mlines.Line2D([], [], color='green', linestyle='-', linewidth=6, alpha=0.5,label=r'numerator of $\varepsilon_t$ for selection 2'),
     mlines.Line2D([], [], color='black', marker='x', linestyle='None',markersize=7, label='first time with same reward'),]
 
-    leg1 = ax.legend(handles=legend_handles[:2],loc='upper center',bbox_to_anchor=(0.43, -0.2),ncol=2,frameon=False,fontsize=9,columnspacing=1.5)
-    leg2 = ax.legend(handles=legend_handles[2:],loc='upper center',bbox_to_anchor=(0.43, -0.3),ncol=2,frameon=False,fontsize=9,columnspacing=0.5)
+    leg1 = ax.legend(handles=legend_handles[:2],loc='upper center',bbox_to_anchor=(0.43, -0.2),ncol=2,frameon=False,fontsize=10,columnspacing=1.5)
+    leg2 = ax.legend(handles=legend_handles[2:],loc='upper center',bbox_to_anchor=(0.43, -0.3),ncol=2,frameon=False,fontsize=10,columnspacing=0.5)
     ax.add_artist(leg1)
 
 plot_efficiency(axs,truth_last)

@@ -61,6 +61,13 @@ def abbreviate(env_name: str) -> str:
 
 
 # Class to construct figures for the appendixes
+plt.rc('text', usetex=True)
+plt.rc('font', family='serif')
+plt.rcParams['text.latex.preamble'] = r'''
+\usepackage{amsmath}
+\boldmath
+'''
+
 class Grapher():
 
     def __init__(self,library,all_packs,seeds,data_path,figure_path):
@@ -107,7 +114,6 @@ class Grapher():
                 ax.set_xticks([])
             ax.set_yticks([]) 
 
-                # Graficas
     
 
         # Grafica de degradaciones
@@ -147,7 +153,7 @@ class Grapher():
     def estimations(self,train_white=False):
 
 
-        def plot_analysis_per_seed(ax,truth,cols_test,cols_train,first_row,last_row,first_column):
+        def plot_analysis_per_seed(ax,truth,cols_test,cols_train,first_row,last_row,first_column,center_row=False,center_column=False):
 
             # Estimates with validation
             greens = plt.cm.Greens(np.linspace(0.3, 0.9, len(cols_test.columns)))
@@ -157,36 +163,36 @@ class Grapher():
             #ax.plot(range(len(truth)),np.array(truth)-np.array(truth), color='black', label='truth')
 
             for col, color in zip(cols_test.columns[::-1], greens):
-                ax.plot(range(len(truth)), abs(np.array(cols_test[col].values)-np.array(truth)), color=color, label=col.split('_')[0]+' validation',linewidth=1)
+                ax.plot(range(len(truth)), abs(np.array(cols_test[col].values)-np.array(truth)), color=color, label=col.split('_')[0]+r' \textit{validation}',linewidth=1)
             for col, color in zip(cols_train.columns[::-1], oranges):
                 if train_white:
                     ax.plot(range(len(truth)), abs(np.array(cols_train[col].values)-np.array(truth)), color='white',alpha=0,linewidth=1)
                 else:
-                    ax.plot(range(len(truth)), abs(np.array(cols_train[col].values)-np.array(truth)), color=color, label=col.split('_')[0]+' train',linewidth=1)
+                    ax.plot(range(len(truth)), abs(np.array(cols_train[col].values)-np.array(truth)), color=color, label=col.split('_')[0]+r' \textit{train}',linewidth=1)
 
 
             ax.ticklabel_format(axis='y', style='sci', scilimits=(0, 0))
             offset = ax.yaxis.get_offset_text()
-            offset.set_x(-0.15)
+            offset.set_x(0)
 
             if first_row:
                 ax.set_title(abbreviate(pack.split('_')[2]))
             else:
                 ax.yaxis.get_offset_text().set_visible(False)
             if last_row:
-                ax.set_xlabel(r'$t$')
+                ax.set_xlabel(r'$t$',fontsize=14)
                 ax.tick_params(labelbottom=True)
             else:
                 ax.tick_params(labelbottom=False)
-            if first_column:
-                ax.set_ylabel(r'$|\widetilde{f}(\pi_t)-f(\pi_t)|$')
+            if first_column and center_row:
+                ax.set_ylabel(r'$|\widetilde{f}(\pi_t)-f(\pi_t)|$',fontsize=14)
 
             if last_row and first_column:
                 leg=ax.legend(
                         loc='upper center',
                         bbox_to_anchor=(4, -0.5),
                         ncol=len(ax.get_legend_handles_labels()[0]),
-                        frameon=False
+                        frameon=False,fontsize=14,handletextpad=0.5,columnspacing=0.9,handlelength=0.9
                     )
                 for line in leg.get_lines():
                     line.set_linewidth(3)
@@ -202,8 +208,10 @@ class Grapher():
             df_test=pd.read_csv(self.data_path+'/'+pack.replace('pack','SB3')+'/df_test_all_seq_est.csv')
             df_train=pd.read_csv(self.data_path+'/'+pack.replace('pack','SB3')+'/df_train_all_seq_est.csv')
 
+            
             for seed in range(1,n_seeds+1):
 
+                center_row=[True if (seed-1)==n_seeds//2 else False][0]
                 first_row=[True if seed==1 else False][0]
                 last_row=[True if seed==n_seeds else False][0]
                 first_column=[True if i==0 else False][0]
@@ -213,7 +221,7 @@ class Grapher():
                 cols_test=cols_test.applymap(lambda x: DataConverter.compress_decompress_list(x,compress=False)[0])
                 cols_train = df_train[[c for c in df_train.columns if c.endswith('_seed'+str(seed))]]
 
-                plot_analysis_per_seed(axs[seed-1,i],truth,cols_test,cols_train,first_row,last_row,first_column)
+                plot_analysis_per_seed(axs[seed-1,i],truth,cols_test,cols_train,first_row,last_row,first_column,center_row=center_row)
 
         if train_white:
             plt.savefig(self.figure_path+'/all_setups/appendix_estimations_only_test.pdf')
@@ -223,44 +231,44 @@ class Grapher():
     def estimations_selected_conf(self):
 
 
-        def plot_analysis_per_seed(ax,truth,test,train,first_row,last_row,first_column):
+        def plot_analysis_per_seed(ax,truth,test,train,first_row,last_row,first_column,center_row):
 
 
             # Ground truth
-            ax.plot(range(len(train)),np.array(test), color='green', label='validation',linewidth=2,alpha=0.8)
+            ax.plot(range(len(train)),np.array(test), color='green', label=r'\textit{validation}',linewidth=2,alpha=0.8)
             ax.plot(range(len(truth)),np.array(truth), color='black', label='truth',linewidth=1)
-            ax.plot(range(len(train)),np.array(train), color='orange', label='train',linewidth=1)
+            ax.plot(range(len(train)),np.array(train), color='orange', label=r'\textit{train}',linewidth=1)
             
 
             ax.ticklabel_format(axis='y', style='sci', scilimits=(0, 0))
             offset = ax.yaxis.get_offset_text()
-            offset.set_x(-0.15)
+            offset.set_x(0)
 
             if first_row:
                 ax.set_title(abbreviate(pack.split('_')[2]))
             else:
                 ax.yaxis.get_offset_text().set_visible(False)
             if last_row:
-                ax.set_xlabel(r'$t$')
+                ax.set_xlabel(r'$t$',fontsize=14)
                 ax.tick_params(labelbottom=True)
             else:
                 ax.tick_params(labelbottom=False)
-            if first_column:
-                ax.set_ylabel(r'$\widetilde{f}(\pi_t)$')
+            if first_column and center_row:
+                ax.set_ylabel(r'$\widetilde{f}(\pi_t)$',fontsize=14)
 
             if last_row and first_column:
                 legend_handles = [
                     mlines.Line2D([], [], color='black', linestyle='-', linewidth=2, label='ground truth'),
-                    mlines.Line2D([], [], color='green', linestyle='-', linewidth=2, label=r'validation $\kappa=5$'),
-                    mlines.Line2D([], [], color='orange', linestyle='-', linewidth=2, label=r'train $\kappa=50$'),
+                    mlines.Line2D([], [], color='green', linestyle='-', linewidth=2, label=r'\textit{validation} $\kappa=5$'),
+                    mlines.Line2D([], [], color='orange', linestyle='-', linewidth=2, label=r'\textit{train} $\kappa=50$'),
                 ]
 
                 leg=ax.legend(
                     handles=legend_handles,
                     loc='upper center',
-                    bbox_to_anchor=(1, -0.45),  # fuera de la gráfica (abajo)
+                    bbox_to_anchor=(4, -0.45),  # fuera de la gráfica (abajo)
                     ncol=3,
-                    frameon=False
+                    frameon=False, fontsize=14
                 )
                 for line in leg.get_lines():
                     line.set_linewidth(3)
@@ -289,6 +297,7 @@ class Grapher():
                 first_row=[True if seed==1 else False][0]
                 last_row=[True if seed==n_seeds else False][0]
                 first_column=[True if i==0 else False][0]
+                center_row=[True if seed-1==n_seeds//2 else False][0]
 
                 truth= df_truth[pack+str(seed)].tolist()
                 
@@ -296,7 +305,7 @@ class Grapher():
                 test=[DataConverter.compress_decompress_list(x,compress=False)[0] for x in test]
                 train = df_train[str(general_train_n_ep)+'_traj_ep_seed'+str(seed)].tolist()
 
-                plot_analysis_per_seed(axs[seed-1,i],truth,test,train,first_row,last_row,first_column)
+                plot_analysis_per_seed(axs[seed-1,i],truth,test,train,first_row,last_row,first_column,center_row=center_row)
 
 
 
@@ -306,7 +315,7 @@ class Grapher():
 
         def plot_analysis_per_seed(ax1,ax2,pack,seed,
                                     global_deg_metric=global_deg_metric,local_deg_metric=local_deg_metric,
-                                    first_row=False,first_column=False,last_row=False):
+                                    first_row=False,first_column=False,last_row=False,center_row=False):
 
             colors=list(mcolors.TABLEAU_COLORS.keys())
 
@@ -331,23 +340,23 @@ class Grapher():
             ax2.set_xlim(0,len(truth_last))
             ax2.ticklabel_format(axis='y', style='sci', scilimits=(0, 0))
             offset = ax2.yaxis.get_offset_text()
-            offset.set_x(-0.15)
+            offset.set_x(-0.19)
 
             if first_row:
-                ax1.set_title(abbreviate(pack.split('_')[2]))
+                ax1.set_title(abbreviate(pack.split('_')[2]),fontsize=14)
             if last_row:
-                ax2.set_xlabel(r'$t$')
+                ax2.set_xlabel(r'$t$',fontsize=12)
                 ax2.tick_params(labelbottom=True)
             else:
                 ax2.tick_params(labelbottom=False)
-            if first_column:
-                ax2.set_ylabel(r'$f(\pi_t)$')
+            if first_column and center_row:
+                ax2.set_ylabel(r'$f(\pi_t)$',fontsize=12)
 
         n_seeds=5
 
         fig, axs = plt.subplots(n_seeds*2,len(self.all_packs), figsize=(2.5*len(self.all_packs),1.2*n_seeds),
                                 height_ratios=[0.2,1]*n_seeds)
-        plt.subplots_adjust(top=0.95,bottom=0.15,left=0.05,right=0.98, hspace=0.2,wspace=0.2)
+        plt.subplots_adjust(top=0.95,bottom=0.13,left=0.04,right=0.99, hspace=0.2,wspace=0.2)
 
         # compartir ejes solo para filas impares
         for col in range(len(self.all_packs)):
@@ -364,9 +373,10 @@ class Grapher():
                 first_row=[True if seed==1 else False][0]
                 last_row=[True if seed==n_seeds else False][0]
                 first_column=[True if i==0 else False][0]
+                center_row=[True if seed-1==n_seeds//2 else False][0]
                 j=seed-1
                 plot_analysis_per_seed(axs[j*2-n_seeds*2*((j+1)//n_seeds),i],axs[j*2+1-n_seeds*2*((j+1)//n_seeds),i],pack,seed,
-                                       first_row=first_row,last_row=last_row,first_column=first_column)
+                                       first_row=first_row,last_row=last_row,first_column=first_column,center_row=center_row)
                 
         legend_elements = [
                     Patch(facecolor='black', edgecolor='black', label=r'$\delta_t=1$'),
@@ -376,7 +386,7 @@ class Grapher():
                     Line2D([0], [0], color='black', lw=2, linestyle='--', label=r'$t_{max}$')
                     
                 ]
-        fig.legend(handles=legend_elements,loc='lower center',ncol=5,frameon=False,bbox_to_anchor=(0.18, 0.005))
+        fig.legend(handles=legend_elements,loc='lower center',ncol=5,frameon=False,bbox_to_anchor=(0.5, -0.01),fontsize=12)
 
         plt.savefig(self.figure_path+'/all_setups/appendix_regions.pdf')    
 
@@ -419,13 +429,14 @@ class Grapher():
                 ax.grid(axis='x', linestyle='--',alpha=0.4)
                 if nombres!=None:
                     ax.set_yticks(range(len(n_ep_list)), n_ep_list)
+                    ax.set_yticklabels([rf'${{{n_ep}}}$' for n_ep in n_ep_list])
                     if first_column:
-                        ax.set_ylabel(r'train $\kappa$')
+                        ax.set_ylabel(r'\textit{train} $\kappa$',fontsize=14)
 
                 else:
                     ax.set_yticks([])
 
-                ax.set_title(title)
+                ax.set_title(title,fontsize=14)
                 ax.set_xticklabels([])
         
             def obtain_best_train_conf(prec1,prec2,prec3,n_ep_list):
@@ -484,12 +495,13 @@ class Grapher():
                         ax.axhline(current_height-0.5, color='black', linewidth=1)
                 ax.grid(axis='x', linestyle='--', alpha=0.5)
                 ax.set_yticks(range(len(segment_labels)), segment_labels)
+                ax.set_yticklabels([rf'${{{i}}}$' for i in segment_labels])
 
                 if nombres!=None:
                     for center, name in zip(region_centers, n_ep_list):
-                        ax.text(-0.25, center, name,transform=ax.get_yaxis_transform(),ha='right', va='center')
+                        ax.text(-0.25, center, rf'${{{name}}}$',transform=ax.get_yaxis_transform(),ha='right', va='center')
                     if first_column:
-                        ax.set_ylabel(r'validation $(\kappa,\varphi_c)$',labelpad=35)
+                        ax.set_ylabel(r'\textit{validation} $(\kappa,\varphi_c)$',labelpad=35,fontsize=14)
                 else:
                     ax.set_yticks([])
       
@@ -534,9 +546,9 @@ class Grapher():
 
 
         fig, axs = plt.subplots(8,11, figsize=(1.8*11,2*8),
-                                gridspec_kw={'width_ratios': [1]*3+[0.5]+[1]*3+[0.5]+[1]*3,
-                                             'height_ratios': [0.1,0.5]+[0.05]+[0.1,0.5]+[0.05]+[0.1,0.5]})
-        plt.subplots_adjust(top=0.95,bottom=0.05,left=0.06,right=0.98, hspace=0.1,wspace=0)
+                                gridspec_kw={'width_ratios': [1]*3+[0.7]+[1]*3+[0.7]+[1]*3,
+                                             'height_ratios': [0.1,0.5]+[0.07]+[0.1,0.5]+[0.07]+[0.1,0.5]})
+        plt.subplots_adjust(top=0.96,bottom=0.02,left=0.06,right=0.98, hspace=0.1,wspace=0)
 
 
         for i,pack in tqdm(enumerate(self.all_packs)):
@@ -573,7 +585,7 @@ class Grapher():
                     bbox_to_anchor=(1.5, 0),
                     ncol=1,         
                     frameon=False,
-                    fontsize=12
+                    fontsize=14
                 )
 
 
@@ -621,7 +633,7 @@ class Grapher():
                 values_clip = np.clip(values, 0, 1)
                 
                 axs_cost[i].imshow(values_clip[np.newaxis, :],cmap=cmap_gwr,norm=norm_gwr,aspect='auto',interpolation='nearest')
-                axs_cost[i].set_ylabel(col.split('_')[0], rotation=0,fontsize=8)
+                axs_cost[i].set_ylabel(rf'${{{col.split('_')[0]}}}$', rotation=0,fontsize=8)
                 axs_cost[i].yaxis.set_label_coords(-0.05, 0)
 
             # Limpieza visual
@@ -634,14 +646,14 @@ class Grapher():
             if last_row:
                 for ax in all_axs[:-1]:
                     ax.set_xticks([])
-                all_axs[-1].set_xlabel(r'$t$')
+                all_axs[-1].set_xlabel(r'$t$',fontsize=10)
             else:
                 for ax in all_axs[:-2]:
                     ax.set_xticks([])
                 all_axs[-1].set_xlabel('')
             all_axs[-2].tick_params(axis='x', labelsize=8,length=0.5)
             all_axs[-1].tick_params(axis='x', labelsize=8,length=0.5)
-            axs_cost[1].text(-0.09, 0.5,abbreviate(pack.replace('pack_PPO_','')),rotation=90,va='center',ha='center',transform=axs_cost[1].transAxes,fontsize=8)
+            axs_cost[1].text(-0.1, 0.5,abbreviate(pack.replace('pack_PPO_','')),rotation=90,va='center',ha='center',transform=axs_cost[1].transAxes,fontsize=10)
 
 
   
@@ -680,13 +692,13 @@ class Grapher():
         # izquierda
         cax1 = fig.add_axes([0.08+0.05, y, w, h])
         cbar1 = fig.colorbar(sm, cax=cax1, orientation='horizontal')
-        cbar1.set_label('Validation-to-learning iter. cost ratio', fontsize=8)
+        cbar1.set_label('Validation-to-learning iter. cost ratio', fontsize=10)
         cbar1.ax.tick_params(labelsize=8)
 
         # derecha
         cax2 = fig.add_axes([0.54+0.05, y, w, h])
         cbar2 = fig.colorbar(sm2, cax=cax2, orientation='horizontal')
-        cbar2.set_label(r'Normalized $f(\pi_t)$ or mean $|\tau|$', fontsize=8)
+        cbar2.set_label(r'Normalized $f(\pi_t)$ or mean $|\tau|$', fontsize=10)
         cbar2.ax.tick_params(labelsize=8)
 
         plt.savefig(self.figure_path+'/all_setups/appendix_val_cost_throughout_sequence.pdf')
@@ -761,7 +773,7 @@ class Grapher():
                 # Despues dibujar sobre esta la grafica auxiliar que indica dodnde nos hemos pasado
                 plot_iters_upper_cost_threshold(axs[2*j+j,i],up_to_cost)
 
-            axs[0,i].set_title(abbreviate(pack.replace('pack_PPO_','')),fontsize=8)
+            axs[0,i].set_title(abbreviate(pack.replace('pack_PPO_','')),fontsize=14)
 
         for i in [2,5,8]:
             for j in range(7):
@@ -777,7 +789,7 @@ class Grapher():
         # linea roja extra
         legend_elements.append(Line2D([0], [0], color='red', lw=2, label=r'$\varphi_c$ is surpassed'))
         axs[len(list_cost)*2+len(list_cost)-2,0].legend(handles=legend_elements,
-            loc='upper center',bbox_to_anchor=(2.5, -0.55),ncol=len(legend_elements), frameon=False)
+            loc='upper center',bbox_to_anchor=(4, -0.55),ncol=len(legend_elements), frameon=False)
                 
         plt.savefig(self.figure_path+'/all_setups/appendix_cost_of_cost_driven_test.pdf')
 
@@ -799,14 +811,14 @@ class Grapher():
                     )
                 )
             ax.set_xticks(list(range(1,len(list_costs)+1)))
-            ax.set_xticklabels([str(cost) for cost in list_costs])
-            ax.set_title(abbreviate(pack.replace('pack_PPO_','')),fontsize=8)
+            ax.set_xticklabels([rf'${{{cost}}}$' for cost in list_costs])
+            ax.set_title(abbreviate(pack.replace('pack_PPO_','')),fontsize=14)
 
             if not first_column:
                 ax.set_yticks([])
             if first_column:
-                ax.set_ylabel(r'$c_{val}/c_{learn}$')
-            ax.set_xlabel(r'$\varphi_c$')
+                ax.set_ylabel(r'$c_{val}/c_{learn}$',fontsize=12)
+            ax.set_xlabel(r'$\varphi_c$',fontsize=12)
 
         fig, axs = plt.subplots(1,len(self.all_packs), figsize=(1.8*len(self.all_packs),2))
         plt.subplots_adjust(top=0.85,bottom=0.21,left=0.07,right=0.98, hspace=0.1,wspace=0.1)
@@ -853,19 +865,19 @@ class Grapher():
                 ax.plot([x - 0.25, x + 0.25],[med, med],color='blue',linewidth=2,zorder=2)
 
             ax.set_xticks(list(range(1,len(list_n_ep)+1)))
-            ax.set_xticklabels([str(cost) for cost in list_n_ep])
+            ax.set_xticklabels([rf'${{{cost}}}$' for cost in list_n_ep])
 
             if first_row:
-                ax.set_title(abbreviate(pack.replace('pack_PPO_','')),fontsize=8)
+                ax.set_title(abbreviate(pack.replace('pack_PPO_','')),fontsize=14)
             if not first_column:
                 ax.set_yticks([])
             if first_column:
-                ax.set_ylabel(r'$c_{val}/c_{learn}$')
-                ax.text(-0.5, 0.5,rf'$\varphi_c={cost}$',transform=ax.transAxes,ha='center',va='center',rotation=90)
+                ax.set_ylabel(r'$c_{val}/c_{learn}$',fontsize=12)
+                ax.text(-0.5, 0.5,rf'$\varphi_c={cost}$',transform=ax.transAxes,ha='center',va='center',rotation=90,fontsize=12)
             if not last_row:
                 ax.set_xticks([])
             if last_row:
-                ax.set_xlabel(r'$\kappa$')
+                ax.set_xlabel(r'$\kappa$',fontsize=12)
 
         fig, axs = plt.subplots(len(list_cost),len(self.all_packs), figsize=(1.8*len(self.all_packs),1.5*len(list_cost)))
         plt.subplots_adjust(top=0.95,bottom=0.1,left=0.07,right=0.98, hspace=0.1,wspace=0.1)
@@ -917,19 +929,19 @@ class Grapher():
                 ax.fill_between([x - 0.25, x + 0.25],[p25, p25],[p75, p75],color='blue',alpha=0.4,zorder=1)
                 ax.plot([x - 0.25, x + 0.25],[med, med],color='blue',linewidth=2,zorder=2)
             ax.set_xticks(list(range(1,len(list_n_ep)+1)))
-            ax.set_xticklabels([str(cost) for cost in list_n_ep])
+            ax.set_xticklabels([rf'${{{cost}}}$' for cost in list_n_ep])
 
             if first_row:
-                ax.set_title(abbreviate(pack.replace('pack_PPO_','')),fontsize=8)
+                ax.set_title(abbreviate(pack.replace('pack_PPO_','')),fontsize=14)
             if not first_column:
                 ax.set_yticks([])
             if first_column:
-                ax.set_ylabel(r'$c_{val}/c_{learn}$')
+                ax.set_ylabel(r'$c_{val}/c_{learn}$',fontsize=12)
                 ax.text(-0.5, 0.5,rf'$\varphi={freq}$',transform=ax.transAxes,ha='center',va='center',rotation=90)
             if not last_row:
                 ax.set_xticks([])
             if last_row:
-                ax.set_xlabel(r'$\kappa$')
+                ax.set_xlabel(r'$\kappa$',fontsize=12)
 
         list_freq=[20,10,5,1]
 
@@ -972,9 +984,9 @@ class Grapher():
             cmap = ListedColormap(["white", "black"])
             ax.imshow(img,cmap=cmap,aspect='auto',vmin=0,vmax=1,interpolation='nearest')
             ax.set_yticks([])
-            ax.set_ylabel(abbreviate(pack.replace('pack_PPO_','')),fontsize=8)
+            ax.set_ylabel(abbreviate(pack.replace('pack_PPO_','')),fontsize=10)
             if last_row:
-                ax.set_xlabel(r'$t$')
+                ax.set_xlabel(r'$t$',fontsize=10)
 
             ax.tick_params(axis='x', labelsize=8,length=0.5)
 
@@ -1081,7 +1093,7 @@ class Grapher():
 
             
         fig, axs = plt.subplots(2,len(self.all_packs), figsize=(2*len(self.all_packs),2*2),sharey='row',sharex='col')
-        plt.subplots_adjust(top=0.9,bottom=0.2,left=0.06,right=0.99, hspace=0.,wspace=0.)
+        plt.subplots_adjust(top=0.9,bottom=0.2,left=0.075,right=0.99, hspace=0.,wspace=0.)
 
         for ax in axs.flat:
             ax.grid(True, which='major', axis='both', color='gray', linestyle='--', alpha=0.3)
@@ -1123,11 +1135,13 @@ class Grapher():
                 ax.plot(x, y2, color="#815513", label='middle',linewidth=1.5)
                 ax.plot(x, y3, color='#3cb371', label='high',marker=6,linewidth=1.5)
                 ax.axhline(y=0, color='black', linestyle='--',linewidth=1)
-                ax.set_title(abbreviate(pack.replace('pack_PPO_','')))
+                ax.set_title(abbreviate(pack.replace('pack_PPO_','')),fontsize=14)
+                ax.tick_params(axis='y', labelsize=12)
+                ax.set_ylim(-0.25,0.4)
 
 
                 if first_pack:
-                    ax.set_ylabel('Proportion\ndifference in RA')
+                    ax.set_ylabel('Proportion\ndifference in RA',fontsize=12)
 
             def plot_acc(ax,x,listas,first_pack=False,middle_pack=False):
 
@@ -1174,14 +1188,16 @@ class Grapher():
 
                 ax.set_ylim(-0.1,1.1)
                 ax.set_yticks([0, 0.25, 0.5, 0.75, 1])
-                ax.set_yticklabels([0, 0.25, 0.5, 0.75, 1])
+                ax.set_yticklabels(['$0$', '$0.25$', '$0.5$', '$0.75$', '$1$'])
                 ax.set_xlim(0,0.55)
                 ax.set_xticks([0.05, 0.2, 0.35, 0.5])
-                ax.set_xticklabels([0.05, 0.2, 0.35, 0.5])
+                ax.set_xticklabels(['$0.05$', '$0.2$', '$0.35$', '$0.5$'])
                 if first_pack:
-                    ax.set_ylabel('Accuracy in\nbest-policy tracking')
+                    ax.set_ylabel('Accuracy in\nbest-policy tracking',fontsize=12)
                 if middle_pack:
-                    ax.set_xlabel(r'$\varphi_c$')
+                    ax.set_xlabel(r'$\varphi_c$',fontsize=12)
+            
+                ax.tick_params(axis='both', labelsize=12)
 
 
             first_pack=[True if i==0 else False][0]
@@ -1213,9 +1229,9 @@ class Grapher():
 
         axs[1,0].legend(handles=legend_elements,
                 loc='upper center',
-                bbox_to_anchor=(2.5, -0.3),
+                bbox_to_anchor=(3.5, -0.3),
                 ncol=5,
-                frameon=False)
+                frameon=False,fontsize=12)
                 
         plt.savefig(self.figure_path+'/all_setups/appendix_early_stopping_tradeoff.png')
 

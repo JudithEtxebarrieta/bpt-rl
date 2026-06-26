@@ -42,6 +42,13 @@ def abbreviate(env_name: str) -> str:
 
 
 # Class for generating figures of the main analysis
+plt.rc('text', usetex=True)
+plt.rc('font', family='serif')
+plt.rcParams['text.latex.preamble'] = r'''
+\usepackage{amsmath}
+\boldmath
+'''
+
 class Grapher():
 
     def __init__(self,library,all_packs,seeds,data_path,figure_path):
@@ -77,7 +84,7 @@ class Grapher():
             return count_list
 
         # Funciones para plotear datos pack-region
-        def plot_pack_degradation(ax,deg_list,pack_name='',title='',not_last_pack=False):
+        def plot_pack_degradation(ax,deg_list,pack_name='',title='',not_last_pack=False,main_title='',xlabel=''):
 
             data = np.array(deg_list)
 
@@ -100,16 +107,19 @@ class Grapher():
             ax.axvline(np.median(data), color='red',linewidth=2)
 
             ax.set_xlim(-0.05, 1.05)
-            ax.set_title(title)
-            ax.set_ylabel(abbreviate(pack_name), rotation=0, labelpad=20)
+            ax.set_title(title,fontsize=14)
+            ax.text( 0.5, 1.5, rf'\textbf{{{main_title}}}',transform=ax.transAxes,ha='center',va='bottom',fontsize=14)
+            ax.set_ylabel(abbreviate(pack_name), rotation=0, labelpad=20,fontsize=12)
             ax.set_xticks([0, 0.25, 0.5, 0.75, 1])
-            ax.set_xticklabels(['0', '0.25', '0.5', '0.75', '1'])
+            ax.set_xticklabels([r'$0$', r'$0.25$', r'$0.5$', r'$0.75$', r'$1$'],fontsize=12)
 
             if not_last_pack:   
                 ax.set_xticks([])
+            else:
+                ax.set_xlabel(xlabel,fontsize=12)
             ax.set_yticks([]) 
 
-        def plot_pack_criteria_prec_or_eff(ax,listas,pack_name='',title='',last_pack=False):
+        def plot_pack_criteria_prec_or_eff(ax,listas,pack_name='',title='',last_pack=False,main_title='',xlabel=''):
             colors=['green','orange','blue']
             color_marker_map = {'green': 's','orange': '^','blue': 'o'}
             for y, data,color in zip(range(len(listas)), listas,colors):
@@ -120,24 +130,27 @@ class Grapher():
                 ax.plot(np.median(data), y, color_marker_map[color], color=color,markersize=4)
 
             ax.grid(axis='x', linestyle='--',alpha=0.4)
-            ax.set_title(title)
+            ax.set_title(title,fontsize=14)
+            ax.text( 0.5, 1.5, rf'\textbf{{{main_title}}}',transform=ax.transAxes,ha='center',va='bottom',fontsize=14)
             ax.set_xlim(-0.05,1.05)
-            ax.set_ylabel(abbreviate(pack_name), rotation=0, labelpad=20)
+            ax.set_ylabel(abbreviate(pack_name), rotation=0, labelpad=20,fontsize=12)
             ax.set_xticks([0, 0.25, 0.5, 0.75, 1])
-            ax.set_xticklabels(['0', '0.25', '0.5', '0.75', '1'])
+            ax.set_xticklabels([r'$0$', r'$0.25$', r'$0.5$', r'$0.75$', r'$1$'])
             ax.set_yticks([])
-            ax.tick_params(axis='x', labelsize=8)
+            ax.tick_params(axis='x', labelsize=12)
             if not last_pack:
                 ax.tick_params(axis='x', labelbottom=False)
             else:
+                if xlabel!='':
+                    ax.set_xlabel(xlabel,fontsize=12)
                 if pack_name!='' and prec_or_eff=='prec':
             
                     legend_elements = [
-                        Line2D([0], [0], marker='o', color='blue', label='Last', markersize=6, linestyle=''),
-                        Line2D([0], [0], marker='^', color='orange', label='Train', markersize=6, linestyle=''),
-                        Line2D([0], [0], marker='s', color='green', label='Validation', markersize=6, linestyle='')
+                        Line2D([0], [0], marker='o', color='blue', label=r'\textit{Last}', markersize=6, linestyle=''),
+                        Line2D([0], [0], marker='^', color='orange', label=r'\textit{Train}', markersize=6, linestyle=''),
+                        Line2D([0], [0], marker='s', color='green', label=r'\textit{Validation}', markersize=6, linestyle='')
                     ]
-                    ax.legend(handles=legend_elements, loc='upper center',bbox_to_anchor=(1, -0.4), ncol=3, frameon=False)
+                    ax.legend(handles=legend_elements, loc='upper center',bbox_to_anchor=(1.3, -0.7), ncol=3, frameon=False,fontsize=14)
             
         # Cargar datos necesarios
         df_conf=pd.read_csv(self.data_path+'/configurations.csv')
@@ -148,7 +161,7 @@ class Grapher():
         # Graficas
         fig, axs = plt.subplots(len(self.all_packs),3*3+2, figsize=(5*3,0.65*len(self.all_packs)),
                                     gridspec_kw={'width_ratios': [1,1,1,0.35,1,1,1,0.35,1,1,1]})
-        plt.subplots_adjust(top=0.9,bottom=0.15,left=0.05,right=0.98, hspace=0.0,wspace=0.0)
+        plt.subplots_adjust(top=0.9,bottom=0.15,left=0.03,right=0.99, hspace=0.0,wspace=0.0)
 
         #---- Degradacion
         for i,pack in enumerate(all_packs):
@@ -162,10 +175,12 @@ class Grapher():
                                 ) 
 
             # Dibujar distribucion de degradacion de las tres regiones
-            title=[['\nInitialization','Degradation\nLearning','\nConvergence']if i==0 else ['']*3][0]
+            title=[['Initialization','Learning','Convergence']if i==0 else ['']*3][0]
+            main_title=[r'\textbf{Degradation}' if i==0 else ''][0]
+            xlabel=r'$\delta$'
             not_last_pack=[False if i==len(all_packs)-1 else True][0]
             plot_pack_degradation(axs[i,0],deg1,pack_name=pack.replace('pack_PPO_',''),title=title[0],not_last_pack=not_last_pack)
-            plot_pack_degradation(axs[i,1],deg2,title=title[1],not_last_pack=not_last_pack)
+            plot_pack_degradation(axs[i,1],deg2,title=title[1],not_last_pack=not_last_pack,main_title=main_title,xlabel=xlabel)
             plot_pack_degradation(axs[i,2],deg3,title=title[2],not_last_pack=not_last_pack)
 
             # Actualizar datos de interes
@@ -192,10 +207,12 @@ class Grapher():
                         )
             
             # Dibujar distribucion de prec/eff de las tres regiones
-            title=[['\nInitialization','Accuracy\nLearning','\nConvergence']if i==0 else ['']*3][0]
+            title=[['Initialization','Learning ','Convergence']if i==0 else ['']*3][0]
+            main_title=[r'\textbf{Accuracy}' if i==0 else ''][0]
+            xlabel=r'$\alpha$'
             last_pack=[True if i==len(all_packs)-1 else False][0]
             plot_pack_criteria_prec_or_eff(axs[i,4],[last1,train1,test1][::-1],pack_name=pack.replace('pack_PPO_',''),title=title[0],last_pack=last_pack)
-            plot_pack_criteria_prec_or_eff(axs[i,5],[last2,train2,test2][::-1],title=title[1],last_pack=last_pack)
+            plot_pack_criteria_prec_or_eff(axs[i,5],[last2,train2,test2][::-1],title=title[1],last_pack=last_pack,main_title=main_title,xlabel=xlabel)
             plot_pack_criteria_prec_or_eff(axs[i,6],[last3,train3,test3][::-1],title=title[2],last_pack=last_pack)
 
             # Actualizar datos de interes
@@ -224,10 +241,12 @@ class Grapher():
                         )
 
             # Dibujar distribucion de prec/eff de las tres regiones
-            title=[['\nInitialization','Efficiency\nLearning','\nConvergence']if i==0 else ['']*3][0]
+            title=[['Initialization','Learning','Convergence']if i==0 else ['']*3][0]
+            main_title=[r'\textbf{Efficiency}' if i==0 else ''][0]
+            xlabel=r'$\varepsilon$'
             last_pack=[True if i==len(all_packs)-1 else False][0]
             plot_pack_criteria_prec_or_eff(axs[i,8],[last1,train1,test1][::-1],pack_name=pack.replace('pack_PPO_',''),title=title[0],last_pack=last_pack)
-            plot_pack_criteria_prec_or_eff(axs[i,9],[last2,train2,test2][::-1],title=title[1],last_pack=last_pack)
+            plot_pack_criteria_prec_or_eff(axs[i,9],[last2,train2,test2][::-1],title=title[1],last_pack=last_pack,main_title=main_title,xlabel=xlabel)
             plot_pack_criteria_prec_or_eff(axs[i,10],[last3,train3,test3][::-1],title=title[2],last_pack=last_pack)
 
             # Actualizar datos de interes
@@ -339,9 +358,9 @@ class Grapher():
         test_conf=conf_str.split('_')[0]+'_'+conf_str.split('_')[1]+'cost'
 
         legend_map = {
-                "last":  Line2D([0], [0], marker='o', color='#0000FF', label='Last', markersize=6, linestyle=''),
-                "train": Line2D([0], [0], marker='^', color='#FF8800', label='Train', markersize=6, linestyle=''),
-                "test":  Line2D([0], [0], marker='s', color='green',   label='Validation', markersize=6, linestyle='')
+                "last":  Line2D([0], [0], marker='o', color='#0000FF', label=r'\textit{Last}', markersize=6, linestyle=''),
+                "train": Line2D([0], [0], marker='^', color='#FF8800', label=r'\textit{Train}', markersize=6, linestyle=''),
+                "test":  Line2D([0], [0], marker='s', color='green',   label=r'\textit{Validation}', markersize=6, linestyle='')
             }
 
         legend_groups = [["last", "train"],["last", "test"],["train", "test"]]
@@ -470,7 +489,7 @@ class Grapher():
             if not not_last_pack and pack_name != '':
                 for i in range(3):
                         handles = [legend_map[k] for k in legend_groups[i]]
-                        axs[i].legend(handles=handles,loc='upper center',bbox_to_anchor=(0.5, 0.5),ncol=len(handles),frameon=False)
+                        axs[i].legend(handles=handles,loc='upper center',bbox_to_anchor=(1.5, 0.7),ncol=len(handles),frameon=False,fontsize=11,handletextpad=0.4)
                         
 
             # etiqueta global (opcional)
@@ -617,7 +636,7 @@ class Grapher():
         #                 axs[i].legend(handles=handles,loc='upper center',bbox_to_anchor=(0.5, -0.4),ncol=len(handles),frameon=False)
 
         # NOTE: Nuevo con normalizacion conjunta, para evitar el sesgo que nombra Aritz
-        def plot_in_which_deg_best(axs, data, pack_name='', title='', not_last_pack=True):
+        def plot_in_which_deg_best(axs, data, pack_name='', title='', not_last_pack=True,xlabel=''):
 
             colors = [['blue', 'orange'],['blue', 'green'],['orange', 'green']]
             color_marker_map = { 'blue': 'o','orange': '^','green': 's'}
@@ -682,13 +701,15 @@ class Grapher():
                 # estética por ax
                 ax.set_xlim(-0.05, 1.05)
                 ax.set_yticks([])
-                ax.set_title(title)
-                ax.set_ylabel(abbreviate(pack_name), rotation=0, labelpad=20)
+                ax.set_title(title,fontsize=14)
+                ax.set_ylabel(abbreviate(pack_name), rotation=0, labelpad=20,fontsize=12)
                 ax.set_xticks([0, 0.25, 0.5, 0.75, 1])
-                ax.set_xticklabels(['0', '0.25', '0.5', '0.75', '1'])
+                ax.set_xticklabels([r'$0$', r'$0.25$', r'$0.5$', r'$0.75$', r'$1$'],fontsize=12)
 
                 if not_last_pack:
                     ax.set_xticklabels([])
+                else:
+                    ax.set_xlabel(xlabel,fontsize=14)
 
             # leyenda
             if not_last_pack:
@@ -701,9 +722,10 @@ class Grapher():
                         axs[i].legend(
                             handles=handles,
                             loc='upper center',
-                            bbox_to_anchor=(0.5, -0.4),
+                            bbox_to_anchor=(1.5, -0.65),
                             ncol=len(handles),
-                            frameon=False
+                            frameon=False,
+                            fontsize=14
                         )
 
         # NOTE: Nuevo con barplots enfrentadas por nivel de degradacion, relacionado con propuesta de Aritz
@@ -896,7 +918,7 @@ class Grapher():
         else:
             fig, axs = plt.subplots(len(self.all_packs),3*3+2, figsize=(5*3,0.6*len(self.all_packs)),
                                         gridspec_kw={'width_ratios': [1,1,1,0.35,1,1,1,0.35,1,1,1]})
-            plt.subplots_adjust(top=0.95,bottom=0.15,left=0.05,right=0.98, hspace=0.0,wspace=0.0)
+            plt.subplots_adjust(top=0.94,bottom=0.15,left=0.04,right=0.99, hspace=0.0,wspace=0.0)
 
         for i,pack in enumerate(all_packs):
 
@@ -945,9 +967,9 @@ class Grapher():
                                 train_conf=train_conf,test_conf=test_conf,
                                 global_deg_metric=global_deg_metric,local_deg_metric=local_deg_metric
                                 )
-                
+                xlabel=r'$\delta$'
                 plot_in_which_deg_best([axs[i,0],axs[i,4],axs[i,8]],matrix1,pack_name=pack.replace('pack_PPO_',''),title=title[0],not_last_pack=not_last_pack)
-                plot_in_which_deg_best([axs[i,1],axs[i,5],axs[i,9]],matrix2,title=title[1],not_last_pack=not_last_pack)
+                plot_in_which_deg_best([axs[i,1],axs[i,5],axs[i,9]],matrix2,title=title[1],not_last_pack=not_last_pack,xlabel=xlabel)
                 plot_in_which_deg_best([axs[i,2],axs[i,6],axs[i,10]],matrix3,title=title[2],not_last_pack=not_last_pack)
 
                 #Datos de interes
@@ -1056,10 +1078,10 @@ class Grapher():
         test_cost_freq=conf_str.split('_')[0]+'_'+conf_str.split('_')[1]+'cost'
 
         legend_elements = [Line2D([0], [0], color='black', label='Truth best', linestyle='-', linewidth=1.5),
-                            Line2D([0], [0], marker='o', color='blue', label='Last',markersize=6, linestyle=''),
-                            Line2D([0], [0], marker='^', color='orange', label='Default train',markersize=6, linestyle=''),
-                            Line2D([0], [0], marker='D', color="#A52D81", label='Default validation',markersize=6, linestyle=''),
-                            Line2D([0], [0], marker='s', color='green', label='Cost-driven validation',markersize=6, linestyle='')
+                            Line2D([0], [0], marker='o', color='blue', label=r'\textit{Last}',markersize=6, linestyle=''),
+                            Line2D([0], [0], marker='^', color='orange', label=r'Default \textit{train}',markersize=6, linestyle=''),
+                            Line2D([0], [0], marker='D', color="#A52D81", label=r'Default \textit{validation}',markersize=6, linestyle=''),
+                            Line2D([0], [0], marker='s', color='green', label=r'Cost-driven \textit{validation}',markersize=6, linestyle='')
                             
                         ]
 
@@ -1092,15 +1114,15 @@ class Grapher():
 
             if first_pack:
                 for i in range(4):
-                    axs[i,pack_indx].set_ylabel(r"$f(\widetilde{\pi}_t)$",fontsize=12)
+                    axs[i,pack_indx].set_ylabel(r"$f(\widetilde{\pi}_t)$",fontsize=14)
                 if pack_name!='':
                     axs[3,pack_indx].legend(handles=legend_elements,loc='upper center',bbox_to_anchor=(1.5, -0.3),ncol=5,frameon=False)
             for i in range(4):
                 axs[i, pack_indx].ticklabel_format(axis='y', style='sci', scilimits=(0, 0))
                 if i!=0:
                     axs[i, pack_indx].yaxis.get_offset_text().set_visible(False)
-            axs[0,pack_indx].set_title(abbreviate(pack_name),fontsize=12)
-            axs[3,pack_indx].set_xlabel('$t$',fontsize=12)
+            axs[0,pack_indx].set_title(abbreviate(pack_name),fontsize=14)
+            axs[3,pack_indx].set_xlabel('$t$',fontsize=14)
             
         def plot_pack_criteria_cummulative_diff(axs,pack_name,pack_indx,first_pack=False,diff_type='cummulative'):
             #---- Obtener listas con diferencia pareada de evolucion de estimaciones de las politicas seleccionadas
@@ -1191,6 +1213,8 @@ class Grapher():
                     if len(truth_evol)!=max_long:
                         ax.axvline(x=len(truth_evol), color='red', linewidth=1)
 
+                    ax.tick_params(axis='both', labelsize=12)
+
             if early_stopping_graph=='all':
                 plot_succesive_halving(axs[0,pack_indx],matrix_best_truth,'black')
                 plot_succesive_halving(axs[1,pack_indx],matrix_last_truth,'blue')
@@ -1199,19 +1223,19 @@ class Grapher():
                 plot_succesive_halving(axs[4,pack_indx],matrix_test_truth,'green')
 
                 if first_pack:
-                    for i,ylabel in enumerate(['Ground truth\n','Last\n','Default train\n','Default validation\n','Cost-driven\nvalidation']):
+                    for i,ylabel in enumerate(['Ground truth',r'\textit{Last}',r'Default \textit{train}',r'Default \textit{validation}',r'Cost-driven \textit{validation}']):
                         axs[i,pack_indx].set_ylabel(ylabel+'\n'+r"$f(\widetilde{\pi}_t)$",fontsize=12)
                 for i in range(5):
                     axs[i, pack_indx].ticklabel_format(axis='y', style='sci', scilimits=(0, 0))
                     if i!=0:
                         axs[i, pack_indx].yaxis.get_offset_text().set_visible(False)
 
-
-                axs[0,pack_indx].set_title(abbreviate(pack_name),fontsize=12)
+                
+                axs[0,pack_indx].set_title(abbreviate(pack_name),fontsize=14)
                 axs[4,pack_indx].set_xlabel(r"$t$",fontsize=12)
 
             # Graficas 2 y 3: info de resource allocation (eff) y evolucion de performnace (prec)
-            def plot_resource_allocation(ax, listas, colors):
+            def plot_resource_allocation(ax, listas, colors,center_column=False):
 
                 block_centers = []
 
@@ -1250,7 +1274,7 @@ class Grapher():
 
                     for i, counts in enumerate(histogramas):
                         y = start + i * spacing
-                        ax.barh(y,counts[b],height=bar_height,left=0,color=colors[i],align='center',alpha=0.9)
+                        ax.barh(y,counts[b],height=bar_height,left=0,color=colors[i],align='center',alpha=0.8)
 
                         color = colors[i]
                         if color in marker_map and color != 'black':
@@ -1275,7 +1299,8 @@ class Grapher():
                 bin_centers = [(bins[i] + bins[i+1]) / 2 for i in range(len(bins)-1)]
                 ax.set_yticks(bin_centers)
 
-                ax.set_xlabel('Proportion of evaluations')
+                if center_column:
+                    ax.set_xlabel('Proportion of evaluations',fontsize=12)
 
                 # para que los numeros del eje x no se superpongan
                 step = 100
@@ -1286,12 +1311,12 @@ class Grapher():
                 tick_2 = 2 * tick_1
 
                 ax.set_xticks([0, tick_1, tick_2])
-                ax.set_xticklabels([0, tick_1, tick_2])
+                ax.set_xticklabels([r'$0$', rf'${{{tick_1}}}$', rf'${{{tick_2}}}$'],fontsize=12)
                         
                 if pack_indx == 0:
-                    ax.set_ylabel('Truth reward values')
-                    ax.set_yticklabels(["low", "middle", "high"])
-                    ax.legend(handles=legend_elements,loc='upper center',bbox_to_anchor=(2, -0.25),ncol=5,frameon=False)
+                    ax.set_ylabel('Truth reward values',fontsize=12)
+                    ax.set_yticklabels(["low", "middle", "high"],fontsize=12)
+                    ax.legend(handles=legend_elements,loc='upper center',bbox_to_anchor=(3.5, -0.2),ncol=5,frameon=False,fontsize=12)
                 else:
                     ax.set_yticklabels(["", "", ""])    
 
@@ -1492,26 +1517,29 @@ class Grapher():
                     ax.vlines([p25, p75], i-0.15, i+0.15, color=colors[i], linewidth=1)
                     ax.plot(med, i, markers[i], color=colors[i], markersize=6)
 
-                    ax.set_title(abbreviate(pack.replace('pack_PPO_','')))
+                    ax.set_title(abbreviate(pack.replace('pack_PPO_','')),fontsize=14)
                     ax.set_xlim(-0.1,1.1)
                     ax.set_xticks([0, 0.25, 0.5, 0.75, 1])
-                    ax.set_xticklabels([0, 0.25, 0.5, 0.75, 1])
+                    ax.set_xticklabels([r'$0$', r'$0.25$', r'$0.5$', r'$0.75$', r'$1$'])
                     ax.grid(axis='x', linestyle='--', linewidth=0.8, alpha=0.6)
                     if first_pack:
                         ax.set_yticks(range(len(acc_lists)))
-                        ax.set_yticklabels(['Last', 'Default train', 'Default\nvalidation', 'Cost-driven\nvalidation'])
+                        ax.set_yticklabels([r'\textit{Last}', r'\noindent Default\\\textit{train}', r'\noindent Default\\\textit{validation}', r'\noindent Cost-driven\\\textit{validation}'],fontsize=12)
                     else:
                         ax.set_yticklabels([]) 
                         ax.tick_params(axis='y', which='both', left=True, right=False, length=5)
 
                     if xlabel:
-                        ax.set_xlabel(r'$\alpha^{SH}$')
+                        ax.set_xlabel(r'$\alpha^{SH}$',fontsize=12)
+
+                    ax.tick_params(axis='x', labelsize=10)
 
             if early_stopping_graph=='eff':
+                center_column=[True if pack_indx==len(self.all_packs)//2 else False][0]
                 plot_resource_allocation(axs[pack_indx],
                                  [matrix_best_truth,matrix_last_truth,matrix_train_default_truth,matrix_test_default_truth,matrix_test_truth],
-                                 ['black','blue','orange','purple','green'])
-                axs[pack_indx].set_title(abbreviate(pack_name))
+                                 ['black','blue','orange','purple','green'],center_column=center_column)
+                axs[pack_indx].set_title(abbreviate(pack_name),fontsize=14)
 
             if early_stopping_graph=='prec':
   
@@ -1549,8 +1577,8 @@ class Grapher():
             fig, axs = plt.subplots(1,len(self.all_packs), figsize=(2*len(self.all_packs),3))
             plt.subplots_adjust(top=0.9,bottom=0.25,left=0.07,right=0.98, hspace=0.0,wspace=0.05)
         if consequence_type in['cummulative_mean_diff','early_stopping_prec']:
-            fig, axs = plt.subplots(1,len(self.all_packs), figsize=(2*len(self.all_packs),2))
-            plt.subplots_adjust(top=0.85,bottom=0.2,left=0.08,right=0.99, hspace=0.0,wspace=0.05)
+            fig, axs = plt.subplots(1,len(self.all_packs), figsize=(2*len(self.all_packs),2.2))
+            plt.subplots_adjust(top=0.85,bottom=0.18,left=0.08,right=0.99, hspace=0.0,wspace=0.05)
 
         for i,pack in enumerate(all_packs):
 
@@ -1600,18 +1628,18 @@ class Grapher():
             ax.axvspan(np.quantile(cost_list,0.25), np.quantile(cost_list,0.75), color='red', alpha=0.5,zorder=2)
 
             ax.set_xlim(-0.05, 1.05)
-            ax.text(-0.4, -2.5, ytitle,transform=ax.transAxes,rotation=90,va="center",ha="center",fontsize=10)
+            ax.text(-0.4, -2.5, ytitle,transform=ax.transAxes,rotation=90,va="center",ha="center",fontsize=12)
             if first_column:
                 ax.set_ylabel(abbreviate(pack_name), rotation=0,fontsize=10)
                 ax.yaxis.set_label_coords(-0.15, 0.1) 
 
             ax.set_xticks([0, 0.25, 0.5, 0.75, 1])
-            ax.set_xticklabels(['0', '0.25', '0.5', '0.75', '1'],fontsize=10)
+            ax.set_xticklabels([r'$0$', r'$0.25$', r'$0.5$', r'$0.75$', r'$1$'],fontsize=12)
 
             if not_last_pack:   
                 ax.tick_params(axis='x', labelbottom=False)
             if first_pack:
-                ax.set_title(title,fontsize=10)
+                ax.set_title(title,fontsize=12)
             ax.set_yticks([]) 
 
         def plot_val_times(ax,times_list,single_or_list='list',pack_name='',not_last_pack=True,first_column=True,first_pack=False):
@@ -1625,7 +1653,7 @@ class Grapher():
             
             ax.set_xlim(-0.05, 1.05)
             ax.set_xticks([0, 0.25, 0.5, 0.75, 1])
-            ax.set_xticklabels(['0', '0.25', '0.5', '0.75', '1'],fontsize=10)
+            ax.set_xticklabels([r'$0$', r'$0.25$', r'$0.5$', r'$0.75$', r'$1$'],fontsize=12)
             
             if first_column:
                 ax.set_ylabel(abbreviate(pack_name), rotation=0,fontsize=10)
@@ -1633,7 +1661,7 @@ class Grapher():
             if not_last_pack:   
                 ax.tick_params(axis='x', labelbottom=False)
             if first_pack:
-                ax.set_title('Proportion of validations\n',fontsize=10)
+                ax.set_title('Proportion of\nvalidations',fontsize=12)
             ax.set_yticks([]) 
                 
         # Grafica
@@ -1641,7 +1669,7 @@ class Grapher():
         fig, axs = plt.subplots(len(self.all_packs)*2+1,5, figsize=(3*2,0.4*len(self.all_packs)),
                                     gridspec_kw={'width_ratios': [1,0,1,0,1],
                                                  'height_ratios': [1]*len(self.all_packs)+[0.5]+[1]*len(self.all_packs)})
-        plt.subplots_adjust(top=0.87,bottom=0.1,left=0.15,right=0.98, hspace=0.0,wspace=0.0)
+        plt.subplots_adjust(top=0.86,bottom=0.1,left=0.15,right=0.98, hspace=0.0,wspace=0.0)
 
         axs = np.atleast_2d(axs)
 
@@ -1674,7 +1702,7 @@ class Grapher():
 
             not_last_pack=[False if i==len(all_packs)-1 else True][0]
             first_pack=[True if i==0 else False][0]
-            titles=[['Default\nvalidation', 'Cost-driven\nvalidation']if i==0 else ['','']][0]
+            titles=[[r'\noindent Default\\ \textit{validation}', r'\noindent Cost-driven\\\textit{validation}']if i==0 else ['','']][0]
             plot_pack_costs_accs(axs[i,0],cost_default,pack_name=pack.replace('pack_PPO_',''),ytitle=titles[0],not_last_pack=True,first_pack=first_pack,title='Validation-to-learning\ncost ratio')
             plot_pack_costs_accs(axs[i+len(self.all_packs)+1,0],cost_with_cost,pack_name=pack.replace('pack_PPO_',''),ytitle=titles[1],not_last_pack=not_last_pack)
             plot_val_times(axs[i,2],times_default,pack_name=pack.replace('pack_PPO_',''),single_or_list='number',not_last_pack=True,first_column=False,first_pack=first_pack)
@@ -1798,15 +1826,15 @@ class Grapher():
             # puntos (solo borde)
             Line2D([0], [0], marker='o', linestyle='None',
                 markerfacecolor='none', markeredgecolor='black',
-                label='Last'),
+                label=r'\textit{Last}'),
 
             Line2D([0], [0], marker='^', linestyle='None',
                 markerfacecolor='none', markeredgecolor='black',
-                label='Train'),
+                label=r'\textit{Train}'),
 
             Line2D([0], [0], marker='s', linestyle='None',
                 markerfacecolor='none', markeredgecolor='black',
-                label='Validation'),
+                label=r'\textit{Validation}'),
 
             # líneas
             Line2D([0], [0], color=colors[0], lw=2,
